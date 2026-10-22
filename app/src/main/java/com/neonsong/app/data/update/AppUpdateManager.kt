@@ -50,8 +50,8 @@ class AppUpdateManager @Inject constructor(
         const val KEY_DISMISSED_VERSION = "dismissed_version"
 
         // Default GitHub releases endpoint and raw manifest fallback
-        const val DEFAULT_GITHUB_API_URL = "https://api.github.com/repos/Clash-Projects/Neon Song-native/releases/latest"
-        const val DEFAULT_MANIFEST_URL = "https://raw.githubusercontent.com/Clash-Projects/Neon Song-native/main/version.json"
+        const val DEFAULT_GITHUB_API_URL = "https://api.github.com/repos/ansh2222949/Neon-song/releases/latest"
+        const val DEFAULT_MANIFEST_URL = "https://raw.githubusercontent.com/ansh2222949/Neon-song/main/version.json"
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
