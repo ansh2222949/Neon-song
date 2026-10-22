@@ -1,0 +1,8 @@
+{
+  "version": "4.2.5",
+  "versionCode": 25,
+  "changelog": "• Fluid AGSL background with smoothstep radial feathering\n• Expressive Bento Grid Settings page\n• High-Precision C++ DSP 16KB alignment\n• In-app update support",
+  "downloadUrl": "https://github.com/Clash-Projects/Neon Song-native/releases/latest/download/NeonSong-v4.2.4-release.apk",
+  "releaseUrl": "https://github.com/Clash-Projects/Neon Song-native/releases/latest",
+  "isMandatory": false
+}

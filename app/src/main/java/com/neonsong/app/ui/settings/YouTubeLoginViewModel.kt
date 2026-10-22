@@ -1,0 +1,128 @@
+package com.neonsong.app.ui.settings
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.neonsong.app.data.ytmusic.YtMusicAuthManager
+import com.neonsong.app.data.music.InnerTubeMusicApi
+import com.neonsong.app.data.ytmusic.YtMusicSyncManager
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+data class YouTubeLoginUiState(
+    val verifying: Boolean = false,
+    val connectedName: String? = null,
+    val errorMessage: String? = null,
+)
+
+@HiltViewModel
+class YouTubeLoginViewModel @Inject constructor(
+    private val ytAuthManager: YtMusicAuthManager,
+    private val innerTube: InnerTubeMusicApi,
+    private val syncManager: YtMusicSyncManager,
+    private val sessionPreferences: com.neonsong.app.data.local.SessionPreferences,
+    private val ytMusicPreferences: com.neonsong.app.data.ytmusic.YtMusicPreferences,
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(YouTubeLoginUiState())
+    val uiState: StateFlow<YouTubeLoginUiState> = _uiState.asStateFlow()
+
+    /**
+     * Persists the cookies captured from the sign-in WebView, then verifies
+     * the session with an authenticated browse (authoritative — no HTML
+     * scraping) before reporting success. Atomic: the previous session is
+     * restored when verification fails, so a bad paste can never disconnect
+     * a working account. Sync kicks off immediately so the user sees their
+     * playlists appear right away.
+     */
+    fun attemptConnect(rawCookieHeader: String?) {
+        if (_uiState.value.verifying) return
+        val cookies = rawCookieHeader.orEmpty()
+        val hasSapisid = listOf("__Secure-3PAPISID=", "SAPISID=", "APISID=").any { it in cookies }
+        val hasLoginInfo = "LOGIN_INFO=" in cookies
+        if (!hasSapisid || !hasLoginInfo) {
+            _uiState.update {
+                it.copy(errorMessage = "Sign-in incomplete — finish signing in, then tap \"I'm signed in\".")
+            }
+            return
+        }
+
+        _uiState.update { it.copy(verifying = true, errorMessage = null) }
+        viewModelScope.launch {
+            val previous = ytAuthManager.connection.value
+            try {
+                ytAuthManager.connect(rawCookieHeader ?: return@launch, "", null, null)
+                // Slow devices: the DataStore collector can re-emit the old
+                // (disconnected) value after the optimistic update, making
+                // fetchAccountInfo() bail instantly. Wait until memory matches
+                // what was just persisted.
+                kotlinx.coroutines.withTimeoutOrNull(4_000L) { ytAuthManager.awaitLoadedConnection() }
+                // A successful YouTube Music login ends guest mode: the
+                // LaunchGate then routes on the YT connection itself.
+                runCatching { sessionPreferences.exitGuestMode() }
+                // Verify the session is really authenticated before reporting
+                // success. Retried with backoff: right after sign-in Google is
+                // still finishing its cookie redirect chain and the WebView may
+                // not have flushed the final SAPISID/LOGIN_INFO yet, so re-read
+                // cookies between attempts instead of hammering instantly.
+                var info: com.neonsong.app.data.music.YtAccountInfo? = null
+                for ((attempt, waitMs) in longArrayOf(0L, 1_200L, 2_500L, 4_000L).withIndex()) {
+                    if (waitMs > 0L) kotlinx.coroutines.delay(waitMs)
+                    if (attempt > 0) {
+                        runCatching { android.webkit.CookieManager.getInstance().flush() }
+                        if (ytAuthManager.refreshCookiesFromCookieManager()) {
+                            kotlinx.coroutines.withTimeoutOrNull(2_000L) { ytAuthManager.awaitLoadedConnection() }
+                        }
+                    }
+                    info = runCatching { innerTube.fetchAccountInfo() }.getOrNull()
+                    if (info != null) break
+                }
+                val verified = info ?: throw java.io.IOException("YouTube rejected the session — sign in again.")
+                val displayName = verified.accountName.ifBlank { "Google account" }
+                ytAuthManager.updateAccountIdentity(verified.accountName, verified.channelHandle, verified.photoUrl)
+                _uiState.update { it.copy(verifying = false, connectedName = displayName) }
+                viewModelScope.launch {
+                    runCatching { syncManager.syncNow("connected") }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                runCatching {
+                    if (previous.isConnected) {
+                        ytMusicPreferences.saveConnection(
+                            previous.cookies,
+                            previous.accountName,
+                            previous.channelHandle,
+                            previous.photoUrl,
+                            onBehalfOfUser = previous.onBehalfOfUser,
+                            authUserIndex = previous.authUserIndex,
+                            pageId = previous.pageId,
+                        )
+                    } else {
+                        ytAuthManager.signOut()
+                    }
+                }
+                _uiState.update {
+                    it.copy(
+                        verifying = false,
+                        errorMessage = "Couldn't finish connecting: ${e.localizedMessage ?: e.message}",
+                    )
+                }
+            } catch (error: LinkageError) {
+                _uiState.update {
+                    it.copy(
+                        verifying = false,
+                        errorMessage = "YouTube Music sign-in isn't supported by this ROM.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissError() = _uiState.update { it.copy(errorMessage = null) }
+}
