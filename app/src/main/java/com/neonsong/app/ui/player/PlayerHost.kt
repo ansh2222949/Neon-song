@@ -29,6 +29,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -2221,7 +2222,7 @@ private fun FullPlayer(
     val hasVideo = !effectiveVideoId.isNullOrBlank()
     val trackIdentity = remember(track.videoId, track.title, track.artist) { "${track.videoId}_${track.title}_${track.artist}" }
     var isVideoMode by rememberSaveable(trackIdentity) { mutableStateOf(false) }
-    var isVideoFullscreen by rememberSaveable(trackIdentity) { mutableStateOf(false) }
+    var isVideoFullscreen by remember(trackIdentity) { mutableStateOf(false) }
     var resumeAudioAfterVideo by rememberSaveable(trackIdentity) { mutableStateOf(false) }
     var videoPositionMs by rememberSaveable(trackIdentity) { mutableLongStateOf(0L) }
     var videoDurationMs by rememberSaveable(trackIdentity) { mutableLongStateOf(0L) }
@@ -2760,7 +2761,7 @@ private fun FullPlayer(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // ── Header: slimmer, calmer, premium ─────────────────────
-                if (!lyricsFullscreen) Box(
+                if (!lyricsFullscreen && !isVideoFullscreen) Box(
                     Modifier
                         .fillMaxWidth()
                         .adaptiveContentWidth(maxWidth = if (isLandscape) 1100.dp else 640.dp)
@@ -3761,86 +3762,7 @@ private fun FullPlayer(
                             }
                         }
                     }
-                AnimatedVisibility(
-                    visible = isVideoMode && isVideoFullscreen,
-                    enter = fadeIn(tween(220, easing = FastOutSlowInEasing)) + scaleIn(
-                        animationSpec = spring(dampingRatio = 0.82f, stiffness = 450f),
-                        initialScale = 0.92f,
-                    ),
-                    exit = fadeOut(tween(180, easing = FastOutSlowInEasing)) + scaleOut(
-                        animationSpec = spring(dampingRatio = 0.85f, stiffness = 500f),
-                        targetScale = 0.94f,
-                    ),
-                    modifier = Modifier.fillMaxSize().zIndex(10f),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black),
-                    ) {
-                        if (isVideoFullscreen) {
-                            InAppMusicVideo(
-                                videoId = effectiveVideoId.orEmpty(),
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .align(Alignment.Center),
-                                isPlaying = isVideoPlaying,
-                                initialPositionSeconds = (videoPositionMs.takeIf { it > 0L } ?: player.state.value.positionMs)
-                                    .let { (it / 1000f).coerceAtLeast(0f) },
-                                seekCommandSeconds = videoSeekCommandSeconds,
-                                onProgressUpdate = { curMs, durMs ->
-                                    videoPositionMs = curMs
-                                    if (durMs > 0L) videoDurationMs = durMs
-                                },
-                                onPlaybackStateChanged = { playing ->
-                                    isVideoPlaying = playing
-                                },
-                                onVideoEnded = {
-                                    closeVideoMode()
-                                    player.next()
-                                },
-                            )
-                        }
-                        Surface(
-                            shape = CircleShape,
-                            color = Color.Black.copy(alpha = 0.52f),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .padding(16.dp)
-                                .size(44.dp),
-                        ) {
-                            IconButton(
-                                onClick = {
-                                    hapticManager.click()
-                                    isVideoFullscreen = false
-                                },
-                                modifier = Modifier.fillMaxSize(),
-                            ) {
-                                Icon(
-                                    Icons.Filled.FullscreenExit,
-                                    contentDescription = "Exit fullscreen",
-                                    tint = Color.White,
-                                )
-                            }
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(100),
-                            color = Color.Black.copy(alpha = 0.58f),
-                            contentColor = Color.White.copy(alpha = 0.86f),
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(24.dp),
-                        ) {
-                            Text(
-                                text = "Full Screen • Tap back or exit to return to player",
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                            )
-                        }
-                    }
-                }
-                state.error?.takeUnless { lyricsFullscreen }?.let { message ->
+                state.error?.takeUnless { lyricsFullscreen || isVideoFullscreen }?.let { message ->
                     Surface(
                         onClick = player::retry,
                         shape = RoundedCornerShape(20.dp),
@@ -3873,6 +3795,116 @@ private fun FullPlayer(
                             ) {
                                 Icon(Icons.Filled.Close, "Dismiss error", modifier = Modifier.size(18.dp))
                             }
+                        }
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = isVideoMode && isVideoFullscreen,
+                enter = fadeIn(tween(220, easing = FastOutSlowInEasing)) + scaleIn(
+                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 450f),
+                    initialScale = 0.92f,
+                ),
+                exit = fadeOut(tween(180, easing = FastOutSlowInEasing)) + scaleOut(
+                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 500f),
+                    targetScale = 0.94f,
+                ),
+                modifier = Modifier
+                    .matchParentSize()
+                    .zIndex(100f),
+            ) {
+                var fullscreenControlsVisible by remember(isVideoFullscreen) { mutableStateOf(true) }
+                LaunchedEffect(fullscreenControlsVisible, isVideoFullscreen) {
+                    if (isVideoFullscreen && fullscreenControlsVisible) {
+                        delay(2800L)
+                        fullscreenControlsVisible = false
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {
+                            fullscreenControlsVisible = !fullscreenControlsVisible
+                        },
+                ) {
+                    if (isVideoFullscreen) {
+                        InAppMusicVideo(
+                            videoId = effectiveVideoId.orEmpty(),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .align(Alignment.Center),
+                            isPlaying = isVideoPlaying,
+                            initialPositionSeconds = (videoPositionMs.takeIf { it > 0L } ?: player.state.value.positionMs)
+                                .let { (it / 1000f).coerceAtLeast(0f) },
+                            seekCommandSeconds = videoSeekCommandSeconds,
+                            onProgressUpdate = { curMs, durMs ->
+                                videoPositionMs = curMs
+                                if (durMs > 0L) videoDurationMs = durMs
+                            },
+                            onPlaybackStateChanged = { playing ->
+                                isVideoPlaying = playing
+                            },
+                            onVideoEnded = {
+                                closeVideoMode()
+                                player.next()
+                            },
+                        )
+                    }
+                    AnimatedVisibility(
+                        visible = fullscreenControlsVisible,
+                        enter = fadeIn(tween(180)),
+                        exit = fadeOut(tween(240)),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            .padding(16.dp),
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.58f),
+                            border = BorderStroke(1.2.dp, Color.White.copy(alpha = 0.30f)),
+                            modifier = Modifier.size(46.dp),
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    hapticManager.click()
+                                    isVideoFullscreen = false
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                            ) {
+                                Icon(
+                                    Icons.Filled.FullscreenExit,
+                                    contentDescription = "Exit fullscreen",
+                                    tint = Color.White,
+                                )
+                            }
+                        }
+                    }
+                    AnimatedVisibility(
+                        visible = fullscreenControlsVisible,
+                        enter = fadeIn(tween(180)),
+                        exit = fadeOut(tween(240)),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            .padding(bottom = 20.dp),
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(100),
+                            color = Color.Black.copy(alpha = 0.62f),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                            contentColor = Color.White.copy(alpha = 0.88f),
+                        ) {
+                            Text(
+                                text = "Full Screen • Tap back or exit to return to player",
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                            )
                         }
                     }
                 }
@@ -4672,267 +4704,300 @@ private fun PlayerFloatingDock(
 ) {
     val hapticManager = LocalHapticManager.current
     val signalPath by player.signalPath.collectAsStateWithLifecycle()
-    val dockShape = RoundedCornerShape(if (compact) 18.dp else 28.dp)
-    val dockItemHeight = if (compact) 30.dp else 40.dp
+    val dockShape = RoundedCornerShape(if (compact) 24.dp else 28.dp)
+    val dockHeight = if (compact) 48.dp else 56.dp
+    val dockItemHeight = if (compact) 36.dp else 42.dp
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(if (compact) 38.dp else 54.dp),
+            .height(dockHeight),
         contentAlignment = Alignment.Center,
     ) {
         // Authentic glass contact drop shadow
         Box(
             modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .height(if (compact) 32.dp else 48.dp)
+                .fillMaxWidth(if (compact) 0.96f else 0.94f)
+                .height(if (compact) 42.dp else 50.dp)
                 .graphicsLayer {
-                    translationY = if (compact) 2.dp.toPx() else 4.dp.toPx()
-                    alpha = 0.50f
+                    translationY = if (compact) 3.dp.toPx() else 5.dp.toPx()
+                    alpha = 0.55f
                 }
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            Color.Black.copy(alpha = 0.65f),
-                            Color.Black.copy(alpha = 0.20f),
+                            Color.Black.copy(alpha = 0.70f),
+                            Color.Black.copy(alpha = 0.22f),
                             Color.Transparent,
                         ),
                     ),
-                    RoundedCornerShape(if (compact) 18.dp else 28.dp),
+                    dockShape,
                 )
+        )
+
+        val dockBorder = Brush.linearGradient(
+            listOf(
+                Color.White.copy(alpha = 0.40f),
+                Color.White.copy(alpha = 0.10f),
+                Color.White.copy(alpha = 0.28f),
+                Color.White.copy(alpha = 0.08f),
+                Color.White.copy(alpha = 0.35f),
+            ),
+            start = Offset(0f, 0f),
+            end = Offset(450f, 220f),
         )
 
         Surface(
             shape = dockShape,
-            color = Color.Black.copy(alpha = 0.32f),
-            border = BorderStroke(
-                1.dp,
-                Brush.linearGradient(
-                    listOf(
-                        Color.White.copy(alpha = 0.32f),
-                        Color.White.copy(alpha = 0.08f),
-                        Color.White.copy(alpha = 0.20f),
-                    ),
-                    start = Offset(0f, 0f),
-                    end = Offset(400f, 200f),
-                )
-            ),
+            color = Color.Black.copy(alpha = 0.38f),
+            border = BorderStroke(1.2.dp, dockBorder),
             tonalElevation = 0.dp,
-            shadowElevation = 8.dp,
+            shadowElevation = 10.dp,
             modifier = Modifier
                 .fillMaxSize()
                 .liquidGlassChrome(dockShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls),
         ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 10.dp),
-            horizontalArrangement = Arrangement.SpaceAround,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // 1. Lyrics
-            val isLyricsActive = currentTab == FullPlayerTab.LYRICS
-            val lyricsInteraction = remember { MutableInteractionSource() }
-            val isLyricsPressed by lyricsInteraction.collectIsPressedAsState()
-            val lyricsScale by animateFloatAsState(if (isLyricsPressed) 0.90f else 1.0f, ExpressiveMotion.appleTactileSpring(), label = "lyricsScale")
-            Surface(
-                onClick = {
-                    hapticManager.click()
-                    if (isLyricsActive) onTabChange(FullPlayerTab.NOW_PLAYING) else onTabChange(FullPlayerTab.LYRICS)
-                },
-                interactionSource = lyricsInteraction,
-                shape = RoundedCornerShape(16.dp),
-                color = if (isLyricsActive) Color.White.copy(alpha = 0.22f) else Color.Transparent,
-                contentColor = if (isLyricsActive) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.85f),
-                modifier = Modifier
-                    .height(dockItemHeight)
-                    .graphicsLayer { scaleX = lyricsScale; scaleY = lyricsScale },
-            ) {
+            Box(Modifier.fillMaxSize()) {
+                // Specular incident light highlight across top rim
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .height(1.4.dp)
+                        .align(Alignment.TopCenter)
+                        .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color.Transparent,
+                                    Color.White.copy(alpha = 0.50f),
+                                    Color.White.copy(alpha = 0.75f),
+                                    Color.White.copy(alpha = 0.30f),
+                                    Color.Transparent,
+                                )
+                            )
+                        )
+                )
+
                 Row(
-                    modifier = Modifier.padding(horizontal = 8.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = if (compact) 8.dp else 12.dp),
+                    horizontalArrangement = Arrangement.SpaceAround,
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Icon(Icons.Filled.FormatQuote, "Lyrics", Modifier.size(20.dp))
-                    if (isLyricsActive) {
-                        Box(Modifier.size(5.dp).background(Color(0xFF00E5FF), CircleShape))
-                    }
-                }
-            }
-
-            // 2. Video Mode
-            val videoInteraction = remember { MutableInteractionSource() }
-            val isVideoPressed by videoInteraction.collectIsPressedAsState()
-            val videoScale by animateFloatAsState(if (isVideoPressed) 0.90f else 1.0f, ExpressiveMotion.appleTactileSpring(), label = "videoScale")
-            Surface(
-                onClick = {
-                    if (hasVideo) {
-                        hapticManager.click()
-                        onToggleVideo()
-                    }
-                },
-                interactionSource = videoInteraction,
-                shape = RoundedCornerShape(16.dp),
-                enabled = hasVideo,
-                color = if (isVideoMode) Color.White.copy(alpha = 0.22f) else Color.Transparent,
-                contentColor = when {
-                    isVideoMode -> Color(0xFFFF5252)
-                    hasVideo -> Color.White.copy(alpha = 0.85f)
-                    else -> Color.White.copy(alpha = 0.28f)
-                },
-                modifier = Modifier
-                    .height(dockItemHeight)
-                    .graphicsLayer { scaleX = videoScale; scaleY = videoScale },
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(Icons.Filled.SmartDisplay, "Video", Modifier.size(20.dp))
-                    if (isVideoMode) {
-                        Box(Modifier.size(5.dp).background(Color(0xFFFF5252), CircleShape))
-                    }
-                }
-            }
-
-            // 3. Audio / Signal Path
-            val audioInteraction = remember { MutableInteractionSource() }
-            val isAudioPressed by audioInteraction.collectIsPressedAsState()
-            val audioScale by animateFloatAsState(if (isAudioPressed) 0.90f else 1.0f, ExpressiveMotion.appleTactileSpring(), label = "audioScale")
-            val isSpatial = remember(state.audioCodec) { isSpatialAudioCodec(state.audioCodec) }
-            val isHiRes = state.isLossless && ((state.bitDepth ?: 16) > 16 || (state.samplingRateKHz ?: 44.1) > 48.0)
-            val isOpus = remember(state.audioCodec) { state.audioCodec?.contains("opus", ignoreCase = true) == true }
-            val isAac = remember(state.audioCodec) { state.audioCodec?.contains("aac", ignoreCase = true) == true || state.audioCodec?.contains("mp4a", ignoreCase = true) == true }
-
-            val activeBadge = remember(state.audioCodec, state.isLossless, isHiRes, signalPath.bitPerfect, isSpatial, isOpus, isAac) {
-                when {
-                    isSpatial -> Pair("ATMOS", Color(0xFFB388FF))
-                    signalPath.bitPerfect -> Pair("DIRECT", Color(0xFF00E676))
-                    isHiRes -> Pair("HI-RES", Color(0xFF00E5FF))
-                    state.isLossless || state.audioCodec?.equals("flac", ignoreCase = true) == true -> Pair("LOSSLESS", Color(0xFF00E676))
-                    isOpus -> Pair("OPUS", Color(0xFFFFB300))
-                    isAac -> Pair("AAC", Color(0xFF64B5F6))
-                    !state.audioCodec.isNullOrBlank() -> Pair(state.audioCodec!!.uppercase(), Color(0xFFE0E0E0))
-                    else -> Pair("AUDIO", Color.White.copy(alpha = 0.75f))
-                }
-            }
-
-            Surface(
-                onClick = {
-                    hapticManager.click()
-                    onOpenSignalPath()
-                },
-                interactionSource = audioInteraction,
-                shape = RoundedCornerShape(16.dp),
-                color = Color.Transparent,
-                contentColor = Color.White.copy(alpha = 0.90f),
-                modifier = Modifier
-                    .height(dockItemHeight)
-                    .graphicsLayer { scaleX = audioScale; scaleY = audioScale },
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    PlayingWaveBars(
-                        waveColor = activeBadge.second,
-                        containerColor = Color.Transparent,
-                        isPlaying = state.isPlaying,
-                        modifier = Modifier.size(16.dp, 12.dp),
-                    )
-                    AnimatedContent(
-                        targetState = activeBadge,
-                        transitionSpec = {
-                            (slideInVertically { height -> height / 2 } + fadeIn(tween(300)))
-                                .togetherWith(slideOutVertically { height -> -height / 2 } + fadeOut(tween(300)))
+                    // 1. Lyrics
+                    val isLyricsActive = currentTab == FullPlayerTab.LYRICS
+                    val lyricsInteraction = remember { MutableInteractionSource() }
+                    val isLyricsPressed by lyricsInteraction.collectIsPressedAsState()
+                    val lyricsScale by animateFloatAsState(if (isLyricsPressed) 0.88f else 1.0f, ExpressiveMotion.appleTactileSpring(), label = "lyricsScale")
+                    val activeLyricsBorder = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.45f))
+                    Surface(
+                        onClick = {
+                            hapticManager.click()
+                            if (isLyricsActive) onTabChange(FullPlayerTab.NOW_PLAYING) else onTabChange(FullPlayerTab.LYRICS)
                         },
-                        label = "audioBadgeTicker",
-                    ) { badge ->
-                        Text(
-                            text = badge.first,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                letterSpacing = 0.6.sp,
-                            ),
-                            color = badge.second,
-                        )
+                        interactionSource = lyricsInteraction,
+                        shape = RoundedCornerShape(100),
+                        color = if (isLyricsActive) Color.White.copy(alpha = 0.18f) else Color.Transparent,
+                        border = if (isLyricsActive) activeLyricsBorder else null,
+                        contentColor = if (isLyricsActive) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.88f),
+                        modifier = Modifier
+                            .height(dockItemHeight)
+                            .graphicsLayer { scaleX = lyricsScale; scaleY = lyricsScale },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = if (compact) 9.dp else 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Icon(Icons.Filled.FormatQuote, "Lyrics", Modifier.size(if (compact) 19.dp else 21.dp))
+                            if (isLyricsActive) {
+                                Box(Modifier.size(5.dp).background(Color(0xFF00E5FF), CircleShape))
+                            }
+                        }
                     }
-                }
-            }
 
-            // 4. Playing Queue
-            val isQueueActive = currentTab == FullPlayerTab.QUEUE
-            val queueInteraction = remember { MutableInteractionSource() }
-            val isQueuePressed by queueInteraction.collectIsPressedAsState()
-            val queueScale by animateFloatAsState(if (isQueuePressed) 0.90f else 1.0f, ExpressiveMotion.appleTactileSpring(), label = "queueScale")
-            Surface(
-                onClick = {
-                    hapticManager.click()
-                    if (isQueueActive) onTabChange(FullPlayerTab.NOW_PLAYING) else onTabChange(FullPlayerTab.QUEUE)
-                },
-                interactionSource = queueInteraction,
-                shape = RoundedCornerShape(16.dp),
-                color = if (isQueueActive) Color.White.copy(alpha = 0.22f) else Color.Transparent,
-                contentColor = if (isQueueActive) Color(0xFF69F0AE) else Color.White.copy(alpha = 0.85f),
-                modifier = Modifier
-                    .height(dockItemHeight)
-                    .graphicsLayer { scaleX = queueScale; scaleY = queueScale },
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(Icons.Filled.QueueMusic, "Queue", Modifier.size(20.dp))
-                    if (state.queue.isNotEmpty()) {
-                        Text(
-                            text = "${state.queue.size}",
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
-                            color = if (isQueueActive) Color(0xFF69F0AE) else Color.White.copy(alpha = 0.70f),
-                        )
+                    // 2. Video Mode
+                    val videoInteraction = remember { MutableInteractionSource() }
+                    val isVideoPressed by videoInteraction.collectIsPressedAsState()
+                    val videoScale by animateFloatAsState(if (isVideoPressed) 0.88f else 1.0f, ExpressiveMotion.appleTactileSpring(), label = "videoScale")
+                    val activeVideoBorder = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.50f))
+                    Surface(
+                        onClick = {
+                            if (hasVideo) {
+                                hapticManager.click()
+                                onToggleVideo()
+                            }
+                        },
+                        interactionSource = videoInteraction,
+                        shape = RoundedCornerShape(100),
+                        enabled = hasVideo,
+                        color = if (isVideoMode) Color.White.copy(alpha = 0.18f) else Color.Transparent,
+                        border = if (isVideoMode) activeVideoBorder else null,
+                        contentColor = when {
+                            isVideoMode -> Color(0xFFFF5252)
+                            hasVideo -> Color.White.copy(alpha = 0.88f)
+                            else -> Color.White.copy(alpha = 0.28f)
+                        },
+                        modifier = Modifier
+                            .height(dockItemHeight)
+                            .graphicsLayer { scaleX = videoScale; scaleY = videoScale },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = if (compact) 9.dp else 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Icon(Icons.Filled.SmartDisplay, "Video", Modifier.size(if (compact) 19.dp else 21.dp))
+                            if (isVideoMode) {
+                                Box(Modifier.size(5.dp).background(Color(0xFFFF5252), CircleShape))
+                            }
+                        }
                     }
-                }
-            }
 
-            // 5. Sleep Timer
-            val isTimerActive = state.sleepTimerRemainingMs != null && state.sleepTimerRemainingMs > 0L
-            val timerInteraction = remember { MutableInteractionSource() }
-            val isTimerPressed by timerInteraction.collectIsPressedAsState()
-            val timerScale by animateFloatAsState(if (isTimerPressed) 0.90f else 1.0f, ExpressiveMotion.appleTactileSpring(), label = "timerScale")
-            Surface(
-                onClick = {
-                    hapticManager.click()
-                    player.cycleSleepTimer()
-                },
-                interactionSource = timerInteraction,
-                shape = RoundedCornerShape(16.dp),
-                color = if (isTimerActive) Color(0xFFFFB74D).copy(alpha = 0.24f) else Color.Transparent,
-                contentColor = if (isTimerActive) Color(0xFFFFB74D) else Color.White.copy(alpha = 0.85f),
-                modifier = Modifier
-                    .height(dockItemHeight)
-                    .graphicsLayer { scaleX = timerScale; scaleY = timerScale },
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(Icons.Filled.Timer, "Sleep Timer", Modifier.size(19.dp))
-                    if (isTimerActive) {
-                        val minutesLeft = (state.sleepTimerRemainingMs!! / 60000L).coerceAtLeast(1)
-                        Text(
-                            text = "${minutesLeft}m",
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
-                            color = Color(0xFFFFB74D),
-                        )
+                    // 3. Audio / Signal Path
+                    val audioInteraction = remember { MutableInteractionSource() }
+                    val isAudioPressed by audioInteraction.collectIsPressedAsState()
+                    val audioScale by animateFloatAsState(if (isAudioPressed) 0.88f else 1.0f, ExpressiveMotion.appleTactileSpring(), label = "audioScale")
+                    val isSpatial = remember(state.audioCodec) { isSpatialAudioCodec(state.audioCodec) }
+                    val isHiRes = state.isLossless && ((state.bitDepth ?: 16) > 16 || (state.samplingRateKHz ?: 44.1) > 48.0)
+                    val isOpus = remember(state.audioCodec) { state.audioCodec?.contains("opus", ignoreCase = true) == true }
+                    val isAac = remember(state.audioCodec) { state.audioCodec?.contains("aac", ignoreCase = true) == true || state.audioCodec?.contains("mp4a", ignoreCase = true) == true }
+
+                    val activeBadge = remember(state.audioCodec, state.isLossless, isHiRes, signalPath.bitPerfect, isSpatial, isOpus, isAac) {
+                        when {
+                            isSpatial -> Pair("ATMOS", Color(0xFFB388FF))
+                            signalPath.bitPerfect -> Pair("DIRECT", Color(0xFF00E676))
+                            isHiRes -> Pair("HI-RES", Color(0xFF00E5FF))
+                            state.isLossless || state.audioCodec?.equals("flac", ignoreCase = true) == true -> Pair("LOSSLESS", Color(0xFF00E676))
+                            isOpus -> Pair("OPUS", Color(0xFFFFB300))
+                            isAac -> Pair("AAC", Color(0xFF64B5F6))
+                            !state.audioCodec.isNullOrBlank() -> Pair(state.audioCodec!!.uppercase(), Color(0xFFE0E0E0))
+                            else -> Pair("AUDIO", Color.White.copy(alpha = 0.75f))
+                        }
+                    }
+
+                    Surface(
+                        onClick = {
+                            hapticManager.click()
+                            onOpenSignalPath()
+                        },
+                        interactionSource = audioInteraction,
+                        shape = RoundedCornerShape(100),
+                        color = Color.White.copy(alpha = 0.08f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+                        contentColor = Color.White.copy(alpha = 0.90f),
+                        modifier = Modifier
+                            .height(dockItemHeight)
+                            .graphicsLayer { scaleX = audioScale; scaleY = audioScale },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = if (compact) 8.dp else 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            PlayingWaveBars(
+                                waveColor = activeBadge.second,
+                                containerColor = Color.Transparent,
+                                isPlaying = state.isPlaying,
+                                modifier = Modifier.size(16.dp, 12.dp),
+                            )
+                            AnimatedContent(
+                                targetState = activeBadge,
+                                transitionSpec = {
+                                    (slideInVertically { height -> height / 2 } + fadeIn(tween(300)))
+                                        .togetherWith(slideOutVertically { height -> -height / 2 } + fadeOut(tween(300)))
+                                },
+                                label = "audioBadgeTicker",
+                            ) { badge ->
+                                Text(
+                                    text = badge.first,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = if (compact) 9.5.sp else 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        letterSpacing = 0.6.sp,
+                                    ),
+                                    color = badge.second,
+                                )
+                            }
+                        }
+                    }
+
+                    // 4. Playing Queue
+                    val isQueueActive = currentTab == FullPlayerTab.QUEUE
+                    val queueInteraction = remember { MutableInteractionSource() }
+                    val isQueuePressed by queueInteraction.collectIsPressedAsState()
+                    val queueScale by animateFloatAsState(if (isQueuePressed) 0.88f else 1.0f, ExpressiveMotion.appleTactileSpring(), label = "queueScale")
+                    val activeQueueBorder = BorderStroke(1.dp, Color(0xFF69F0AE).copy(alpha = 0.50f))
+                    Surface(
+                        onClick = {
+                            hapticManager.click()
+                            if (isQueueActive) onTabChange(FullPlayerTab.NOW_PLAYING) else onTabChange(FullPlayerTab.QUEUE)
+                        },
+                        interactionSource = queueInteraction,
+                        shape = RoundedCornerShape(100),
+                        color = if (isQueueActive) Color.White.copy(alpha = 0.18f) else Color.Transparent,
+                        border = if (isQueueActive) activeQueueBorder else null,
+                        contentColor = if (isQueueActive) Color(0xFF69F0AE) else Color.White.copy(alpha = 0.88f),
+                        modifier = Modifier
+                            .height(dockItemHeight)
+                            .graphicsLayer { scaleX = queueScale; scaleY = queueScale },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = if (compact) 9.dp else 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Icon(Icons.Filled.QueueMusic, "Queue", Modifier.size(if (compact) 19.dp else 21.dp))
+                            if (state.queue.isNotEmpty()) {
+                                Text(
+                                    text = "${state.queue.size}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp, fontWeight = FontWeight.Bold),
+                                    color = if (isQueueActive) Color(0xFF69F0AE) else Color.White.copy(alpha = 0.72f),
+                                )
+                            }
+                        }
+                    }
+
+                    // 5. Sleep Timer
+                    val isTimerActive = state.sleepTimerRemainingMs != null && state.sleepTimerRemainingMs > 0L
+                    val timerInteraction = remember { MutableInteractionSource() }
+                    val isTimerPressed by timerInteraction.collectIsPressedAsState()
+                    val timerScale by animateFloatAsState(if (isTimerPressed) 0.88f else 1.0f, ExpressiveMotion.appleTactileSpring(), label = "timerScale")
+                    val activeTimerBorder = BorderStroke(1.dp, Color(0xFFFFB74D).copy(alpha = 0.50f))
+                    Surface(
+                        onClick = {
+                            hapticManager.click()
+                            player.cycleSleepTimer()
+                        },
+                        interactionSource = timerInteraction,
+                        shape = RoundedCornerShape(100),
+                        color = if (isTimerActive) Color(0xFFFFB74D).copy(alpha = 0.20f) else Color.Transparent,
+                        border = if (isTimerActive) activeTimerBorder else null,
+                        contentColor = if (isTimerActive) Color(0xFFFFB74D) else Color.White.copy(alpha = 0.88f),
+                        modifier = Modifier
+                            .height(dockItemHeight)
+                            .graphicsLayer { scaleX = timerScale; scaleY = timerScale },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = if (compact) 9.dp else 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Icon(Icons.Filled.Timer, "Sleep Timer", Modifier.size(if (compact) 18.dp else 20.dp))
+                            if (isTimerActive) {
+                                val minutesLeft = (state.sleepTimerRemainingMs!! / 60000L).coerceAtLeast(1)
+                                Text(
+                                    text = "${minutesLeft}m",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                    color = Color(0xFFFFB74D),
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
-    }
     }
 }
 

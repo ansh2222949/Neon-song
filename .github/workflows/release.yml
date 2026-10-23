@@ -96,15 +96,15 @@ jobs:
           TAG="${{ inputs.tag_name }}"
           # Universal release (Android 10+, R8 + ProGuard + shrinkResources)
           if [ -f "app/build/outputs/apk/release/app-release-signed.apk" ]; then
-            cp app/build/outputs/apk/release/app-release-signed.apk final_apk/Neon Song-v${TAG}-universal.apk
+            cp "app/build/outputs/apk/release/app-release-signed.apk" "final_apk/Neon Song-v${TAG}-universal.apk"
           else
-            cp app/build/outputs/apk/release/app-release.apk final_apk/Neon Song-v${TAG}-universal.apk
+            cp "app/build/outputs/apk/release/app-release.apk" "final_apk/Neon Song-v${TAG}-universal.apk"
           fi
           # Universal uncompressed variant (Android 10+, raw debuggable/unminified)
           if [ -f "app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk" ]; then
-            cp app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk final_apk/Neon Song-v${TAG}-universal-uncompressed.apk
+            cp "app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk" "final_apk/Neon Song-v${TAG}-universal-uncompressed.apk"
           else
-            cp app/build/outputs/apk/rawRelease/app-rawRelease.apk final_apk/Neon Song-v${TAG}-universal-uncompressed.apk
+            cp "app/build/outputs/apk/rawRelease/app-rawRelease.apk" "final_apk/Neon Song-v${TAG}-universal-uncompressed.apk"
           fi
           rm -rf app/build/outputs/apk/release/*
 
@@ -136,9 +136,9 @@ jobs:
         run: |
           TAG="${{ inputs.tag_name }}"
           if [ -f "app/build/outputs/apk/release/app-release-signed.apk" ]; then
-            cp app/build/outputs/apk/release/app-release-signed.apk final_apk/Neon Song-v${TAG}-android7.apk
+            cp "app/build/outputs/apk/release/app-release-signed.apk" "final_apk/Neon Song-v${TAG}-android7.apk"
           else
-            cp app/build/outputs/apk/release/app-release.apk final_apk/Neon Song-v${TAG}-android7.apk
+            cp "app/build/outputs/apk/release/app-release.apk" "final_apk/Neon Song-v${TAG}-android7.apk"
           fi
           ls -lh final_apk/
 

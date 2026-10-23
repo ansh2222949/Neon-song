@@ -6,13 +6,11 @@ on:
     paths-ignore:
       - '**.md'
       - 'docs/screenshots/**'
-      - '**.yml'
   pull_request:
     branches: [ main, master ]
     paths-ignore:
       - '**.md'
       - 'docs/screenshots/**'
-      - '**.yml'
   workflow_dispatch:
 
 jobs:
@@ -107,15 +105,15 @@ jobs:
           echo "Building APKs for Neon Song v$VERSION"
           # Compressed release (Android 10+, R8 + ProGuard + shrinkResources)
           if [ -f "app/build/outputs/apk/release/app-release-signed.apk" ]; then
-            cp app/build/outputs/apk/release/app-release-signed.apk final_apk/Neon Song-v${VERSION}-release.apk
+            cp "app/build/outputs/apk/release/app-release-signed.apk" "final_apk/Neon Song-v${VERSION}-release.apk"
           else
-            cp app/build/outputs/apk/release/app-release.apk final_apk/Neon Song-v${VERSION}-release.apk
+            cp "app/build/outputs/apk/release/app-release.apk" "final_apk/Neon Song-v${VERSION}-release.apk"
           fi
           # Raw release (Android 10+, no minify, no shrink, no ProGuard)
           if [ -f "app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk" ]; then
-            cp app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk final_apk/Neon Song-v${VERSION}-raw.apk
+            cp "app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk" "final_apk/Neon Song-v${VERSION}-raw.apk"
           else
-            cp app/build/outputs/apk/rawRelease/app-rawRelease.apk final_apk/Neon Song-v${VERSION}-raw.apk
+            cp "app/build/outputs/apk/rawRelease/app-rawRelease.apk" "final_apk/Neon Song-v${VERSION}-raw.apk"
           fi
           rm -rf app/build/outputs/apk/release/*
 
@@ -147,9 +145,9 @@ jobs:
         run: |
           VERSION="${{ steps.prep_apk.outputs.version }}"
           if [ -f "app/build/outputs/apk/release/app-release-signed.apk" ]; then
-            cp app/build/outputs/apk/release/app-release-signed.apk final_apk/Neon Song-v${VERSION}-android7.apk
+            cp "app/build/outputs/apk/release/app-release-signed.apk" "final_apk/Neon Song-v${VERSION}-android7.apk"
           else
-            cp app/build/outputs/apk/release/app-release.apk final_apk/Neon Song-v${VERSION}-android7.apk
+            cp "app/build/outputs/apk/release/app-release.apk" "final_apk/Neon Song-v${VERSION}-android7.apk"
           fi
           ls -lh final_apk/
 
