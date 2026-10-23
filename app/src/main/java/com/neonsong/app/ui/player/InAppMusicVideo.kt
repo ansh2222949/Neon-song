@@ -1,6 +1,7 @@
 package com.neonsong.app.ui.player
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 import android.os.Handler
@@ -68,7 +69,7 @@ internal fun extractYouTubeVideoId(input: String): String {
     return anyMatch?.groupValues?.get(1) ?: ""
 }
 
-private class YouTubeJsBridge(
+internal class YouTubeJsBridge(
     private val onReady: () -> Unit,
     private val onPlaying: () -> Unit,
     private val onProgress: (Float, Float) -> Unit,
@@ -101,6 +102,127 @@ private class YouTubeJsBridge(
     fun onPlayerError(errorCode: Int) {
         mainHandler.post { onError(errorCode) }
     }
+}
+
+/**
+ * Shared/persistent WebView holder for YouTube video playback.
+ * Prevents recreation/rebuffering when toggling fullscreen or rotating.
+ */
+internal object MusicVideoHolder {
+    private var webViewRef: WebView? = null
+    var activeVideoId: String = ""
+        private set
+    var isJsReady: Boolean = false
+
+    @SuppressLint("SetJavaScriptEnabled")
+    fun getOrCreate(
+        context: Context,
+        videoId: String,
+        initialPositionSeconds: Float,
+        appOrigin: String,
+        initialHtml: String,
+        blankPoster: Bitmap,
+        bridge: YouTubeJsBridge,
+    ): Pair<WebView, Boolean> {
+        val cleanId = extractYouTubeVideoId(videoId)
+        val existing = webViewRef
+        if (existing != null && activeVideoId == cleanId) {
+            (existing.parent as? ViewGroup)?.removeView(existing)
+            return Pair(existing, false)
+        }
+
+        release()
+
+        val newView = WebView(context.applicationContext).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+            setBackgroundColor(AndroidColor.BLACK)
+            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+
+            val cookieManager = CookieManager.getInstance()
+            cookieManager.setAcceptCookie(true)
+            cookieManager.setAcceptThirdPartyCookies(this, true)
+
+            val defaultUa = settings.userAgentString.orEmpty()
+            settings.userAgentString = defaultUa
+                .replace("; wv", "")
+                .replace("Version/4.0 ", "")
+
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            settings.loadsImagesAutomatically = true
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
+            settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            settings.cacheMode = WebSettings.LOAD_DEFAULT
+
+            addJavascriptInterface(bridge, "AndroidBridge")
+
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                    if (request != null && !request.isForMainFrame) {
+                        return false
+                    }
+                    val url = request?.url?.toString().orEmpty()
+                    val host = request?.url?.host.orEmpty()
+                    if (host.endsWith("youtube.com") ||
+                        host.endsWith("youtube-nocookie.com") ||
+                        host.endsWith("googlevideo.com") ||
+                        host.endsWith("google.com") ||
+                        host.endsWith("gstatic.com") ||
+                        host.endsWith("doubleclick.net") ||
+                        url.contains("embed") ||
+                        url.contains("player")
+                    ) {
+                        return false
+                    }
+                    return try {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, request?.url)
+                        view?.context?.startActivity(intent)
+                        true
+                    } catch (_: Exception) {
+                        false
+                    }
+                }
+            }
+
+            webChromeClient = object : WebChromeClient() {
+                override fun getDefaultVideoPoster(): Bitmap? = blankPoster
+            }
+
+            loadDataWithBaseURL(
+                appOrigin,
+                initialHtml,
+                "text/html",
+                "UTF-8",
+                null,
+            )
+        }
+
+        webViewRef = newView
+        activeVideoId = cleanId
+        isJsReady = false
+        return Pair(newView, true)
+    }
+
+    fun release() {
+        webViewRef?.let { wv ->
+            (wv.parent as? ViewGroup)?.removeView(wv)
+            wv.stopLoading()
+            wv.loadUrl("about:blank")
+            wv.destroy()
+        }
+        webViewRef = null
+        activeVideoId = ""
+        isJsReady = false
+    }
+}
+
+internal fun releaseMusicVideo() {
+    MusicVideoHolder.release()
 }
 
 /**
@@ -292,104 +414,52 @@ internal fun InAppMusicVideo(
         Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
     }
 
-    val webView = remember(context) {
-        WebView(context).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            )
-            setBackgroundColor(AndroidColor.BLACK)
-            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-
-            // Allow cookies & 3rd-party cookies for seamless YouTube media authorization
-            val cookieManager = CookieManager.getInstance()
-            cookieManager.setAcceptCookie(true)
-            cookieManager.setAcceptThirdPartyCookies(this, true)
-
-            // Strip '; wv' and 'Version/4.0' from User-Agent to prevent YouTube Error 150/153
-            val defaultUa = settings.userAgentString.orEmpty()
-            settings.userAgentString = defaultUa
-                .replace("; wv", "")
-                .replace("Version/4.0 ", "")
-
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            settings.loadsImagesAutomatically = true
-            settings.allowFileAccess = false
-            settings.allowContentAccess = false
-            settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            settings.cacheMode = WebSettings.LOAD_DEFAULT
-
-            addJavascriptInterface(
-                YouTubeJsBridge(
-                    onReady = {
-                        isJsApiReady = true
-                        isUiReady = true
-                    },
-                    onPlaying = {
-                        isUiReady = true
-                    },
-                    onProgress = { curMs, durMs ->
-                        currentOnProgress?.invoke(curMs.toLong(), durMs.toLong())
-                    },
-                    onStateChange = { state ->
-                        if (state == 0) { // ENDED
-                            currentOnEnded?.invoke()
-                        } else if (state == 1) { // PLAYING
-                            currentOnPlaybackChanged?.invoke(true)
-                        } else if (state == 2) { // PAUSED
-                            currentOnPlaybackChanged?.invoke(false)
-                        }
-                    },
-                    onError = { code ->
-                        if (code == 101 || code == 150 || code == 153) {
-                            currentOnError?.invoke()
-                        }
-                    }
-                ),
-                "AndroidBridge"
-            )
-
-            webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                    if (request != null && !request.isForMainFrame) {
-                        return false
-                    }
-                    val url = request?.url?.toString().orEmpty()
-                    val host = request?.url?.host.orEmpty()
-                    if (host.endsWith("youtube.com") ||
-                        host.endsWith("youtube-nocookie.com") ||
-                        host.endsWith("googlevideo.com") ||
-                        host.endsWith("google.com") ||
-                        host.endsWith("gstatic.com") ||
-                        host.endsWith("doubleclick.net") ||
-                        url.contains("embed") ||
-                        url.contains("player")
-                    ) {
-                        return false
-                    }
-                    return try {
-                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, request?.url)
-                        view?.context?.startActivity(intent)
-                        true
-                    } catch (_: Exception) {
-                        false
-                    }
+    val jsBridge = remember {
+        YouTubeJsBridge(
+            onReady = {
+                isJsApiReady = true
+                MusicVideoHolder.isJsReady = true
+                isUiReady = true
+            },
+            onPlaying = {
+                isUiReady = true
+            },
+            onProgress = { curMs, durMs ->
+                currentOnProgress?.invoke(curMs.toLong(), durMs.toLong())
+            },
+            onStateChange = { state ->
+                if (state == 0) { // ENDED
+                    currentOnEnded?.invoke()
+                } else if (state == 1) { // PLAYING
+                    currentOnPlaybackChanged?.invoke(true)
+                } else if (state == 2) { // PAUSED
+                    currentOnPlaybackChanged?.invoke(false)
+                }
+            },
+            onError = { code ->
+                if (code == 101 || code == 150 || code == 153) {
+                    currentOnError?.invoke()
                 }
             }
+        )
+    }
 
-            webChromeClient = object : WebChromeClient() {
-                override fun getDefaultVideoPoster(): Bitmap? = blankPoster
-            }
+    val (webView, isFresh) = remember(cleanVideoId) {
+        MusicVideoHolder.getOrCreate(
+            context = context,
+            videoId = cleanVideoId,
+            initialPositionSeconds = initialPositionSeconds,
+            appOrigin = appOrigin,
+            initialHtml = initialHtml,
+            blankPoster = blankPoster,
+            bridge = jsBridge,
+        )
+    }
 
-            loadDataWithBaseURL(
-                appOrigin,
-                initialHtml,
-                "text/html",
-                "UTF-8",
-                null,
-            )
+    LaunchedEffect(isFresh) {
+        if (!isFresh && MusicVideoHolder.isJsReady) {
+            isJsApiReady = true
+            isUiReady = true
         }
     }
 
@@ -416,13 +486,13 @@ internal fun InAppMusicVideo(
         }
     }
 
-    // UI safety fallback: fade out spinner after 3.5s if not already ready (without forcing isJsApiReady)
+    // UI safety fallback: fade out spinner after 3.5s if not already ready
     LaunchedEffect(activeVideoId) {
         delay(3500)
         isUiReady = true
     }
 
-    // Instance-safe lifecycle hooks: Never calls global pauseTimers() which breaks other WebViews in the process
+    // Instance-safe lifecycle hooks: Allows background/screen-off playback without abrupt pauses
     DisposableEffect(lifecycleOwner, webView) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -433,8 +503,10 @@ internal fun InAppMusicVideo(
                     }
                 }
                 Lifecycle.Event.ON_PAUSE -> {
-                    webView.onPause()
-                    webView.evaluateJavascript("setPlayback(false);", null)
+                    // Do NOT pause playback when user is actively playing with screen off!
+                    if (!isPlaying) {
+                        webView.onPause()
+                    }
                 }
                 else -> {}
             }
@@ -442,12 +514,8 @@ internal fun InAppMusicVideo(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            webView.onPause()
-            webView.evaluateJavascript("try { if (player && player.stopVideo) player.stopVideo(); } catch(e){}", null)
+            // Detach from parent without destroying, allowing seamless move between card and fullscreen!
             (webView.parent as? ViewGroup)?.removeView(webView)
-            webView.stopLoading()
-            webView.loadUrl("about:blank")
-            webView.destroy()
         }
     }
 

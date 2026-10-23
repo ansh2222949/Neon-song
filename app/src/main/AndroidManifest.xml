@@ -75,7 +75,7 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:theme="@style/Theme.NeonSong.Splash"
-            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize">
 
             <!-- Launcher -->

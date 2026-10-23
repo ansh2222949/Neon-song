@@ -2226,6 +2226,7 @@ private fun FullPlayer(
     }
 
     val closeVideoMode = {
+        releaseMusicVideo()
         isVideoFullscreen = false
         isVideoMode = false
         if (videoPositionMs > 0L) {
@@ -3570,8 +3571,7 @@ private fun FullPlayer(
                         InAppMusicVideo(
                             videoId = effectiveVideoId.orEmpty(),
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(16f / 9f)
+                                .fillMaxSize()
                                 .align(Alignment.Center),
                             isPlaying = isVideoPlaying,
                             initialPositionSeconds = (videoPositionMs.takeIf { it > 0L } ?: player.state.value.positionMs)
