@@ -65,6 +65,11 @@ provider.json
 .kotlin/
 # Native generated secrets (CI only, never commit)
 app/src/main/cpp/SecretsBridge_generated.h
+security/neonsong-vault/src/secrets_generated.rs
+
+# Rust build artifacts
+target/
+**/target/
 
 
 # Addon service & credentials (never commit)

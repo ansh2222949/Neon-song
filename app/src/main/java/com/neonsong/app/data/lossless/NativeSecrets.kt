@@ -37,8 +37,12 @@ class NativeSecrets @Inject constructor(
     companion object {
         init {
             try {
-                System.loadLibrary("neonsong_audio")
+                System.loadLibrary("neonsong_vault")
             } catch (_: Throwable) {
+                try {
+                    System.loadLibrary("neonsong_audio")
+                } catch (_: Throwable) {
+                }
             }
         }
 

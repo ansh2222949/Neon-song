@@ -1,0 +1,20 @@
+[package]
+name = "neonsong_vault"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+jni = "0.21"
+sha2 = { version = "0.10", default-features = false }
+hmac = { version = "0.12", default-features = false }
+zeroize = { version = "1.8", default-features = false, features = ["zeroize_derive"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
