@@ -71,7 +71,7 @@ android {
         buildConfigField("String", "NEONSONG_LYRICS_URL", "\"$neonSongLyricsUrl\"")
 
         // Native secrets (addon client lock) live strictly in native .so via
-        // SecretsBridge_generated.h (tools/generate_native_secrets.py).
+        // Rust vault secrets_generated.rs (tools/generate_native_secrets.py).
         // No secret fields are exposed in DEX / BuildConfig.
 
         externalNativeBuild {

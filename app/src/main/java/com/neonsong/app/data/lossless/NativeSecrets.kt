@@ -38,11 +38,8 @@ class NativeSecrets @Inject constructor(
         init {
             try {
                 System.loadLibrary("neonsong_vault")
-            } catch (_: Throwable) {
-                try {
-                    System.loadLibrary("neonsong_audio")
-                } catch (_: Throwable) {
-                }
+            } catch (t: Throwable) {
+                android.util.Log.e("NativeSecrets", "Failed to load Rust vault (neonsong_vault)", t)
             }
         }
 

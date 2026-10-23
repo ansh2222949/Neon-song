@@ -75,7 +75,6 @@ add_library(
     AudioEngine.cpp
     DspProcessor.cpp
     NativeBridge.cpp
-    SecretsBridge.cpp
 )
 
 target_include_directories(
