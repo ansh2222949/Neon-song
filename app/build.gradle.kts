@@ -122,7 +122,37 @@ android {
                 enableV2Signing = true
                 enableV3Signing = true
             } else {
-                initWith(getByName("debug"))
+                val debugConfig = getByName("debug")
+                val debugFile = debugConfig.storeFile ?: File(System.getProperty("user.home"), ".android/debug.keystore")
+                if (!debugFile.exists() || debugFile.length() == 0L) {
+                    try {
+                        debugFile.parentFile?.mkdirs()
+                        val javaHome = System.getProperty("java.home")
+                        val isWin = org.gradle.internal.os.OperatingSystem.current().isWindows
+                        val keytoolPath = File(javaHome, if (isWin) "bin/keytool.exe" else "bin/keytool")
+                        val keytoolExec = if (keytoolPath.exists()) keytoolPath.absolutePath else "keytool"
+                        ProcessBuilder(
+                            keytoolExec,
+                            "-genkeypair",
+                            "-noprompt",
+                            "-keystore", debugFile.absolutePath,
+                            "-storepass", "android",
+                            "-alias", "androiddebugkey",
+                            "-keypass", "android",
+                            "-keyalg", "RSA",
+                            "-keysize", "2048",
+                            "-validity", "10000",
+                            "-dname", "CN=Android Debug,O=Android,C=US"
+                        ).start().waitFor()
+                    } catch (_: Exception) {}
+                }
+                initWith(debugConfig)
+                if (debugFile.exists()) {
+                    storeFile = debugFile
+                }
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
