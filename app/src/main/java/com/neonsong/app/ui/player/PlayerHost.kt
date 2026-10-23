@@ -2367,17 +2367,12 @@ private fun FullPlayer(
             override fun onOrientationChanged(orientation: Int) {
                 if (orientation == ORIENTATION_UNKNOWN) return
                 val now = SystemClock.uptimeMillis()
+                // Only auto-exit fullscreen when user holds phone upright after entering fullscreen
                 if (isVideoFullscreen && now - lastFullscreenTime > 700L) {
                     val isStraightUp = orientation in 335..360 || orientation in 0..25
                     if (isStraightUp) {
                         isVideoFullscreen = false
                         activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                    }
-                } else if (!isVideoFullscreen && isVideoMode) {
-                    val isSideways = orientation in 70..110 || orientation in 250..290
-                    if (isSideways) {
-                        isVideoFullscreen = true
-                        activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                     }
                 }
             }
@@ -3128,26 +3123,40 @@ private fun FullPlayer(
                                                     .aspectRatio(16f / 9f)
                                                     .align(Alignment.Center),
                                             ) {
+                                                // Authentic optical glass contact drop shadow
                                                 Box(
                                                     modifier = Modifier
                                                         .fillMaxSize()
-                                                        .graphicsLayer { scaleX = 1.08f; scaleY = 1.08f; alpha = 0.60f }
+                                                        .graphicsLayer {
+                                                            scaleX = 1.01f
+                                                            scaleY = 1.01f
+                                                            translationY = 8f
+                                                        }
                                                         .background(
                                                             Brush.radialGradient(
                                                                 listOf(
-                                                                    ambientColor.copy(alpha = 0.70f),
-                                                                    ambientCompanion.copy(alpha = 0.28f),
+                                                                    Color.Black.copy(alpha = 0.55f),
+                                                                    Color.Black.copy(alpha = 0.20f),
                                                                     Color.Transparent,
                                                                 )
                                                             ),
                                                             shape = RoundedCornerShape(26.dp),
                                                         ),
                                                 )
+                                                val videoGlassBorder = Brush.linearGradient(
+                                                    listOf(
+                                                        Color.White.copy(alpha = 0.32f),
+                                                        Color.White.copy(alpha = 0.08f),
+                                                        Color.White.copy(alpha = 0.20f),
+                                                    ),
+                                                    start = Offset(0f, 0f),
+                                                    end = Offset(400f, 400f),
+                                                )
                                                 Surface(
                                                     shape = RoundedCornerShape(24.dp),
                                                     color = Color.Black,
-                                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
-                                                    shadowElevation = 24.dp,
+                                                    border = BorderStroke(1.2.dp, videoGlassBorder),
+                                                    shadowElevation = 18.dp,
                                                     modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)),
                                                 ) {
                                                     Box(Modifier.fillMaxSize()) {
@@ -3172,36 +3181,42 @@ private fun FullPlayer(
                                                                 },
                                                             )
                                                         }
-                                                        IconButton(
-                                                            onClick = {
-                                                                hapticManager.click()
-                                                                isVideoFullscreen = true
-                                                            },
+                                                        Surface(
+                                                            shape = CircleShape,
+                                                            color = Color.Black.copy(alpha = 0.52f),
+                                                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
                                                             modifier = Modifier
                                                                 .align(Alignment.TopEnd)
-                                                                .padding(8.dp)
-                                                                .size(36.dp)
-                                                                .clip(CircleShape)
-                                                                .background(Color.Black.copy(alpha = 0.65f)),
+                                                                .padding(10.dp)
+                                                                .size(38.dp),
                                                         ) {
-                                                            Icon(
-                                                                Icons.Filled.Fullscreen,
-                                                                contentDescription = "Expand fullscreen video",
-                                                                tint = Color.White,
-                                                                modifier = Modifier.size(20.dp),
-                                                            )
+                                                            IconButton(
+                                                                onClick = {
+                                                                    hapticManager.click()
+                                                                    isVideoFullscreen = true
+                                                                },
+                                                                modifier = Modifier.fillMaxSize(),
+                                                            ) {
+                                                                Icon(
+                                                                    Icons.Filled.Fullscreen,
+                                                                    contentDescription = "Expand fullscreen video",
+                                                                    tint = Color.White,
+                                                                    modifier = Modifier.size(20.dp),
+                                                                )
+                                                            }
                                                         }
                                                         Surface(
                                                             shape = RoundedCornerShape(100),
-                                                            color = Color.Black.copy(alpha = 0.65f),
+                                                            color = Color.Black.copy(alpha = 0.52f),
+                                                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
                                                             modifier = Modifier
                                                                 .align(Alignment.BottomStart)
-                                                                .padding(8.dp),
+                                                                .padding(10.dp),
                                                         ) {
                                                             Row(
-                                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.5.dp),
                                                                 verticalAlignment = Alignment.CenterVertically,
-                                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                                horizontalArrangement = Arrangement.spacedBy(5.dp),
                                                             ) {
                                                                 Box(
                                                                     modifier = Modifier
@@ -3211,7 +3226,7 @@ private fun FullPlayer(
                                                                 Text(
                                                                     text = "HD Video",
                                                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
-                                                                    color = Color.White.copy(alpha = 0.92f),
+                                                                    color = Color.White.copy(alpha = 0.95f),
                                                                 )
                                                             }
                                                         }
@@ -3487,12 +3502,12 @@ private fun FullPlayer(
                                                 translationY = spatialTiltY * 0.20f
                                             },
                                     ) {
-                                    val trackInfoShape = RoundedCornerShape(26.dp)
+                                    val trackInfoShape = RoundedCornerShape(24.dp)
                                     val trackInfoBorderBrush = Brush.linearGradient(
                                         listOf(
-                                            Color.White.copy(alpha = (0.34f + spatialTiltX * 0.01f).coerceIn(0.12f, 0.60f)),
+                                            Color.White.copy(alpha = (0.35f + spatialTiltX * 0.01f).coerceIn(0.18f, 0.55f)),
                                             Color.White.copy(alpha = 0.08f),
-                                            ambientCompanion.copy(alpha = (0.24f + spatialTiltY * 0.01f).coerceIn(0.08f, 0.50f)),
+                                            Color.White.copy(alpha = (0.22f + spatialTiltY * 0.01f).coerceIn(0.10f, 0.40f)),
                                         ),
                                         start = Offset(spatialTiltX * 12f, spatialTiltY * 8f),
                                         end = Offset(600f + spatialTiltX * 12f, 200f + spatialTiltY * 8f),
@@ -3502,22 +3517,22 @@ private fun FullPlayer(
                                             .fillMaxWidth()
                                             .clip(trackInfoShape)
                                             .background(
-                                                Brush.horizontalGradient(
+                                                Brush.verticalGradient(
                                                     listOf(
-                                                        Color.White.copy(alpha = 0.12f),
-                                                        Color.White.copy(alpha = 0.05f),
-                                                        ambientColor.copy(alpha = 0.08f),
+                                                        Color.White.copy(alpha = 0.10f),
+                                                        Color.White.copy(alpha = 0.03f),
+                                                        Color.Black.copy(alpha = 0.24f),
                                                     )
                                                 )
                                             )
                                             .border(
-                                                width = 1.2.dp,
+                                                width = 1.dp,
                                                 brush = trackInfoBorderBrush,
                                                 shape = trackInfoShape,
                                             )
                                             .padding(
                                                 horizontal = if (isLandscape) 14.dp else 18.dp,
-                                                vertical = if (isLandscape) 6.dp else 13.dp,
+                                                vertical = if (isLandscape) 6.dp else 12.dp,
                                             ),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
@@ -3699,14 +3714,15 @@ private fun FullPlayer(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .padding(horizontal = 24.dp)
+                                            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                                            .padding(horizontal = 20.dp)
                                             .padding(bottom = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(24.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(20.dp),
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .weight(1f)
+                                                .weight(1.05f)
                                                 .fillMaxHeight(),
                                             contentAlignment = Alignment.Center,
                                         ) {
@@ -3714,7 +3730,7 @@ private fun FullPlayer(
                                         }
                                         Column(
                                             modifier = Modifier
-                                                .weight(1.25f)
+                                                .weight(1.15f)
                                                 .fillMaxHeight(),
                                             verticalArrangement = Arrangement.Center,
                                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -3747,8 +3763,14 @@ private fun FullPlayer(
                     }
                 AnimatedVisibility(
                     visible = isVideoMode && isVideoFullscreen,
-                    enter = fadeIn(androidx.compose.animation.core.tween(150)),
-                    exit = fadeOut(androidx.compose.animation.core.tween(150)),
+                    enter = fadeIn(tween(220, easing = FastOutSlowInEasing)) + scaleIn(
+                        animationSpec = spring(dampingRatio = 0.82f, stiffness = 450f),
+                        initialScale = 0.92f,
+                    ),
+                    exit = fadeOut(tween(180, easing = FastOutSlowInEasing)) + scaleOut(
+                        animationSpec = spring(dampingRatio = 0.85f, stiffness = 500f),
+                        targetScale = 0.94f,
+                    ),
                     modifier = Modifier.fillMaxSize().zIndex(10f),
                 ) {
                     Box(
@@ -3779,23 +3801,28 @@ private fun FullPlayer(
                                 },
                             )
                         }
-                        IconButton(
-                            onClick = {
-                                hapticManager.click()
-                                isVideoFullscreen = false
-                            },
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.52f),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
                             modifier = Modifier
                                 .align(Alignment.TopStart)
                                 .padding(16.dp)
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.56f)),
+                                .size(44.dp),
                         ) {
-                            Icon(
-                                Icons.Filled.FullscreenExit,
-                                contentDescription = "Exit fullscreen",
-                                tint = Color.White,
-                            )
+                            IconButton(
+                                onClick = {
+                                    hapticManager.click()
+                                    isVideoFullscreen = false
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                            ) {
+                                Icon(
+                                    Icons.Filled.FullscreenExit,
+                                    contentDescription = "Exit fullscreen",
+                                    tint = Color.White,
+                                )
+                            }
                         }
                         Surface(
                             shape = RoundedCornerShape(100),
@@ -4648,47 +4675,26 @@ private fun PlayerFloatingDock(
     val dockShape = RoundedCornerShape(if (compact) 18.dp else 28.dp)
     val dockItemHeight = if (compact) 30.dp else 40.dp
 
-    val dockGlowTransition = rememberInfiniteTransition(label = "dockGlowMotion")
-    val dockGlowPulse by dockGlowTransition.animateFloat(
-        initialValue = 0.55f,
-        targetValue = 0.95f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2600, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "dockGlowPulse",
-    )
-    val dockGlowShift by dockGlowTransition.animateFloat(
-        initialValue = -30f,
-        targetValue = 30f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(4200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "dockGlowShift",
-    )
-
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(if (compact) 38.dp else 54.dp),
         contentAlignment = Alignment.Center,
     ) {
-        // Living breathing ambient motion pod glow behind the floating dock
+        // Authentic glass contact drop shadow
         Box(
             modifier = Modifier
-                .fillMaxWidth(0.94f)
-                .height(if (compact) 34.dp else 50.dp)
+                .fillMaxWidth(0.95f)
+                .height(if (compact) 32.dp else 48.dp)
                 .graphicsLayer {
-                    translationX = dockGlowShift
-                    translationY = if (compact) 3.dp.toPx() else 6.dp.toPx()
-                    alpha = if (state.isPlaying) dockGlowPulse else 0.40f
+                    translationY = if (compact) 2.dp.toPx() else 4.dp.toPx()
+                    alpha = 0.50f
                 }
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFF00E5FF).copy(alpha = 0.35f),
-                            Color(0xFF7C4DFF).copy(alpha = 0.20f),
+                            Color.Black.copy(alpha = 0.65f),
+                            Color.Black.copy(alpha = 0.20f),
                             Color.Transparent,
                         ),
                     ),
@@ -4698,19 +4704,21 @@ private fun PlayerFloatingDock(
 
         Surface(
             shape = dockShape,
-            color = Color.Black.copy(alpha = 0.35f),
+            color = Color.Black.copy(alpha = 0.32f),
             border = BorderStroke(
                 1.dp,
-                Brush.horizontalGradient(
+                Brush.linearGradient(
                     listOf(
-                        Color.White.copy(alpha = 0.28f),
+                        Color.White.copy(alpha = 0.32f),
                         Color.White.copy(alpha = 0.08f),
                         Color.White.copy(alpha = 0.20f),
-                    )
+                    ),
+                    start = Offset(0f, 0f),
+                    end = Offset(400f, 200f),
                 )
             ),
             tonalElevation = 0.dp,
-            shadowElevation = 10.dp,
+            shadowElevation = 8.dp,
             modifier = Modifier
                 .fillMaxSize()
                 .liquidGlassChrome(dockShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls),

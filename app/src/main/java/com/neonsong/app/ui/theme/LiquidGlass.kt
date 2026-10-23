@@ -484,6 +484,15 @@ fun Modifier.drawInteractiveGlass(
             onDrawSurface = {
                 val darken = lerp(minScrim, maxScrim, ((luminanceAnimation - 0.3f) / 0.5f).coerceIn(0f, 1f))
                 drawRect((if (isDark) Color.Black else Color.White).copy(alpha = darken))
+                // Physically-grounded incident light transmission (subtle optical glass top-sheen)
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        0.0f to Color.White.copy(alpha = if (isDark) 0.08f else 0.14f),
+                        0.45f to Color.White.copy(alpha = 0.02f),
+                        1.0f to Color.Transparent,
+                    ),
+                    blendMode = BlendMode.Plus,
+                )
                 val press = interaction?.pressProgress ?: 0f
                 if (press > 0f) {
                     drawRect(
