@@ -1,11 +1,20 @@
 package com.neonsong.app.ui.feed
 
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import com.neonsong.app.ui.common.isTabletOrWideScreen
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -258,8 +267,15 @@ fun FeedScreen(
                     }.distinctBy { it.name.trim().lowercase() }
                 }
 
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().safeHorizontalContentPadding(),
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.TopCenter,
+                ) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .adaptiveContentWidth(maxWidth = 1000.dp)
+                            .safeHorizontalContentPadding(),
                     contentPadding = PaddingValues(
                         bottom = FloatingNavDefaults.contentBottomPadding(),
                         top = 12.dp,
@@ -859,6 +875,7 @@ fun FeedScreen(
                         FeedFooter(lastUpdatedMillis = state.feedData.lastUpdatedMillis)
                     }
                 }
+                }
             }
         }
     }
@@ -921,124 +938,292 @@ private fun InfiniteRadioHero(
 ) {
     val haptics = LocalHapticFeedback.current
     val heroArt = quickPicks.firstOrNull { !it.artworkUrl.isNullOrBlank() }?.artworkUrl
-    val heroShape = RoundedCornerShape(28.dp)
-    Surface(
-        shape = heroShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.65f),
-        border = BorderStroke(
-            1.5.dp,
-            Brush.horizontalGradient(
-                listOf(
-                    Color(0xFF00E5FF),
-                    Color(0xFFB388FF),
-                    Color(0xFFFF4081),
-                )
-            ),
+    val heroShape = RoundedCornerShape(30.dp)
+    val isWide = isTabletOrWideScreen()
+
+    var touchX by remember { mutableStateOf(0f) }
+    var touchY by remember { mutableStateOf(0f) }
+    var isTouched by remember { mutableStateOf(false) }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "heroGlow")
+    val glowPulse by infiniteTransition.animateFloat(
+        initialValue = 0.85f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
         ),
-        tonalElevation = 4.dp,
+        label = "heroGlowPulse",
+    )
+    val ambientTiltY by infiniteTransition.animateFloat(
+        initialValue = -2.2f,
+        targetValue = 2.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(3800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "heroAmbientTiltY",
+    )
+    val ambientTiltX by infiniteTransition.animateFloat(
+        initialValue = 1.4f,
+        targetValue = -1.4f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4600, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "heroAmbientTiltX",
+    )
+
+    val animatedTiltX by animateFloatAsState(
+        targetValue = if (isTouched) touchX else 0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "heroTiltX",
+    )
+    val animatedTiltY by animateFloatAsState(
+        targetValue = if (isTouched) touchY else 0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "heroTiltY",
+    )
+    val cardScale by animateFloatAsState(
+        targetValue = if (isTouched) 0.97f else 1.0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "heroScale",
+    )
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-    ) {
-        Box(modifier = Modifier.fillMaxWidth()) {
-            if (!heroArt.isNullOrBlank()) {
-                AsyncImage(
-                    model = heroArt,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(208.dp)
-                        .alpha(0.32f),
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(208.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
-                                MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.55f),
-                                MaterialTheme.colorScheme.surfaceContainer,
-                            ),
-                        ),
-                    ),
-            )
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.AutoAwesome,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(12.dp),
-                            )
-                            Text(
-                                "NEON VIBE • FOR YOU",
-                                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.1.sp),
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF00E5FF),
-                            )
+            .padding(horizontal = 16.dp)
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull()
+                        if (change != null) {
+                            if (change.pressed) {
+                                val w = size.width.toFloat()
+                                val h = size.height.toFloat()
+                                if (w > 0f && h > 0f) {
+                                    touchX = ((change.position.x - w / 2f) / (w / 2f)).coerceIn(-1f, 1f)
+                                    touchY = ((change.position.y - h / 2f) / (h / 2f)).coerceIn(-1f, 1f)
+                                    isTouched = true
+                                }
+                            } else {
+                                isTouched = false
+                                touchX = 0f
+                                touchY = 0f
+                            }
+                        } else {
+                            isTouched = false
+                            touchX = 0f
+                            touchY = 0f
                         }
                     }
                 }
-                Text(
-                    text = "Neon Infinite Radio",
-                    style = MaterialTheme.typography.headlineSmall.copy(fontSize = 24.sp, letterSpacing = (-0.4).sp),
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.semantics { heading() },
+            }
+            .graphicsLayer {
+                rotationY = (animatedTiltX * 13f) + (if (isTouched) 0f else ambientTiltY)
+                rotationX = (-animatedTiltY * 11f) + (if (isTouched) 0f else ambientTiltX)
+                cameraDistance = 18f * density
+                scaleX = cardScale
+                scaleY = cardScale
+            },
+    ) {
+        // 3D Ambient Neon Glow Behind the Glass Card
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .graphicsLayer {
+                    scaleX = glowPulse * (if (isTouched) 1.06f else 1.0f)
+                    scaleY = glowPulse * (if (isTouched) 1.06f else 1.0f)
+                    alpha = if (isTouched) 0.70f else 0.50f
+                }
+                .background(
+                    Brush.radialGradient(
+                        listOf(
+                            Color(0xFF00E5FF).copy(alpha = 0.40f),
+                            Color(0xFF7C4DFF).copy(alpha = 0.25f),
+                            Color(0xFFFF4081).copy(alpha = 0.12f),
+                            Color.Transparent,
+                        )
+                    ),
+                    shape = heroShape,
                 )
-                Text(
-                    text = "An endless station shaped by your listening",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(2.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Button(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onPlay()
-                        },
-                        enabled = quickPicks.isNotEmpty(),
-                        shape = CircleShape,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF00E5FF),
-                            contentColor = Color.Black,
+        )
+
+        Surface(
+            shape = heroShape,
+            color = Color(0xFF10131E).copy(alpha = 0.82f),
+            border = BorderStroke(
+                1.5.dp,
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF00E5FF),
+                        Color(0xFFB388FF),
+                        Color(0xFFFF4081),
+                        Color(0xFF00E5FF).copy(alpha = 0.40f),
+                    )
+                ),
+            ),
+            shadowElevation = if (isTouched) 24.dp else 18.dp,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Box(modifier = Modifier.fillMaxWidth()) {
+                if (!heroArt.isNullOrBlank()) {
+                    AsyncImage(
+                        model = heroArt,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (isWide) 220.dp else 216.dp)
+                            .alpha(0.35f),
+                    )
+                }
+
+                // Cinematic Liquid Glass Layer: Vertical Gradient + Subtle Frosting
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(if (isWide) 220.dp else 216.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFF00E5FF).copy(alpha = 0.14f),
+                                    Color(0xFF10131E).copy(alpha = 0.70f),
+                                    Color(0xFF0A0C14).copy(alpha = 0.96f),
+                                ),
+                            ),
                         ),
-                        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 10.dp),
-                        modifier = Modifier.height(44.dp),
+                )
+
+                // 3D Liquid Specular Diagonal Glass Sheen - Dynamically tracks tilt & touch
+                val sheenStartOffset = Offset(
+                    x = 50f + animatedTiltX * 240f,
+                    y = 20f + animatedTiltY * 180f,
+                )
+                val sheenEndOffset = Offset(
+                    x = 850f + animatedTiltX * 240f,
+                    y = 650f + animatedTiltY * 180f,
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(if (isWide) 220.dp else 216.dp)
+                        .background(
+                            Brush.linearGradient(
+                                0.0f to Color.Transparent,
+                                0.38f to Color.White.copy(alpha = 0.04f),
+                                0.50f to Color.White.copy(alpha = 0.20f),
+                                0.62f to Color.White.copy(alpha = 0.04f),
+                                1.0f to Color.Transparent,
+                                start = sheenStartOffset,
+                                end = sheenEndOffset,
+                            )
+                        )
+                )
+
+                // Razor-Thin 3D Specular Top Bevel Rim
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.5.dp)
+                        .align(Alignment.TopCenter)
+                        .clip(RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color.Transparent,
+                                    Color.White.copy(alpha = 0.85f),
+                                    Color(0xFF00E5FF).copy(alpha = 0.90f),
+                                    Color.White.copy(alpha = 0.50f),
+                                    Color.Transparent,
+                                )
+                            )
+                        )
+                )
+
+                // Content
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 22.dp, vertical = 22.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = "Neon Infinite Radio",
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontSize = 25.sp,
+                            letterSpacing = (-0.5).sp,
+                            fontWeight = FontWeight.Black,
+                        ),
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.semantics { heading() },
+                    )
+
+                    Text(
+                        text = "An endless station dynamically shaped by your listening",
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                        color = Color.White.copy(alpha = 0.78f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+
+                    Spacer(Modifier.height(4.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp), tint = Color.Black)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Play Neon Station", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.ExtraBold, color = Color.Black)
+                        // 3D Floating Neon Gradient Button
+                        Surface(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onPlay()
+                            },
+                            enabled = quickPicks.isNotEmpty(),
+                            shape = CircleShape,
+                            color = Color.Transparent,
+                            shadowElevation = 14.dp,
+                            modifier = Modifier
+                                .height(46.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(
+                                            Color(0xFF00E5FF),
+                                            Color(0xFF7C4DFF),
+                                        )
+                                    )
+                                )
+                                .border(
+                                    1.dp,
+                                    Color.White.copy(alpha = 0.45f),
+                                    CircleShape,
+                                ),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                            ) {
+                                Icon(
+                                    Icons.Filled.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(22.dp),
+                                    tint = Color.White,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Start Station",
+                                    style = MaterialTheme.typography.labelLarge.copy(fontSize = 15.sp),
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.White,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1262,9 +1447,42 @@ private fun QuickTileCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val tileShape = RoundedCornerShape(18.dp)
+    val tileShape = RoundedCornerShape(22.dp)
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
 
-    // Per-type vibrant gradient pairs for the artwork/icon box matching modern expressive designs
+    var touchTileX by remember { mutableStateOf(0f) }
+    var touchTileY by remember { mutableStateOf(0f) }
+    var isTileTouched by remember { mutableStateOf(false) }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "tileAmbient")
+    val ambientTileTilt by infiniteTransition.animateFloat(
+        initialValue = -1.6f,
+        targetValue = 1.6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(3400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "tileAmbientTilt",
+    )
+
+    val animatedTileX by animateFloatAsState(
+        targetValue = if (isTileTouched) touchTileX else 0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "tileTiltX",
+    )
+    val animatedTileY by animateFloatAsState(
+        targetValue = if (isTileTouched) touchTileY else 0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "tileTiltY",
+    )
+
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed || isTileTouched) 0.93f else 1.0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "tileScale",
+    )
+
     val isYtLikedTile = tile.collection == "yt_liked" || tile.playlistId == "yt_liked"
     val isLocalLikedTile = tile.isLiked && !isYtLikedTile
     val isLikedTile = isYtLikedTile || isLocalLikedTile
@@ -1273,149 +1491,250 @@ private fun QuickTileCard(
     val isDiscoverTile = tile.collection == "radio" || tile.title.equals("Discover", ignoreCase = true)
     val isNewReleasesTile = tile.collection == "new_releases"
 
-    val iconGradient = when {
-        isLikedTile -> Brush.linearGradient(
-            colors = listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.primary),
-        )
-        isMixTile -> Brush.linearGradient(
-            colors = listOf(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.secondary),
-        )
-        isMyMixTile -> Brush.linearGradient(
-            colors = listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)),
-        )
-        isDiscoverTile -> Brush.linearGradient(
-            colors = listOf(MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.tertiary),
-        )
-        isNewReleasesTile -> Brush.linearGradient(
-            colors = listOf(MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.error),
-        )
-        else -> Brush.linearGradient(
-            colors = listOf(
-                MaterialTheme.colorScheme.primaryContainer,
-                MaterialTheme.colorScheme.surfaceContainerHighest,
-            ),
-        )
+    // Vibrant 3D jewel color schemes
+    val (jewelColors, accentBorder) = when {
+        isLikedTile -> listOf(Color(0xFFFF2D55), Color(0xFFFF5277)) to listOf(Color(0xFFFF2D55), Color(0xFFFF85A1))
+        isMixTile -> listOf(Color(0xFF7C4DFF), Color(0xFF00E5FF)) to listOf(Color(0xFF7C4DFF), Color(0xFF00E5FF))
+        isMyMixTile -> listOf(Color(0xFF00E676), Color(0xFF00B0FF)) to listOf(Color(0xFF00E676), Color(0xFF00E5FF))
+        isDiscoverTile -> listOf(Color(0xFFFF9100), Color(0xFFFF3D00)) to listOf(Color(0xFFFF9100), Color(0xFFFF5252))
+        isNewReleasesTile -> listOf(Color(0xFFFF1744), Color(0xFFFF80AB)) to listOf(Color(0xFFFF1744), Color(0xFFFF4081))
+        else -> listOf(Color(0xFF00E5FF), Color(0xFF7C4DFF)) to listOf(Color(0xFF00E5FF), Color(0xFFB388FF))
     }
+
+    val iconGradient = Brush.radialGradient(
+        colors = listOf(
+            jewelColors[0].copy(alpha = 0.95f),
+            jewelColors[1].copy(alpha = 0.85f),
+            jewelColors[0].copy(alpha = 0.65f),
+        ),
+        center = Offset(40f, 40f),
+        radius = 220f,
+    )
 
     Surface(
         onClick = onClick,
+        interactionSource = interactionSource,
         shape = tileShape,
-        color = when {
-            isLikedTile -> MaterialTheme.colorScheme.primaryContainer
-            isMixTile -> MaterialTheme.colorScheme.secondaryContainer
-            isMyMixTile -> MaterialTheme.colorScheme.surfaceVariant
-            isDiscoverTile -> MaterialTheme.colorScheme.tertiaryContainer
-            isNewReleasesTile -> MaterialTheme.colorScheme.errorContainer
-            else -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.75f)
-        },
+        color = Color(0xFF131724).copy(alpha = 0.82f),
         border = BorderStroke(
-            1.dp,
+            1.2.dp,
             Brush.linearGradient(
                 listOf(
-                    Color(0xFF00E5FF).copy(alpha = 0.35f),
-                    Color(0xFFFF007F).copy(alpha = 0.25f),
+                    accentBorder[0].copy(alpha = if (isPressed || isTileTouched) 0.95f else 0.70f),
+                    accentBorder[1].copy(alpha = 0.35f),
+                    Color.White.copy(alpha = 0.15f),
                 )
             ),
         ),
+        shadowElevation = if (isPressed || isTileTouched) 18.dp else 12.dp,
         modifier = modifier
-            .width(136.dp),
+            .width(142.dp)
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull()
+                        if (change != null) {
+                            if (change.pressed) {
+                                val w = size.width.toFloat()
+                                val h = size.height.toFloat()
+                                if (w > 0f && h > 0f) {
+                                    touchTileX = ((change.position.x - w / 2f) / (w / 2f)).coerceIn(-1f, 1f)
+                                    touchTileY = ((change.position.y - h / 2f) / (h / 2f)).coerceIn(-1f, 1f)
+                                    isTileTouched = true
+                                }
+                            } else {
+                                isTileTouched = false
+                                touchTileX = 0f
+                                touchTileY = 0f
+                            }
+                        } else {
+                            isTileTouched = false
+                            touchTileX = 0f
+                            touchTileY = 0f
+                        }
+                    }
+                }
+            }
+            .graphicsLayer {
+                rotationY = (animatedTileX * 12f) + (if (isTileTouched) 0f else ambientTileTilt)
+                rotationX = (-animatedTileY * 10f)
+                cameraDistance = 16f * density
+                scaleX = scale
+                scaleY = scale
+            },
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(10.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            // 3D Liquid Specular Diagonal Glass Reflection - tracks touch tilt
+            val tileSheenStart = Offset(
+                x = 10f + animatedTileX * 120f,
+                y = 10f + animatedTileY * 100f,
+            )
+            val tileSheenEnd = Offset(
+                x = 350f + animatedTileX * 120f,
+                y = 450f + animatedTileY * 100f,
+            )
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.linearGradient(
+                            0.0f to Color.Transparent,
+                            0.35f to Color.White.copy(alpha = 0.04f),
+                            0.50f to Color.White.copy(alpha = 0.18f),
+                            0.65f to Color.White.copy(alpha = 0.02f),
+                            1.0f to Color.Transparent,
+                            start = tileSheenStart,
+                            end = tileSheenEnd,
+                        )
+                    )
+            )
+
+            // Razor-thin 3D Specular Top Bevel
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(iconGradient),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (isYtLikedTile) {
-                    Icon(
-                        Icons.Filled.ThumbUp,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(36.dp),
+                    .height(1.2.dp)
+                    .align(Alignment.TopCenter)
+                    .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                Color.Transparent,
+                                Color.White.copy(alpha = 0.75f),
+                                Color.Transparent,
+                            )
+                        )
                     )
-                } else if (isLocalLikedTile) {
-                    Icon(
-                        Icons.Filled.Favorite,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(36.dp),
-                    )
-                } else if (isMixTile) {
-                    Icon(
-                        Icons.Filled.AutoAwesome,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.size(36.dp),
-                    )
-                } else if (isMyMixTile) {
-                    Icon(
-                        Icons.Filled.AllInclusive,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(36.dp),
-                    )
-                } else if (isDiscoverTile) {
-                    Icon(
-                        Icons.Filled.Explore,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                        modifier = Modifier.size(36.dp),
-                    )
-                } else if (isNewReleasesTile) {
-                    Icon(
-                        Icons.Filled.NewReleases,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.size(36.dp),
-                    )
-                } else {
-                    ArtworkImage(
-                        name = tile.title,
-                        artist = tile.subtitle ?: "",
-                        embeddedUrl = tile.artworkUrl,
-                        fallbackIcon = Icons.Filled.Album,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-            }
+            )
 
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp, start = 2.dp, end = 2.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                    .fillMaxSize()
+                    .padding(11.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text(
-                    text = tile.title,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 13.sp,
-                        lineHeight = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                    ),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                val finalSubtitle = if (isNewReleasesTile) "Fresh drops" else tile.subtitle ?: if (tile.actionVideoId != null) "Track" else "Playlist"
-                if (finalSubtitle.isNotEmpty()) {
-                    Text(
-                        text = finalSubtitle,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontSize = 11.sp,
-                            lineHeight = 14.sp,
+                // 3D Floating Jewel Icon / Artwork Container
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(iconGradient)
+                        .border(
+                            1.dp,
+                            Brush.linearGradient(
+                                listOf(
+                                    Color.White.copy(alpha = 0.50f),
+                                    Color.White.copy(alpha = 0.10f),
+                                    accentBorder[0].copy(alpha = 0.30f),
+                                )
+                            ),
+                            RoundedCornerShape(16.dp),
                         ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // Jewel Corner Highlight Spot
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .align(Alignment.TopStart)
+                            .padding(4.dp)
+                            .background(
+                                Brush.radialGradient(
+                                    listOf(
+                                        Color.White.copy(alpha = 0.40f),
+                                        Color.Transparent,
+                                    )
+                                ),
+                                CircleShape,
+                            )
                     )
+
+                    if (isYtLikedTile) {
+                        Icon(
+                            Icons.Filled.ThumbUp,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(36.dp),
+                        )
+                    } else if (isLocalLikedTile) {
+                        Icon(
+                            Icons.Filled.Favorite,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(36.dp),
+                        )
+                    } else if (isMixTile) {
+                        Icon(
+                            Icons.Filled.AutoAwesome,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(36.dp),
+                        )
+                    } else if (isMyMixTile) {
+                        Icon(
+                            Icons.Filled.AllInclusive,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(36.dp),
+                        )
+                    } else if (isDiscoverTile) {
+                        Icon(
+                            Icons.Filled.Explore,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(36.dp),
+                        )
+                    } else if (isNewReleasesTile) {
+                        Icon(
+                            Icons.Filled.NewReleases,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(36.dp),
+                        )
+                    } else {
+                        ArtworkImage(
+                            name = tile.title,
+                            artist = tile.subtitle ?: "",
+                            embeddedUrl = tile.artworkUrl,
+                            fallbackIcon = Icons.Filled.Album,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 9.dp, start = 2.dp, end = 2.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = tile.title,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 13.5.sp,
+                            lineHeight = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        color = Color.White,
+                    )
+                    val finalSubtitle = if (isNewReleasesTile) "Fresh drops" else tile.subtitle ?: if (tile.actionVideoId != null) "Track" else "Playlist"
+                    if (finalSubtitle.isNotEmpty()) {
+                        Text(
+                            text = finalSubtitle,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 11.sp,
+                                lineHeight = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = Color.White.copy(alpha = 0.65f),
+                        )
+                    }
                 }
             }
         }
@@ -1475,21 +1794,28 @@ private fun QuickPicksRows(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
-                            Box(modifier = Modifier.size(48.dp)) {
-                                ArtworkImage(
-                                    name = track.title,
-                                    artist = ArtistHelper.primaryArtist(track.artist),
-                                    embeddedUrl = track.artworkUrl,
-                                    fallbackIcon = Icons.Filled.MusicNote,
-                                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
-                                )
-                                if (isCurrent && isPlaying) {
-                                    PlayingWaveBars(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .padding(2.dp)
-                                            .size(24.dp, 18.dp),
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                shadowElevation = 8.dp,
+                                color = Color(0xFF10131E),
+                                modifier = Modifier.size(48.dp),
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    ArtworkImage(
+                                        name = track.title,
+                                        artist = ArtistHelper.primaryArtist(track.artist),
+                                        embeddedUrl = track.artworkUrl,
+                                        fallbackIcon = Icons.Filled.MusicNote,
+                                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
                                     )
+                                    if (isCurrent && isPlaying) {
+                                        PlayingWaveBars(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(2.dp)
+                                                .size(24.dp, 18.dp),
+                                        )
+                                    }
                                 }
                             }
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -1556,11 +1882,23 @@ private fun FeedMediaCard(
     cardWidth: androidx.compose.ui.unit.Dp = 148.dp,
 ) {
     val haptics = LocalHapticFeedback.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1.0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "mediaCardScale",
+    )
+
     Column(
         modifier = Modifier
             .width(cardWidth)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .combinedClickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
                 onLongClick = onLongClick,
                 onClick = {
@@ -1576,6 +1914,7 @@ private fun FeedMediaCard(
             Surface(
                 shape = RoundedCornerShape(18.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shadowElevation = if (isPressed) 10.dp else 4.dp,
                 tonalElevation = 1.dp,
                 modifier = Modifier.fillMaxSize(),
             ) {
@@ -1586,6 +1925,22 @@ private fun FeedMediaCard(
                         embeddedUrl = artworkUrl,
                         fallbackIcon = fallbackIcon,
                         modifier = Modifier.fillMaxSize(),
+                    )
+                    // 3D razor specular top bevel
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.2.dp)
+                            .align(Alignment.TopCenter)
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color.Transparent,
+                                        Color.White.copy(alpha = if (isPressed) 0.60f else 0.35f),
+                                        Color.Transparent,
+                                    )
+                                )
+                            )
                     )
                     if (badgeText != null) {
                         Surface(

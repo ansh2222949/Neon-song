@@ -96,6 +96,16 @@ class FeedViewModel @Inject constructor(
                 _uiState.update { it.copy(avatarUrl = stats.avatarUrl) }
             }
         }
+        viewModelScope.launch {
+            musicPlayer.state
+                .map { state -> state.current?.videoId ?: state.current?.title }
+                .distinctUntilChanged()
+                .collect { currentKey ->
+                    if (!currentKey.isNullOrBlank()) {
+                        lastLoadedMillis = 0L
+                    }
+                }
+        }
     }
 
     fun loadFeed() = fetchFeed(refreshing = false)
@@ -104,10 +114,6 @@ class FeedViewModel @Inject constructor(
 
     fun onVisible() {
         if (feedJob?.isActive == true) return
-        // ON_START fires on every return from a pushed screen (artist, album,
-        // playlist...). Reloading the whole feed each time kept the tabs in
-        // a near-constant loading state and hammered the network — only
-        // refresh when there's nothing yet or the data is stale.
         val hasContent = _uiState.value.feedData.quickPicks.isNotEmpty() ||
             _uiState.value.feedData.topArtists.isNotEmpty() ||
             _uiState.value.feedData.newReleases.isNotEmpty()
@@ -117,8 +123,18 @@ class FeedViewModel @Inject constructor(
 
     fun playInfiniteRadio() {
         val feed = _uiState.value.feedData
-        (feed.quickPicks + feed.ytLikedSongs + feed.freshFinds).randomOrNull()?.let {
-            playTrack(it, "Infinite Radio")
+        val pool = (feed.quickPicks + feed.ytLikedSongs + feed.freshFinds).filter { it.videoId.isNotBlank() }
+        val seed = pool.randomOrNull() ?: return
+        viewModelScope.launch {
+            val related = runCatching {
+                innerTube.fetchRelatedSongs(seed.videoId, limit = 30, prefetchStreams = false)
+            }.getOrDefault(emptyList())
+            val queue = (listOf(seed) + related).distinctBy(YouTubeMusicTrack::videoId)
+            if (queue.isNotEmpty()) {
+                playTracksQueue(queue, startIndex = 0, sourceLabel = "Neon Infinite Radio")
+            } else {
+                playTrack(seed, "Neon Infinite Radio")
+            }
         }
     }
 
@@ -339,6 +355,6 @@ class FeedViewModel @Inject constructor(
     )
 
     private companion object {
-        const val STALE_AFTER_MILLIS = 90_000L
+        const val STALE_AFTER_MILLIS = 35_000L
     }
 }

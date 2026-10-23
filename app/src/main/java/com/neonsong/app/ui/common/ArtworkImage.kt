@@ -1,9 +1,18 @@
 package com.neonsong.app.ui.common
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -49,6 +58,7 @@ fun ArtworkImage(
     alignment: Alignment = Alignment.Center,
     transformations: List<Transformation> = emptyList(),
     crossfade: Boolean = true,
+    enable3DGlass: Boolean = true,
     artworkViewModel: ArtworkViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -110,6 +120,60 @@ fun ArtworkImage(
                     }
                 },
             )
+
+            if (enable3DGlass) {
+                // 3D Liquid Glass diagonal specular sheen
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.linearGradient(
+                                0.0f to Color.Transparent,
+                                0.36f to Color.White.copy(alpha = 0.02f),
+                                0.50f to Color.White.copy(alpha = 0.16f),
+                                0.64f to Color.White.copy(alpha = 0.02f),
+                                1.0f to Color.Transparent,
+                                start = Offset(0f, 0f),
+                                end = Offset(250f, 250f),
+                            )
+                        )
+                )
+
+                // Razor-Thin 3D Specular Top Bevel Rim
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .align(Alignment.TopCenter)
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color.Transparent,
+                                    Color.White.copy(alpha = 0.65f),
+                                    Color.Transparent,
+                                )
+                            )
+                        )
+                )
+
+                // 3D Glass Perimeter Border
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .border(
+                            BorderStroke(
+                                0.7.dp,
+                                Brush.verticalGradient(
+                                    listOf(
+                                        Color.White.copy(alpha = 0.28f),
+                                        Color.Transparent,
+                                        Color.Black.copy(alpha = 0.35f),
+                                    )
+                                ),
+                            )
+                        )
+                )
+            }
         } else {
             Icon(
                 fallbackIcon,

@@ -56,6 +56,8 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -154,6 +156,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -356,8 +359,9 @@ class PlayerViewModel @Inject constructor(
             runCatching {
                 val mvId = searchRepository.get().findMusicVideo(track.title, track.artist, targetDurationMs = track.durationMs)
                     ?: track.videoId
-                if (!mvId.isNullOrBlank()) {
-                    _resolvedMusicVideoIds.update { it + (key to mvId) }
+                val cleanId = mvId?.takeIf { it.isNotBlank() }?.let { extractYouTubeVideoId(it) }
+                if (!cleanId.isNullOrBlank()) {
+                    _resolvedMusicVideoIds.update { it + (key to cleanId) }
                 }
             }
         }
@@ -530,8 +534,12 @@ class PlayerViewModel @Inject constructor(
      */
     private suspend fun waitUntilAudible(track: PlayableTrack) {
         withTimeoutOrNull(8_000L) {
-            player.state.drop(1).first { state ->
-                val same = track.videoId.isNullOrBlank() || state.current?.videoId == track.videoId
+            player.state.first { state ->
+                val same = if (!track.videoId.isNullOrBlank()) {
+                    state.current?.videoId == track.videoId
+                } else {
+                    state.current?.title == track.title && state.current?.artist == track.artist
+                }
                 same && state.isPlaying && !state.isBuffering && state.error == null
             }
         }
@@ -1624,8 +1632,13 @@ private fun AddToPlaylistDialog(
     val scope = rememberCoroutineScope()
     val trackKey = remember(track.title, track.artist) { track.toGeneratedTrack().key }
     val selectedPlaylists = sanitizedPlaylists.filter { it.id in selectedPlaylistIds }
-    val playlistListMaxHeight = (LocalConfiguration.current.screenHeightDp.dp - 360.dp)
-        .coerceIn(180.dp, 410.dp)
+    val config = LocalConfiguration.current
+    val isLandscapeDialog = config.screenWidthDp > config.screenHeightDp
+    val playlistListMaxHeight = if (isLandscapeDialog) {
+        (config.screenHeightDp.dp - 210.dp).coerceIn(96.dp, 220.dp)
+    } else {
+        (config.screenHeightDp.dp - 360.dp).coerceIn(180.dp, 410.dp)
+    }
 
     LaunchedEffect(sanitizedPlaylists.map(SavedPlaylist::id)) {
         selectedPlaylistIds = selectedPlaylistIds.intersect(sanitizedPlaylists.mapTo(mutableSetOf(), SavedPlaylist::id))
@@ -2209,16 +2222,17 @@ private fun FullPlayer(
     val trackIdentity = remember(track.videoId, track.title, track.artist) { "${track.videoId}_${track.title}_${track.artist}" }
     var isVideoMode by rememberSaveable(trackIdentity) { mutableStateOf(false) }
     var isVideoFullscreen by rememberSaveable(trackIdentity) { mutableStateOf(false) }
-    var resumeAudioAfterVideo by remember(trackIdentity) { mutableStateOf(false) }
-    var videoPositionMs by remember(trackIdentity) { mutableLongStateOf(0L) }
-    var videoDurationMs by remember(trackIdentity) { mutableLongStateOf(0L) }
-    var isVideoPlaying by remember(trackIdentity) { mutableStateOf(true) }
+    var resumeAudioAfterVideo by rememberSaveable(trackIdentity) { mutableStateOf(false) }
+    var videoPositionMs by rememberSaveable(trackIdentity) { mutableLongStateOf(0L) }
+    var videoDurationMs by rememberSaveable(trackIdentity) { mutableLongStateOf(0L) }
+    var isVideoPlaying by rememberSaveable(trackIdentity) { mutableStateOf(true) }
     var videoSeekCommandSeconds by remember(trackIdentity) { mutableStateOf<Float?>(null) }
 
+    val view = LocalView.current
     val enterVideoMode = {
         if (hasVideo && !isVideoMode) {
             resumeAudioAfterVideo = state.isPlaying || state.isBuffering
-            videoPositionMs = player.state.value.positionMs.coerceAtLeast(0L)
+            videoPositionMs = progressState.value.positionMs.coerceAtLeast(0L)
             player.pause()
             isVideoPlaying = true
             isVideoMode = true
@@ -2227,6 +2241,9 @@ private fun FullPlayer(
 
     val closeVideoMode = {
         releaseMusicVideo()
+        val activity = generateSequence(view.context) { (it as? android.content.ContextWrapper)?.baseContext }
+            .filterIsInstance<android.app.Activity>().firstOrNull()
+        activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         isVideoFullscreen = false
         isVideoMode = false
         if (videoPositionMs > 0L) {
@@ -2240,6 +2257,59 @@ private fun FullPlayer(
             isVideoFullscreen = false
         } else {
             closeVideoMode()
+        }
+    }
+
+    // Auto-switch from video to background voice/audio on screen off or device lock
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(view.context, isVideoMode, lifecycleOwner) {
+        if (!isVideoMode) return@DisposableEffect onDispose {}
+        val ctx = view.context
+        val powerManager = ctx.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+
+        fun switchToVoice() {
+            if (isVideoMode) {
+                val currentPos = videoPositionMs.coerceAtLeast(0L)
+                closeVideoMode()
+                player.seekTo(currentPos)
+                player.resume()
+            }
+        }
+
+        val screenOffReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: android.content.Intent?) {
+                if (intent?.action == android.content.Intent.ACTION_SCREEN_OFF) {
+                    switchToVoice()
+                }
+            }
+        }
+        val filter = android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF)
+        androidx.core.content.ContextCompat.registerReceiver(
+            ctx,
+            screenOffReceiver,
+            filter,
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+
+        val lifecycleObserver = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                if (powerManager?.isInteractive == false) {
+                    switchToVoice()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
+
+        onDispose {
+            runCatching { ctx.unregisterReceiver(screenOffReceiver) }
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
+        }
+    }
+
+    // Ensure WebView never leaks audio if track changes or FullPlayer is closed
+    DisposableEffect(trackIdentity) {
+        onDispose {
+            releaseMusicVideo()
         }
     }
 
@@ -2257,8 +2327,10 @@ private fun FullPlayer(
     var showLyricsOffsetDialog by remember { mutableStateOf(false) }
     var showSignalPath by remember { mutableStateOf(false) }
     val signalPath by player.signalPath.collectAsStateWithLifecycle()
+    val configuration = LocalConfiguration.current
+    val isLandscapeScreen = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val isCanvasActive = canvasEnabled && canvas != null
-    val showFullBleed = canvasFullBleedEnabled
+    val showFullBleed = canvasFullBleedEnabled && !isLandscapeScreen
     val showSleeveCanvas = isCanvasActive && !showFullBleed
     // activeCanvas is the single gate every render branch below keys off, so it also
     // carries the Animated Album Canvas toggle. The ViewModel nulls canvasState
@@ -2279,7 +2351,45 @@ private fun FullPlayer(
     var canvasAspect by remember(activeCanvas?.url) { mutableFloatStateOf(0f) }
     var canvasRendered by remember(activeCanvas?.url) { mutableStateOf(false) }
     var lyricsFullscreen by remember(currentTab) { mutableStateOf(false) }
-    val view = LocalView.current
+    var lastFullscreenTime by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(isVideoFullscreen) {
+        if (isVideoFullscreen) {
+            lastFullscreenTime = SystemClock.uptimeMillis()
+        }
+    }
+
+    DisposableEffect(view, isVideoMode, isVideoFullscreen) {
+        if (!isVideoMode) return@DisposableEffect onDispose {}
+        val activity = generateSequence(view.context) { (it as? android.content.ContextWrapper)?.baseContext }
+            .filterIsInstance<android.app.Activity>().firstOrNull()
+
+        val listener = object : android.view.OrientationEventListener(view.context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                val now = SystemClock.uptimeMillis()
+                if (isVideoFullscreen && now - lastFullscreenTime > 700L) {
+                    val isStraightUp = orientation in 335..360 || orientation in 0..25
+                    if (isStraightUp) {
+                        isVideoFullscreen = false
+                        activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                    }
+                } else if (!isVideoFullscreen && isVideoMode) {
+                    val isSideways = orientation in 70..110 || orientation in 250..290
+                    if (isSideways) {
+                        isVideoFullscreen = true
+                        activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    }
+                }
+            }
+        }
+        if (listener.canDetectOrientation()) {
+            listener.enable()
+        }
+        onDispose {
+            listener.disable()
+        }
+    }
+
     DisposableEffect(view, lyricsFullscreen, isVideoFullscreen) {
         val fullscreenActive = lyricsFullscreen || isVideoFullscreen
         val activity = generateSequence(view.context) { (it as? android.content.ContextWrapper)?.baseContext }
@@ -2289,11 +2399,17 @@ private fun FullPlayer(
         if (fullscreenActive) {
             controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller?.hide(WindowInsetsCompat.Type.systemBars())
+            if (isVideoFullscreen) {
+                activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            }
         }
         onDispose {
             if (fullscreenActive) {
                 controller?.show(WindowInsetsCompat.Type.systemBars())
                 previousBehavior?.let { controller.systemBarsBehavior = it }
+                if (isVideoFullscreen) {
+                    activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                }
             }
         }
     }
@@ -2351,9 +2467,16 @@ private fun FullPlayer(
                 val p = palette.vibrantSwatch ?: palette.dominantSwatch ?: palette.mutedSwatch
                 val s = palette.lightVibrantSwatch ?: palette.darkVibrantSwatch ?: palette.mutedSwatch ?: palette.dominantSwatch
                 val t = palette.darkVibrantSwatch ?: palette.darkMutedSwatch ?: palette.dominantSwatch
-                if (p != null) ambientPrimary = Color(p.rgb)
-                if (s != null) ambientSecondary = Color(s.rgb)
-                if (t != null) ambientTertiary = Color(t.rgb)
+                fun boostVibrance(colorInt: Int, satBoost: Float = 1.35f, minSat: Float = 0.65f, minLight: Float = 0.38f, maxLight: Float = 0.60f): Color {
+                    val hsl = FloatArray(3)
+                    androidx.core.graphics.ColorUtils.colorToHSL(colorInt, hsl)
+                    hsl[1] = (hsl[1] * satBoost).coerceIn(minSat, 1.0f)
+                    hsl[2] = hsl[2].coerceIn(minLight, maxLight)
+                    return Color(androidx.core.graphics.ColorUtils.HSLToColor(hsl))
+                }
+                if (p != null) ambientPrimary = boostVibrance(p.rgb, satBoost = 1.40f, minSat = 0.70f, minLight = 0.40f, maxLight = 0.62f)
+                if (s != null) ambientSecondary = boostVibrance(s.rgb, satBoost = 1.30f, minSat = 0.60f, minLight = 0.45f, maxLight = 0.70f)
+                if (t != null) ambientTertiary = boostVibrance(t.rgb, satBoost = 1.30f, minSat = 0.60f, minLight = 0.22f, maxLight = 0.42f)
             }
         }
     }
@@ -2363,7 +2486,7 @@ private fun FullPlayer(
         label = "playerAmbientColor",
     )
     val ambientCompanion by animateColorAsState(
-        targetValue = ambientSecondary ?: androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.tertiary, ambientColor, 0.42f),
+        targetValue = ambientSecondary ?: androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.tertiary, ambientColor, 0.48f),
         animationSpec = tween(700),
         label = "playerAmbientCompanion",
     )
@@ -2385,7 +2508,10 @@ private fun FullPlayer(
                 when {
                     currentTab != FullPlayerTab.NOW_PLAYING && dismissDragY > swipeThreshold -> onTabChange(FullPlayerTab.NOW_PLAYING)
                     currentTab == FullPlayerTab.NOW_PLAYING && dismissDragY < -swipeThreshold -> onTabChange(FullPlayerTab.QUEUE)
-                    currentTab == FullPlayerTab.NOW_PLAYING && dismissDragY > swipeThreshold -> onCollapse()
+                    currentTab == FullPlayerTab.NOW_PLAYING && dismissDragY > swipeThreshold -> {
+                        if (isVideoMode) closeVideoMode()
+                        onCollapse()
+                    }
                 }
                 dismissDragY = 0f
             },
@@ -2417,12 +2543,13 @@ private fun FullPlayer(
                 val playerHeight = size.height.coerceAtLeast(1f)
                 alpha = (1f - shownDismissY.coerceAtLeast(0f) / (playerHeight * 1.5f)).coerceIn(0.72f, 1f)
             }
-            .playerVerticalSwipe(enabled = currentTab == FullPlayerTab.NOW_PLAYING),
+            .playerVerticalSwipe(enabled = currentTab == FullPlayerTab.NOW_PLAYING && !isLandscapeScreen),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val bgWidth = constraints.maxWidth.toFloat()
             val bgHeight = constraints.maxHeight.toFloat()
             val bgMaxDimension = maxOf(bgWidth, bgHeight, 1f)
+            val isLandscape = constraints.maxWidth > constraints.maxHeight
             var heroBottomPx by remember { mutableFloatStateOf(0f) }
 
             Box(Modifier.matchParentSize().liquidGlassSource(if (fullGlass) playerBackdrop else null)) {
@@ -2599,7 +2726,7 @@ private fun FullPlayer(
                             presentationAlpha = { heroAlpha },
                             onAspectRatioChanged = { canvasAspect = it },
                             onRenderedChanged = { canvasRendered = it },
-                            pausedForTransition = shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,
+                            pausedForTransition = isVideoMode || shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,
                             modifier = Modifier
                                 .align(Alignment.TopStart)
                                 .fillMaxWidth()
@@ -2641,8 +2768,8 @@ private fun FullPlayer(
                 if (!lyricsFullscreen) Box(
                     Modifier
                         .fillMaxWidth()
-                        .adaptiveContentWidth(maxWidth = 640.dp)
-                        .height(52.dp)
+                        .adaptiveContentWidth(maxWidth = if (isLandscape) 1100.dp else 640.dp)
+                        .height(if (isLandscape) 44.dp else 52.dp)
                         .padding(horizontal = 20.dp)
                         .playerVerticalSwipe(enabled = currentTab != FullPlayerTab.NOW_PLAYING),
                 ) {
@@ -2751,7 +2878,7 @@ private fun FullPlayer(
 
                 AnimatedContent(
                     targetState = currentTab,
-                    modifier = Modifier.weight(1f).adaptiveContentWidth(maxWidth = 680.dp),
+                    modifier = Modifier.weight(1f).adaptiveContentWidth(maxWidth = if (isLandscape) 1100.dp else 680.dp),
                     transitionSpec = {
                         // Matched fade durations keep both layers visible
                         // throughout the crossfade so the background never
@@ -2863,10 +2990,7 @@ private fun FullPlayer(
                                     animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioMediumBouncy),
                                     label = "spatialTiltY",
                                 )
-                                Column(
-                                    Modifier.fillMaxSize().padding(horizontal = 20.dp).padding(bottom = 18.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                ) {
+                                val artworkContent = @Composable { artworkMod: Modifier ->
                                     val hasArtwork = !track.artworkUrl.isNullOrBlank() || !resolvedAmbientUrl.isNullOrBlank() || activeCanvas != null
                                     val sleeveAlpha by animateFloatAsState(
                                         targetValue = if (showFullBleed && activeCanvas != null) 0f else 1f,
@@ -2875,9 +2999,7 @@ private fun FullPlayer(
                                     )
 
                                     BoxWithConstraints(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .weight(1f)
+                                        modifier = artworkMod
                                             .onGloballyPositioned { coordinates ->
                                                 val rootPos = coordinates.positionInRoot()
                                                 val bottom = rootPos.y + coordinates.size.height
@@ -2900,8 +3022,14 @@ private fun FullPlayer(
                                                         if (!change.pressed) {
                                                             if (isDrag) {
                                                                 when {
-                                                                    artworkDragX < -swipeThreshold -> player.next()
-                                                                    artworkDragX > swipeThreshold -> player.previous()
+                                                                    artworkDragX < -swipeThreshold -> {
+                                                                        if (isVideoMode) closeVideoMode()
+                                                                        player.next()
+                                                                    }
+                                                                    artworkDragX > swipeThreshold -> {
+                                                                        if (isVideoMode) closeVideoMode()
+                                                                        player.previous()
+                                                                    }
                                                                 }
                                                                 artworkDragX = 0f
                                                             } else {
@@ -2938,8 +3066,15 @@ private fun FullPlayer(
                                                                         seekOverlayDirection = side
                                                                         lastTapTimestamp = now
                                                                         val deltaMs = if (side == SeekDirection.FORWARD) 5_000L else -5_000L
-                                                                        val newPos = (player.state.value.positionMs + deltaMs).coerceIn(0L, player.state.value.durationMs.coerceAtLeast(0L))
-                                                                        player.seekTo(newPos)
+                                                                        if (isVideoMode) {
+                                                                            val maxDur = if (videoDurationMs > 0L) videoDurationMs else (track.durationMs ?: state.durationMs).coerceAtLeast(0L)
+                                                                            val newPos = (videoPositionMs + deltaMs).coerceIn(0L, maxDur)
+                                                                            videoPositionMs = newPos
+                                                                            videoSeekCommandSeconds = newPos / 1000f
+                                                                        } else {
+                                                                            val newPos = (player.state.value.positionMs + deltaMs).coerceIn(0L, player.state.value.durationMs.coerceAtLeast(0L))
+                                                                            player.seekTo(newPos)
+                                                                        }
 
                                                                         seekResetJob?.cancel()
                                                                         seekResetJob = coroutineScope.launch {
@@ -2985,7 +3120,8 @@ private fun FullPlayer(
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         if (isVideoMode && hasVideo) {
-                                            val videoCardWidth = (minOf(maxWidth, 420.dp) - 8.dp).coerceAtLeast(240.dp)
+                                            val maxVidW = minOf(maxWidth, if (isLandscape) ((maxHeight - 20.dp) * 16f / 9f) else 420.dp)
+                                            val videoCardWidth = (maxVidW - 8.dp).coerceAtLeast(240.dp)
                                             Box(
                                                 modifier = Modifier
                                                     .width(videoCardWidth)
@@ -3083,9 +3219,9 @@ private fun FullPlayer(
                                                 }
                                             }
                                         } else {
-                                            val artworkSize = (minOf(maxWidth, maxHeight) - 6.dp)
+                                            val artworkSize = (minOf(maxWidth, maxHeight) - if (isLandscape) 28.dp else 8.dp)
                                                 .coerceAtLeast(0.dp)
-                                                .coerceAtMost(370.dp)
+                                                .coerceAtMost(if (isLandscape) 275.dp else 370.dp)
 
                                         if (sleeveAlpha > 0.001f) {
                                             val glowAlpha by animateFloatAsState(
@@ -3203,7 +3339,7 @@ private fun FullPlayer(
                                                         corner = 32.dp,
                                                         canvas = if (showSleeveCanvas) canvas else null,
                                                         isPlaying = state.isPlaying,
-                                                        pausedForTransition = shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,
+                                                        pausedForTransition = isVideoMode || shownDismissY > 0f || currentTab != FullPlayerTab.NOW_PLAYING,
                                                         onAspectRatioChanged = { canvasAspect = it },
                                                     )
 
@@ -3341,10 +3477,11 @@ private fun FullPlayer(
                                             }
                                         }
                                     }
-                                    Spacer(Modifier.height(8.dp))
+                                }
+                                val controlsContent = @Composable { controlsMod: Modifier ->
+                                    val verticalGap = if (isLandscape) 5.dp else 12.dp
                                     Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
+                                        modifier = controlsMod
                                             .graphicsLayer {
                                                 translationX = spatialTiltX * 0.35f
                                                 translationY = spatialTiltY * 0.20f
@@ -3378,14 +3515,17 @@ private fun FullPlayer(
                                                 brush = trackInfoBorderBrush,
                                                 shape = trackInfoShape,
                                             )
-                                            .padding(horizontal = 18.dp, vertical = 13.dp),
+                                            .padding(
+                                                horizontal = if (isLandscape) 14.dp else 18.dp,
+                                                vertical = if (isLandscape) 6.dp else 13.dp,
+                                            ),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Column(Modifier.weight(1f)) {
                                             Text(
                                                 track.title,
                                                 style = MaterialTheme.typography.headlineSmall.copy(
-                                                    fontSize = 22.sp,
+                                                    fontSize = if (isLandscape) 18.sp else 22.sp,
                                                     letterSpacing = (-0.4).sp,
                                                     fontWeight = FontWeight.ExtraBold,
                                                 ),
@@ -3400,7 +3540,7 @@ private fun FullPlayer(
                                                         initialDelayMillis = 900,
                                                     ),
                                             )
-                                            Spacer(Modifier.height(4.dp))
+                                            Spacer(Modifier.height(2.dp))
                                             val splitArtists = remember(track.artist) {
                                                 com.neonsong.app.util.ArtistHelper.splitArtists(track.artist)
                                             }
@@ -3412,7 +3552,7 @@ private fun FullPlayer(
                                                     Text(
                                                         text = artName,
                                                         style = MaterialTheme.typography.titleMedium.copy(
-                                                            fontSize = 15.sp,
+                                                            fontSize = if (isLandscape) 13.sp else 15.sp,
                                                             fontWeight = FontWeight.SemiBold,
                                                         ),
                                                         color = Color.White.copy(alpha = 0.82f),
@@ -3426,7 +3566,7 @@ private fun FullPlayer(
                                                         Text(
                                                             text = " • ",
                                                             style = MaterialTheme.typography.titleMedium.copy(
-                                                                fontSize = 14.sp,
+                                                                fontSize = 13.sp,
                                                                 fontWeight = FontWeight.Normal,
                                                             ),
                                                             color = Color.White.copy(alpha = 0.45f),
@@ -3483,7 +3623,7 @@ private fun FullPlayer(
                                                 if (isLiked) Color(0xFFFF2D55).copy(alpha = 0.40f) else Color.White.copy(alpha = 0.18f),
                                             ),
                                             modifier = Modifier
-                                                .size(48.dp)
+                                                .size(if (isLandscape) 38.dp else 48.dp)
                                                 .graphicsLayer {
                                                     scaleX = likeScale
                                                     scaleY = likeScale
@@ -3494,7 +3634,7 @@ private fun FullPlayer(
                                                     if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
                                                     contentDescription = if (isLiked) "Unlike song" else "Like song",
                                                     modifier = Modifier
-                                                        .size(24.dp)
+                                                        .size(if (isLandscape) 19.dp else 24.dp)
                                                         .graphicsLayer {
                                                             scaleX = likeHeartPulse
                                                             scaleY = likeHeartPulse
@@ -3503,7 +3643,7 @@ private fun FullPlayer(
                                             }
                                         }
                                     }
-                                    Spacer(Modifier.height(14.dp))
+                                    Spacer(Modifier.height(verticalGap))
                                     val effectiveProgressState = if (isVideoMode) videoProgressFlow else progressState
                                     SeekBar(
                                         progressState = effectiveProgressState,
@@ -3525,11 +3665,12 @@ private fun FullPlayer(
                                         tertiaryColor = ambientDeep,
                                         onScrubbingChange = { isScrubbing = it },
                                     )
-                                    Spacer(Modifier.height(14.dp))
+                                    Spacer(Modifier.height(verticalGap))
                                     MainControls(
                                         state = state,
                                         player = player,
                                         isTranslucent = true,
+                                        compact = isLandscape,
                                         overridePlaying = if (isVideoMode) isVideoPlaying else null,
                                         onTogglePlay = if (isVideoMode) { { isVideoPlaying = !isVideoPlaying } } else null,
                                         onNext = if (isVideoMode) { { closeVideoMode(); player.next() } } else null,
@@ -3538,7 +3679,7 @@ private fun FullPlayer(
                                         ambientCompanion = ambientCompanion,
                                     )
                                     }
-                                    Spacer(Modifier.height(18.dp))
+                                    Spacer(Modifier.height(if (isLandscape) 6.dp else 16.dp))
                                     PlayerFloatingDock(
                                         state = state,
                                         player = player,
@@ -3550,45 +3691,94 @@ private fun FullPlayer(
                                             if (isVideoMode) closeVideoMode() else enterVideoMode()
                                         },
                                         onOpenSignalPath = { showSignalPath = true },
+                                        compact = isLandscape,
                                     )
                                 }
+
+                                if (isLandscape) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 24.dp)
+                                            .padding(bottom = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(24.dp),
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxHeight(),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            artworkContent(Modifier.fillMaxSize())
+                                        }
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1.25f)
+                                                .fillMaxHeight(),
+                                            verticalArrangement = Arrangement.Center,
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                        ) {
+                                            controlsContent(Modifier.fillMaxWidth())
+                                        }
+                                    }
+                                } else {
+                                    Column(
+                                        Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 20.dp)
+                                            .padding(bottom = 18.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .weight(1f),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            artworkContent(Modifier.fillMaxSize())
+                                        }
+                                        Spacer(Modifier.height(8.dp))
+                                        controlsContent(Modifier.fillMaxWidth())
+                                    }
+                                }
+                            }
                         }
                     }
-                }
                 AnimatedVisibility(
                     visible = isVideoMode && isVideoFullscreen,
-                    enter = fadeIn(ExpressiveMotion.effectsDefault()) +
-                        scaleIn(ExpressiveMotion.appleSheetSpring(), initialScale = 0.98f),
-                    exit = fadeOut(ExpressiveMotion.effectsFast()) +
-                        scaleOut(ExpressiveMotion.effectsFast(), targetScale = 0.98f),
-                    modifier = Modifier.fillMaxSize().zIndex(4f),
+                    enter = fadeIn(androidx.compose.animation.core.tween(150)),
+                    exit = fadeOut(androidx.compose.animation.core.tween(150)),
+                    modifier = Modifier.fillMaxSize().zIndex(10f),
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(Color.Black),
                     ) {
-                        InAppMusicVideo(
-                            videoId = effectiveVideoId.orEmpty(),
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .align(Alignment.Center),
-                            isPlaying = isVideoPlaying,
-                            initialPositionSeconds = (videoPositionMs.takeIf { it > 0L } ?: player.state.value.positionMs)
-                                .let { (it / 1000f).coerceAtLeast(0f) },
-                            seekCommandSeconds = videoSeekCommandSeconds,
-                            onProgressUpdate = { curMs, durMs ->
-                                videoPositionMs = curMs
-                                if (durMs > 0L) videoDurationMs = durMs
-                            },
-                            onPlaybackStateChanged = { playing ->
-                                isVideoPlaying = playing
-                            },
-                            onVideoEnded = {
-                                closeVideoMode()
-                                player.next()
-                            },
-                        )
+                        if (isVideoFullscreen) {
+                            InAppMusicVideo(
+                                videoId = effectiveVideoId.orEmpty(),
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .align(Alignment.Center),
+                                isPlaying = isVideoPlaying,
+                                initialPositionSeconds = (videoPositionMs.takeIf { it > 0L } ?: player.state.value.positionMs)
+                                    .let { (it / 1000f).coerceAtLeast(0f) },
+                                seekCommandSeconds = videoSeekCommandSeconds,
+                                onProgressUpdate = { curMs, durMs ->
+                                    videoPositionMs = curMs
+                                    if (durMs > 0L) videoDurationMs = durMs
+                                },
+                                onPlaybackStateChanged = { playing ->
+                                    isVideoPlaying = playing
+                                },
+                                onVideoEnded = {
+                                    closeVideoMode()
+                                    player.next()
+                                },
+                            )
+                        }
                         IconButton(
                             onClick = {
                                 hapticManager.click()
@@ -3643,7 +3833,7 @@ private fun FullPlayer(
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                )
+                                    )
                                 Text(
                                     "Tap to retry",
                                     style = MaterialTheme.typography.labelSmall,
@@ -3661,7 +3851,6 @@ private fun FullPlayer(
                 }
             }
         }
-    }
     }
     if (showTrackMenu) {
         TrackContextMenuSheet(
@@ -3694,6 +3883,7 @@ private fun FullPlayer(
     }
 }
 
+}
 @Composable
 internal fun PlayerProgressSlider(
     value: Float,
@@ -3989,6 +4179,7 @@ private fun MainControls(
     state: MusicPlayerState,
     player: MusicPlayer,
     isTranslucent: Boolean = false,
+    compact: Boolean = false,
     overridePlaying: Boolean? = null,
     onTogglePlay: (() -> Unit)? = null,
     onNext: (() -> Unit)? = null,
@@ -3998,6 +4189,13 @@ private fun MainControls(
 ) {
     val hapticManager = LocalHapticManager.current
     val effectivePlaying = overridePlaying ?: state.isPlaying
+
+    val sideButtonSize = if (compact) 40.dp else 46.dp
+    val skipButtonSize = if (compact) 48.dp else 54.dp
+    val playButtonSize = if (compact) 62.dp else 72.dp
+    val sideIconSize = if (compact) 18.dp else 20.dp
+    val skipIconSize = if (compact) 24.dp else 28.dp
+    val playIconSize = if (compact) 30.dp else 34.dp
 
     val shuffleInteraction = remember { MutableInteractionSource() }
     val isShufflePressed by shuffleInteraction.collectIsPressedAsState()
@@ -4028,7 +4226,7 @@ private fun MainControls(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 1. Shuffle Button (46dp)
+        // 1. Shuffle Button
         val isShuffleActive = state.shuffleEnabled
         LiquidGlassSurface(
             glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls, interactionSource = shuffleInteraction),
@@ -4047,14 +4245,14 @@ private fun MainControls(
                 if (isShuffleActive) Color.White.copy(alpha = 0.38f) else Color.White.copy(alpha = 0.10f)
             ),
             modifier = Modifier
-                .size(46.dp)
+                .size(sideButtonSize)
                 .graphicsLayer {
                     scaleX = shuffleScale
                     scaleY = shuffleScale
                 },
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.Shuffle, "Shuffle", Modifier.size(20.dp))
+                Icon(Icons.Filled.Shuffle, "Shuffle", Modifier.size(sideIconSize))
                 if (isShuffleActive) {
                     Box(
                         Modifier
@@ -4067,7 +4265,7 @@ private fun MainControls(
             }
         }
 
-        // 2. Previous Track (54dp)
+        // 2. Previous Track
         LiquidGlassSurface(
             glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls, interactionSource = prevInteraction),
             onClick = {
@@ -4082,20 +4280,20 @@ private fun MainControls(
             shadowElevation = 0.dp,
             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
             modifier = Modifier
-                .size(54.dp)
+                .size(skipButtonSize)
                 .graphicsLayer {
                     scaleX = prevScale
                     scaleY = prevScale
                 },
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(28.dp))
+                Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(skipIconSize))
             }
         }
 
-        // 3. Center Play/Pause Luminous Dial (72dp)
+        // 3. Center Play/Pause Luminous Dial
         Box(
-            modifier = Modifier.size(72.dp),
+            modifier = Modifier.size(playButtonSize),
             contentAlignment = Alignment.Center,
         ) {
             // Enhanced dual-layer breathing ambient glow halo behind center play dial
@@ -4122,7 +4320,7 @@ private fun MainControls(
                 // Wide outer ambient bloom
                 Box(
                     modifier = Modifier
-                        .size(110.dp * playGlowPulse)
+                        .size((if (compact) 92.dp else 110.dp) * playGlowPulse)
                         .background(
                             Brush.radialGradient(
                                 listOf(
@@ -4137,7 +4335,7 @@ private fun MainControls(
                 // Vibrant inner core aura
                 Box(
                     modifier = Modifier
-                        .size(88.dp)
+                        .size(if (compact) 74.dp else 88.dp)
                         .background(
                             Brush.radialGradient(
                                 listOf(
@@ -4170,7 +4368,7 @@ private fun MainControls(
                 },
                 interactionSource = playInteraction,
                 modifier = Modifier
-                    .size(72.dp)
+                    .size(playButtonSize)
                     .graphicsLayer {
                         scaleX = playScale
                         scaleY = playScale
@@ -4182,21 +4380,21 @@ private fun MainControls(
                 ) {
                     if (state.isBuffering && overridePlaying == null) {
                         ExpressiveInlineLoadingIndicator(
-                            size = 32.dp,
+                            size = if (compact) 26.dp else 32.dp,
                             color = Color(0xFF0F1116),
-                            strokeWidth = 3.2.dp,
+                            strokeWidth = 3.dp,
                         )
                     } else {
                         AnimatedPlayPauseIcon(
                             isPlaying = effectivePlaying,
-                            modifier = Modifier.size(34.dp),
+                            modifier = Modifier.size(playIconSize),
                         )
                     }
                 }
             }
         }
 
-        // 4. Next Track (54dp)
+        // 4. Next Track
         LiquidGlassSurface(
             glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls, interactionSource = nextInteraction),
             onClick = {
@@ -4211,18 +4409,18 @@ private fun MainControls(
             shadowElevation = 0.dp,
             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
             modifier = Modifier
-                .size(54.dp)
+                .size(skipButtonSize)
                 .graphicsLayer {
                     scaleX = nextScale
                     scaleY = nextScale
                 },
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.SkipNext, "Next", Modifier.size(28.dp))
+                Icon(Icons.Filled.SkipNext, "Next", Modifier.size(skipIconSize))
             }
         }
 
-        // 5. Repeat Mode Button (46dp)
+        // 5. Repeat Mode Button
         val isRepeatActive = state.repeatMode != Player.REPEAT_MODE_OFF
         LiquidGlassSurface(
             glassModifier = Modifier.liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.PlayerControls, interactionSource = repeatInteraction),
@@ -4241,7 +4439,7 @@ private fun MainControls(
                 if (isRepeatActive) Color.White.copy(alpha = 0.38f) else Color.White.copy(alpha = 0.10f)
             ),
             modifier = Modifier
-                .size(46.dp)
+                .size(sideButtonSize)
                 .graphicsLayer {
                     scaleX = repeatScale
                     scaleY = repeatScale
@@ -4251,7 +4449,7 @@ private fun MainControls(
                 Icon(
                     if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
                     "Repeat",
-                    Modifier.size(20.dp)
+                    Modifier.size(sideIconSize)
                 )
                 if (isRepeatActive) {
                     Box(
@@ -4443,10 +4641,12 @@ private fun PlayerFloatingDock(
     onToggleVideo: () -> Unit,
     onOpenSignalPath: () -> Unit,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     val hapticManager = LocalHapticManager.current
     val signalPath by player.signalPath.collectAsStateWithLifecycle()
-    val dockShape = RoundedCornerShape(28.dp)
+    val dockShape = RoundedCornerShape(if (compact) 18.dp else 28.dp)
+    val dockItemHeight = if (compact) 30.dp else 40.dp
 
     val dockGlowTransition = rememberInfiniteTransition(label = "dockGlowMotion")
     val dockGlowPulse by dockGlowTransition.animateFloat(
@@ -4471,17 +4671,17 @@ private fun PlayerFloatingDock(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(54.dp),
+            .height(if (compact) 38.dp else 54.dp),
         contentAlignment = Alignment.Center,
     ) {
         // Living breathing ambient motion pod glow behind the floating dock
         Box(
             modifier = Modifier
                 .fillMaxWidth(0.94f)
-                .height(50.dp)
+                .height(if (compact) 34.dp else 50.dp)
                 .graphicsLayer {
                     translationX = dockGlowShift
-                    translationY = 6.dp.toPx()
+                    translationY = if (compact) 3.dp.toPx() else 6.dp.toPx()
                     alpha = if (state.isPlaying) dockGlowPulse else 0.40f
                 }
                 .background(
@@ -4492,7 +4692,7 @@ private fun PlayerFloatingDock(
                             Color.Transparent,
                         ),
                     ),
-                    RoundedCornerShape(28.dp),
+                    RoundedCornerShape(if (compact) 18.dp else 28.dp),
                 )
         )
 
@@ -4537,7 +4737,7 @@ private fun PlayerFloatingDock(
                 color = if (isLyricsActive) Color.White.copy(alpha = 0.22f) else Color.Transparent,
                 contentColor = if (isLyricsActive) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.85f),
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(dockItemHeight)
                     .graphicsLayer { scaleX = lyricsScale; scaleY = lyricsScale },
             ) {
                 Row(
@@ -4573,7 +4773,7 @@ private fun PlayerFloatingDock(
                     else -> Color.White.copy(alpha = 0.28f)
                 },
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(dockItemHeight)
                     .graphicsLayer { scaleX = videoScale; scaleY = videoScale },
             ) {
                 Row(
@@ -4620,7 +4820,7 @@ private fun PlayerFloatingDock(
                 color = Color.Transparent,
                 contentColor = Color.White.copy(alpha = 0.90f),
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(dockItemHeight)
                     .graphicsLayer { scaleX = audioScale; scaleY = audioScale },
             ) {
                 Row(
@@ -4670,7 +4870,7 @@ private fun PlayerFloatingDock(
                 color = if (isQueueActive) Color.White.copy(alpha = 0.22f) else Color.Transparent,
                 contentColor = if (isQueueActive) Color(0xFF69F0AE) else Color.White.copy(alpha = 0.85f),
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(dockItemHeight)
                     .graphicsLayer { scaleX = queueScale; scaleY = queueScale },
             ) {
                 Row(
@@ -4704,7 +4904,7 @@ private fun PlayerFloatingDock(
                 color = if (isTimerActive) Color(0xFFFFB74D).copy(alpha = 0.24f) else Color.Transparent,
                 contentColor = if (isTimerActive) Color(0xFFFFB74D) else Color.White.copy(alpha = 0.85f),
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(dockItemHeight)
                     .graphicsLayer { scaleX = timerScale; scaleY = timerScale },
             ) {
                 Row(
@@ -4925,11 +5125,12 @@ private fun QueuePanel(
                 val isCurrent = index == state.currentIndex
                 val isDragging = index == draggingIndex
                 val stableKey = queueKeys.getOrNull(index) ?: index.toString()
+                val currentIndex by rememberUpdatedState(index)
                 @Suppress("DEPRECATION")
                 val dismissState = androidx.compose.material3.rememberSwipeToDismissBoxState(
                     confirmValueChange = { dismissValue ->
                         if (dismissValue != androidx.compose.material3.SwipeToDismissBoxValue.Settled) {
-                            player.removeQueueItem(index)
+                            player.removeQueueItem(currentIndex)
                             true
                         } else {
                             false
@@ -5171,9 +5372,10 @@ private fun PlayableTrack.toGeneratedTrack() = com.neonsong.app.data.generate.Ge
 @Composable
 private fun rememberSpatialTilt(enabled: Boolean = true): androidx.compose.runtime.State<Offset> {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val view = LocalView.current
     val tiltState = remember { mutableStateOf(Offset.Zero) }
 
-    DisposableEffect(enabled) {
+    DisposableEffect(enabled, view) {
         if (!enabled) return@DisposableEffect onDispose {}
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         val sensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
@@ -5185,22 +5387,41 @@ private fun rememberSpatialTilt(enabled: Boolean = true): androidx.compose.runti
 
         val listener = object : SensorEventListener {
             private val rotationMatrix = FloatArray(9)
+            private val remappedMatrix = FloatArray(9)
             private val orientation = FloatArray(3)
 
             override fun onSensorChanged(event: SensorEvent?) {
                 if (event == null) return
-                if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                val displayRotation = view.display?.rotation ?: android.view.Surface.ROTATION_0
+
+                val newOffset = if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
                     SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
-                    SensorManager.getOrientation(rotationMatrix, orientation)
+                    val (axisX, axisY) = when (displayRotation) {
+                        android.view.Surface.ROTATION_90 -> SensorManager.AXIS_Y to SensorManager.AXIS_MINUS_X
+                        android.view.Surface.ROTATION_180 -> SensorManager.AXIS_MINUS_X to SensorManager.AXIS_MINUS_Y
+                        android.view.Surface.ROTATION_270 -> SensorManager.AXIS_MINUS_Y to SensorManager.AXIS_X
+                        else -> SensorManager.AXIS_X to SensorManager.AXIS_Y
+                    }
+                    SensorManager.remapCoordinateSystem(rotationMatrix, axisX, axisY, remappedMatrix)
+                    SensorManager.getOrientation(remappedMatrix, orientation)
                     val pitch = Math.toDegrees(orientation[1].toDouble()).toFloat()
                     val roll = Math.toDegrees(orientation[2].toDouble()).toFloat()
-                    val normRoll = (roll / 32f).coerceIn(-1f, 1f)
-                    val normPitch = (pitch / 32f).coerceIn(-1f, 1f)
-                    tiltState.value = Offset(normRoll, normPitch)
+                    Offset((roll / 32f).coerceIn(-1f, 1f), (pitch / 32f).coerceIn(-1f, 1f))
                 } else if (event.sensor.type == Sensor.TYPE_GRAVITY) {
-                    val x = (event.values[0] / 9.8f).coerceIn(-1f, 1f)
-                    val y = (event.values[1] / 9.8f).coerceIn(-1f, 1f)
-                    tiltState.value = Offset(-x, y)
+                    val rawX = event.values[0]
+                    val rawY = event.values[1]
+                    val (gx, gy) = when (displayRotation) {
+                        android.view.Surface.ROTATION_90 -> -rawY to rawX
+                        android.view.Surface.ROTATION_180 -> -rawX to -rawY
+                        android.view.Surface.ROTATION_270 -> rawY to -rawX
+                        else -> rawX to rawY
+                    }
+                    Offset((-gx / 9.8f).coerceIn(-1f, 1f), (gy / 9.8f).coerceIn(-1f, 1f))
+                } else return
+
+                val prev = tiltState.value
+                if (abs(newOffset.x - prev.x) > 0.015f || abs(newOffset.y - prev.y) > 0.015f) {
+                    tiltState.value = newOffset
                 }
             }
 
