@@ -103,12 +103,7 @@ fun LoginScreen(
                 verticalArrangement = Arrangement.Center,
             ) {
                 Box(Modifier.padding(bottom = 12.dp), contentAlignment = Alignment.Center) {
-                    androidx.compose.foundation.Image(
-                        painter = painterResource(com.neonsong.app.R.drawable.neon_song_art),
-                        contentDescription = "Neon Song",
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                        modifier = Modifier.size(64.dp).clip(CircleShape),
-                    )
+                    com.neonsong.app.ui.common.NeonAppLogo(size = 64.dp)
                 }
                 Text("Neon Song", style = MaterialTheme.typography.headlineMedium)
                 Text(

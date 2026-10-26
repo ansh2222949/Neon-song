@@ -67,8 +67,8 @@ fun ArtworkImage(
     // whole map meant every resolution anywhere recomposed every visible
     // artwork row; with distinctUntilChanged each row recomposes exactly once —
     // when its own URL resolves.
-    val resolvedUrl by remember(key) {
-        artworkViewModel.resolved.map { it[key] }.distinctUntilChanged()
+    val resolvedUrl by remember(artworkViewModel, key) {
+        artworkViewModel.urlForKey(key)
     }.collectAsStateWithLifecycle(initialValue = artworkViewModel.resolved.value[key])
     var resolvedFailed by remember(key, resolvedUrl) { mutableStateOf(false) }
     var embeddedFailed by remember(name, artist, embeddedUrl) { mutableStateOf(false) }

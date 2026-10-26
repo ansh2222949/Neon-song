@@ -11,6 +11,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import androidx.annotation.MainThread
 import androidx.annotation.OptIn
+import androidx.compose.runtime.Immutable
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -117,6 +118,7 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
 @Serializable
+@Immutable
 data class PlayableTrack(
     val title: String,
     val artist: String,
@@ -128,7 +130,13 @@ data class PlayableTrack(
     val playbackUrl: String? = null,
     val playbackMimeType: String? = null,
     val durationMs: Long? = null,
-)
+) {
+    val stableId: String
+        get() = videoId?.takeIf(String::isNotBlank)
+            ?: internalTrackId?.takeIf(String::isNotBlank)
+            ?: playbackUrl?.takeIf(String::isNotBlank)
+            ?: "${title.lowercase().trim()}|${artist.lowercase().trim()}|${durationMs ?: 0L}"
+}
 
 @Serializable
 internal data class PersistedPlaybackSession(
@@ -144,6 +152,7 @@ internal data class PersistedPlaybackSession(
     val durationMs: Long = 0L,
 )
 
+@Immutable
 data class MusicPlayerState(
     val connected: Boolean = true,
     val current: PlayableTrack? = null,
@@ -173,6 +182,7 @@ data class MusicPlayerState(
  * [MusicPlayerState], this does not contain the 60 ms position ticker, so a
  * playing track no longer invalidates every visible track list 16 times/sec.
  */
+@Immutable
 data class PlaybackChromeState(
     val current: PlayableTrack? = null,
     val sourceLabel: String = "Neon Song",
@@ -186,10 +196,20 @@ data class PlaybackChromeState(
 )
 
 /** The small, frequently changing state consumed only by progress UI. */
+@Immutable
 data class PlaybackProgressState(
     val positionMs: Long = 0,
     val durationMs: Long = 0,
 )
+
+private inline fun <T> runSuspendCatching(block: () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (c: CancellationException) {
+        throw c
+    } catch (e: Throwable) {
+        Result.failure(e)
+    }
 
 /**
  * Process-wide native ExoPlayer engine. A foreground service publishes its
@@ -1728,7 +1748,7 @@ class MusicPlayer @Inject constructor(
         track: PlayableTrack,
         sourceLabel: String = "Neon Song",
         startRadio: Boolean = true,
-    ) {
+    ) = onMain {
         pendingRestoredSession = null
         disableDiscoverQueue()
         disableRadioQueue()
@@ -1758,12 +1778,12 @@ class MusicPlayer @Inject constructor(
         startIndex: Int = 0,
         sourceLabel: String = "Neon Song",
         startShuffled: Boolean = false,
-    ) {
+    ) = onMain {
         disableRadioQueue()
         playQueueInternal(tracks, startIndex, endlessDiscover = false, sourceLabel = sourceLabel, startShuffled = startShuffled)
     }
 
-    fun playDiscoverQueue(tracks: List<PlayableTrack>, startIndex: Int = 0) {
+    fun playDiscoverQueue(tracks: List<PlayableTrack>, startIndex: Int = 0) = onMain {
         disableRadioQueue()
         playQueueInternal(tracks, startIndex, endlessDiscover = true, sourceLabel = "Discover", startShuffled = false)
     }
@@ -3236,15 +3256,28 @@ class MusicPlayer @Inject constructor(
                 seekTo(0)
                 return@onMain
             }
+            val activeBaseIndex = if (playRequest?.isActive == true && pendingState.currentIndex in 0 until player.mediaItemCount) {
+                pendingState.currentIndex
+            } else {
+                player.currentMediaItemIndex
+            }
             // Under REPEAT_ONE the engine loops previous onto the current
             // item, so a manual previous would replay the same track and
             // look dead. Fall through to the logical queue order instead;
             // a single-track loop (no logical previous) still replays.
-            val enginePrev = player.previousMediaItemIndex.takeIf { it != C.INDEX_UNSET }
+            val enginePrev = if (player.currentTimeline.isEmpty) {
+                player.previousMediaItemIndex.takeIf { it != C.INDEX_UNSET }
+            } else {
+                player.currentTimeline.getPreviousWindowIndex(
+                    activeBaseIndex,
+                    player.repeatMode,
+                    player.shuffleModeEnabled
+                ).takeIf { it != C.INDEX_UNSET }
+            }
             val repeatOne = player.repeatMode == Player.REPEAT_MODE_ONE ||
                 pendingState.repeatMode == Player.REPEAT_MODE_ONE
             val index = historyIndex
-                ?: if (enginePrev == null || (repeatOne && enginePrev == player.currentMediaItemIndex)) {
+                ?: if (enginePrev == null || (repeatOne && enginePrev == activeBaseIndex)) {
                     val logical = previousQueueIndex(pendingState)
                     if (logical != C.INDEX_UNSET) logical else enginePrev
                 } else {
@@ -3263,14 +3296,27 @@ class MusicPlayer @Inject constructor(
         }
         val pendingState = _state.value
         recordHistory(pendingState.current?.mediaIdKey())
-        val engineNext = player.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET }
+        val activeBaseIndex = if (playRequest?.isActive == true && pendingState.currentIndex in 0 until player.mediaItemCount) {
+            pendingState.currentIndex
+        } else {
+            player.currentMediaItemIndex
+        }
+        val engineNext = if (player.currentTimeline.isEmpty) {
+            player.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET }
+        } else {
+            player.currentTimeline.getNextWindowIndex(
+                activeBaseIndex,
+                player.repeatMode,
+                player.shuffleModeEnabled
+            ).takeIf { it != C.INDEX_UNSET }
+        }
         // Under REPEAT_ONE the engine loops next/previous onto the current
         // item, so a manual next would replay the same track and look dead.
         // Fall through to the logical queue order instead; a single-track
         // loop (no logical next) still replays via the engine index.
         val repeatOne = player.repeatMode == Player.REPEAT_MODE_ONE ||
             pendingState.repeatMode == Player.REPEAT_MODE_ONE
-        val index = if (engineNext == null || (repeatOne && engineNext == player.currentMediaItemIndex)) {
+        val index = if (engineNext == null || (repeatOne && engineNext == activeBaseIndex)) {
             val logical = nextQueueIndex(pendingState)
             if (logical != C.INDEX_UNSET) logical else engineNext
         } else {
@@ -3872,7 +3918,11 @@ class MusicPlayer @Inject constructor(
             return@onMain
         }
         cancelCrossfade()
-        if (index in 0 until player.mediaItemCount) player.removeMediaItem(index)
+        if (index in 0 until player.mediaItemCount) {
+            player.removeMediaItem(index)
+            refresh(player)
+            persistPlaybackSession()
+        }
     }
     fun moveQueueItem(fromIndex: Int, toIndex: Int) = onMain {
         if (fromIndex == toIndex) return@onMain
@@ -3890,8 +3940,11 @@ class MusicPlayer @Inject constructor(
             persistPlaybackSession()
             return@onMain
         }
+        cancelCrossfade()
         if (fromIndex in 0 until player.mediaItemCount && toIndex in 0 until player.mediaItemCount) {
             player.moveMediaItem(fromIndex, toIndex)
+            refresh(player)
+            persistPlaybackSession()
         }
     }
     fun clearError() = _state.update { it.copy(error = null) }
@@ -4162,7 +4215,7 @@ class MusicPlayer @Inject constructor(
                 }
                 if (!shouldLoad) return@launch
 
-                val batch = runCatching {
+                val batch = runSuspendCatching {
                     discoverRepository.nextBatch(DISCOVER_QUEUE_BATCH_SIZE)
                 }.onFailure { error ->
                     android.util.Log.d("MusicPlayer", "Discover queue refill failed", error)
@@ -4336,13 +4389,13 @@ class MusicPlayer @Inject constructor(
         // 1. Primary seed automix / related
         val primarySeedVideoId = primarySeed.videoId?.takeIf(String::isNotBlank)
             ?: innerTube.findBestMatchOrNull(primarySeed.title, primarySeed.artist, prefetchStreams = false)?.videoId
-            ?: runCatching {
+            ?: runSuspendCatching {
                 innerTube.searchSongs("${primarySeed.artist} ${primarySeed.title}", limit = 3, prefetchStreams = false).firstOrNull()?.videoId
             }.getOrNull()
 
         if (primarySeedVideoId != null) {
             radioUsedSeeds.add(primarySeedVideoId)
-            val related = runCatching {
+            val related = runSuspendCatching {
                 innerTube.fetchRelatedSongs(primarySeedVideoId, limit = batchSize, prefetchStreams = false)
             }.getOrDefault(emptyList())
             addCandidates(related)
@@ -4352,12 +4405,12 @@ class MusicPlayer @Inject constructor(
         if (candidateYtTracks.count { it.videoId !in seenVideoIds } < 20) {
             for (seed in fallbackSeeds.take(3)) {
                 val seedVideoId = seed.videoId?.takeIf(String::isNotBlank)
-                    ?: runCatching {
+                    ?: runSuspendCatching {
                         innerTube.findBestMatchOrNull(seed.title, seed.artist, prefetchStreams = false)?.videoId
                     }.getOrNull()
                 if (seedVideoId != null && seedVideoId !in radioUsedSeeds) {
                     radioUsedSeeds.add(seedVideoId)
-                    val related = runCatching {
+                    val related = runSuspendCatching {
                         innerTube.fetchRelatedSongs(seedVideoId, limit = 25, prefetchStreams = false)
                     }.getOrDefault(emptyList())
                     addCandidates(related)
@@ -4373,7 +4426,7 @@ class MusicPlayer @Inject constructor(
                 "${primarySeed.artist} ${primarySeed.title} similar songs",
             )
             for (query in queries) {
-                val searchTracks = runCatching {
+                val searchTracks = runSuspendCatching {
                     innerTube.searchSongs(query, limit = 20, prefetchStreams = false)
                 }.getOrDefault(emptyList())
                 addCandidates(searchTracks)
@@ -4383,13 +4436,13 @@ class MusicPlayer @Inject constructor(
 
         // 4. Fallback to listener taste profile from recent high-engagement artists
         if (candidateYtTracks.count { it.videoId !in seenVideoIds } < 15) {
-            val statsRepo = runCatching { songPlayStatsRepository.get() }.getOrNull()
-            val topTasteArtists = runCatching {
+            val statsRepo = runSuspendCatching { songPlayStatsRepository.get() }.getOrNull()
+            val topTasteArtists = runSuspendCatching {
                 statsRepo?.mostPlayedSince(30, 10)?.map { it.artist.trim() }?.filter { it.isNotBlank() }.orEmpty()
             }.getOrDefault(emptyList())
 
             for (artist in topTasteArtists.shuffled().take(2)) {
-                val artistTracks = runCatching {
+                val artistTracks = runSuspendCatching {
                     innerTube.searchSongs("$artist songs", limit = 15, prefetchStreams = false)
                 }.getOrDefault(emptyList())
                 addCandidates(artistTracks)
@@ -4407,12 +4460,12 @@ class MusicPlayer @Inject constructor(
                 url = "https://music.youtube.com/watch?v=${yt.videoId}",
             )
         }
-        val allowedKeys = runCatching {
+        val allowedKeys = runSuspendCatching {
             discoverRepository.filterRecommendationExclusions(generatedCandidates).mapTo(mutableSetOf()) { it.key }
         }.getOrDefault(generatedCandidates.mapTo(mutableSetOf()) { it.key })
 
-        val statsRepo = runCatching { songPlayStatsRepository.get() }.getOrNull()
-        val affinityArtists = runCatching {
+        val statsRepo = runSuspendCatching { songPlayStatsRepository.get() }.getOrNull()
+        val affinityArtists = runSuspendCatching {
             statsRepo?.mostPlayedSince(30, 40)?.map { it.artist.trim().lowercase() }?.toSet().orEmpty()
         }.getOrDefault(emptySet())
 

@@ -224,6 +224,7 @@ import com.neonsong.app.data.local.eqBandLabel
 import com.neonsong.app.ui.common.ConnectedButtonGroup
 import com.neonsong.app.ui.common.ConnectedButtonItem
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.NeonAppLogo
 import com.neonsong.app.ui.common.safeDrawingBottomPadding
 import com.neonsong.app.ui.common.safeHorizontalContentPadding
 import com.neonsong.app.ui.common.adaptiveContentWidth
@@ -4454,12 +4455,7 @@ private fun AboutCard(
                     ),
                 contentAlignment = Alignment.Center,
             ) {
-                androidx.compose.foundation.Image(
-                    painter = painterResource(R.drawable.neon_song_art),
-                    contentDescription = "Neon Song",
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    modifier = Modifier.size(76.dp).clip(CircleShape),
-                )
+                NeonAppLogo(size = 76.dp)
             }
             Spacer(Modifier.height(16.dp))
             Text("Neon Song", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)

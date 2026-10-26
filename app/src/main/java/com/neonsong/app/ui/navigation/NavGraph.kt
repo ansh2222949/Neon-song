@@ -603,10 +603,9 @@ private fun LaunchGate() {
                 shadowElevation = 10.dp,
                 modifier = Modifier.size(88.dp),
             ) {
-                androidx.compose.foundation.Image(
-                    painter = painterResource(com.neonsong.app.R.drawable.neon_song_art),
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
+                com.neonsong.app.ui.common.NeonAppLogo(
+                    size = 88.dp,
+                    shape = RoundedCornerShape(28.dp),
                 )
             }
             Spacer(Modifier.height(18.dp))

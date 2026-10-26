@@ -108,6 +108,9 @@ fun ExpressiveHeader(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                         Spacer(Modifier.width(12.dp))
+                    } else if (title == NeonBrand.AppName) {
+                        NeonAppLogo(size = 36.dp)
+                        Spacer(Modifier.width(12.dp))
                     }
 
                     Column(Modifier.weight(1f)) {
