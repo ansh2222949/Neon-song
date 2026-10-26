@@ -3527,6 +3527,23 @@ class MusicPlayer @Inject constructor(
         }
         val pendingState = _state.value
         recordHistory(pendingState.current?.mediaIdKey())
+        if (automixEnabled && outgoingPlayer == null) {
+            val standby = currentStandby()
+            val nextIndex = player.nextMediaItemIndex
+            val hasNext = nextIndex != C.INDEX_UNSET && nextIndex in 0 until player.mediaItemCount
+            val nextItem = if (hasNext) player.getMediaItemAt(nextIndex) else null
+            val armedForNext = crossfadeStandbyArmed && standbyIndex == nextIndex &&
+                standbyQueue.size == player.mediaItemCount &&
+                standbyQueue.getOrNull(nextIndex) == nextItem
+            if (standby != null && armedForNext && standby.playbackState == Player.STATE_READY) {
+                val bpm = nativeAutoMixEngine.get().deckABpm.takeIf { it in 50f..220f } ?: 120f
+                val msPerBeat = (60_000f / bpm).toLong()
+                val fourBarsMs = 4 * 4 * msPerBeat
+                nativeAutoMixEngine.get().triggerFadeNow()
+                handOffCrossfade(standby, fourBarsMs)
+                return@onMain
+            }
+        }
         val activeBaseIndex = if (playRequest?.isActive == true && pendingState.currentIndex in 0 until player.mediaItemCount) {
             pendingState.currentIndex
         } else {
@@ -4093,23 +4110,64 @@ class MusicPlayer @Inject constructor(
         setPlaybackParameters(1.0f, 1.0f)
     }
 
-    fun setAutomixEnabled(enabled: Boolean) {
+    fun setAutomixEnabled(enabled: Boolean) = onMain {
+        automixEnabled = enabled
+        runCatching { nativeAutoMixEngine.get().setEnabled(enabled) }
+        audioSinks.forEach { sink -> sink.setAutoMixEnabled(enabled) }
+        if (!enabled && !crossfadeEnabled) {
+            cancelCrossfade()
+        }
+        _state.update { it.copy(isAutoMixEnabled = enabled) }
         applicationScope.launch {
             settingsPreferences.setAutomixEnabled(enabled)
         }
     }
 
-    fun setAutomixBars(bars: Int) {
+    fun setAutomixBars(bars: Int) = onMain {
+        val safeBars = if (bars >= 16) 16 else 8
+        automixBars = safeBars
+        runCatching { nativeAutoMixEngine.get().setBarMode(safeBars) }
+        _state.update { it.copy(autoMixBars = safeBars) }
         applicationScope.launch {
-            settingsPreferences.setAutomixBars(bars)
+            settingsPreferences.setAutomixBars(safeBars)
         }
     }
 
-    fun setAutoDJEnabled(enabled: Boolean) {
+    fun setAutoDJEnabled(enabled: Boolean) = onMain {
+        runCatching { autoDJController.get().setEnabledDirect(enabled) }
+        _state.update { it.copy(isAutoDJActive = enabled) }
         applicationScope.launch {
             settingsPreferences.setAutoDJEnabled(enabled)
         }
     }
+
+    fun triggerManualMix() = onMain {
+        if (!automixEnabled) {
+            setAutomixEnabled(true)
+        }
+        if (outgoingPlayer != null) return@onMain
+        val standby = currentStandby()
+        val nextIndex = player.nextMediaItemIndex
+        val hasNext = nextIndex != C.INDEX_UNSET && nextIndex in 0 until player.mediaItemCount
+        val nextItem = if (hasNext) player.getMediaItemAt(nextIndex) else null
+        val armedForNext = crossfadeStandbyArmed && standbyIndex == nextIndex &&
+            standbyQueue.size == player.mediaItemCount &&
+            standbyQueue.getOrNull(nextIndex) == nextItem
+        if (standby != null && armedForNext && standby.playbackState == Player.STATE_READY) {
+            val bpm = nativeAutoMixEngine.get().deckABpm.takeIf { it in 50f..220f } ?: 120f
+            val msPerBeat = (60_000f / bpm).toLong()
+            val fourBarsMs = 4 * 4 * msPerBeat
+            nativeAutoMixEngine.get().triggerFadeNow()
+            handOffCrossfade(standby, fourBarsMs)
+        } else if (hasNext) {
+            preloadNextQueueItem(player.currentMediaItemIndex)
+            if (nextItem != null && nextItem.localConfiguration?.uri?.scheme != "neonsong") {
+                armCrossfadeStandby(nextIndex, nextItem)
+            }
+            resolveAndPlayQueueItem(nextIndex)
+        }
+    }
+
     fun cycleSleepTimer() = onMain {
         setSleepTimerMinutes(SLEEP_TIMER_MINUTES[(sleepTimerStep + 1) % SLEEP_TIMER_MINUTES.size])
     }

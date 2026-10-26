@@ -139,6 +139,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -2866,7 +2867,7 @@ private fun FullPlayer(
                                 )
                             }
                         }
-                        val isCustomAudio = state.speed != 1f || state.pitch != 1f || state.autoMixState != AutoMixState.IDLE || state.isAutoDJActive
+                        val isCustomAudio = state.speed != 1f || state.pitch != 1f || state.autoMixState != AutoMixState.IDLE || state.isAutoMixEnabled
                         IconButton(
                             onClick = {
                                 hapticManager.click()
@@ -5069,6 +5070,7 @@ private fun AutoDJLiveMonitorCard(
     player: MusicPlayer,
     modifier: Modifier = Modifier,
 ) {
+    val hapticManager = LocalHapticManager.current
     val isBlending = state.autoMixState == AutoMixState.FADING_AUTO || state.autoMixState == AutoMixState.FADING_FAST
     val isArmed = state.autoMixState == AutoMixState.MONITORING_OUTRO
     val isAnalyzing = state.autoMixState == AutoMixState.ANALYZING || state.autoMixState == AutoMixState.PREBUFFERING_DECK_B
@@ -5210,7 +5212,10 @@ private fun AutoDJLiveMonitorCard(
                     }
                     Switch(
                         checked = state.isAutoMixEnabled,
-                        onCheckedChange = { player.setAutomixEnabled(it) },
+                        onCheckedChange = {
+                            hapticManager.click()
+                            player.setAutomixEnabled(it)
+                        },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color(0xFFDDD6FE),
                             checkedTrackColor = Color(0xFF8B5CF6),
@@ -5232,7 +5237,10 @@ private fun AutoDJLiveMonitorCard(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(
                                 selected = state.autoMixBars == 8,
-                                onClick = { player.setAutomixBars(8) },
+                                onClick = {
+                                    hapticManager.click()
+                                    player.setAutomixBars(8)
+                                },
                                 label = { Text("8 Bars") },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = Color(0xFF8B5CF6),
@@ -5241,12 +5249,45 @@ private fun AutoDJLiveMonitorCard(
                             )
                             FilterChip(
                                 selected = state.autoMixBars == 16,
-                                onClick = { player.setAutomixBars(16) },
+                                onClick = {
+                                    hapticManager.click()
+                                    player.setAutomixBars(16)
+                                },
                                 label = { Text("16 Bars") },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = Color(0xFF8B5CF6),
                                     selectedLabelColor = Color.White,
                                 ),
+                            )
+                        }
+                    }
+
+                    if (!isBlending && state.queue.size > 1) {
+                        Button(
+                            onClick = {
+                                hapticManager.click()
+                                player.triggerManualMix()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF8B5CF6),
+                                contentColor = Color.White,
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(38.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.AutoAwesome,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = if (isArmed) "Mix Now \u2022 Outro Ready" else "Blend to Next Track (Mix Now)",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
                             )
                         }
                     }
@@ -5408,7 +5449,10 @@ private fun AutoDJLiveMonitorCard(
                     }
                     Switch(
                         checked = state.isAutoDJActive,
-                        onCheckedChange = { player.setAutoDJEnabled(it) },
+                        onCheckedChange = {
+                            hapticManager.click()
+                            player.setAutoDJEnabled(it)
+                        },
                     )
                 }
             }

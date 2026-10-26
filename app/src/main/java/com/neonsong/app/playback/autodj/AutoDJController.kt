@@ -1,4 +1,4 @@
-﻿package com.neonsong.app.playback.autodj
+package com.neonsong.app.playback.autodj
 
 import android.os.SystemClock
 import android.util.Log
@@ -77,6 +77,16 @@ class AutoDJController @Inject constructor(
     @Volatile
     var isEnabled: Boolean = true
         private set
+
+    fun setEnabledDirect(enabled: Boolean) {
+        isEnabled = enabled
+        if (!enabled) {
+            cancelAllPrefetches("autodj-disabled")
+            _status.value = AutoDJStatus.Disabled
+        } else if (_status.value is AutoDJStatus.Disabled) {
+            _status.value = AutoDJStatus.Idle
+        }
+    }
 
     fun attachHost(
         host: AutoDJPlaybackHost,
