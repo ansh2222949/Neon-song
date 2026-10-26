@@ -184,6 +184,7 @@ data class MusicPlayerState(
     val sleepTimerRemainingMs: Long? = null,
     val isAutoMixActive: Boolean = false,
     val isAutoMixEnabled: Boolean = false,
+    val autoMixBars: Int = 8,
     val autoMixState: AutoMixState = AutoMixState.IDLE,
     val autoMixProgress: Float = 0f,
     val autoMixBpm: Float? = null,
@@ -494,15 +495,29 @@ class MusicPlayer @Inject constructor(
             }
         }
         override fun armStandbyForNext(index: Int, track: PlayableTrack) {
-            // Standby armed
+            onMain {
+                if (index in 0 until player.mediaItemCount) {
+                    val nextItem = player.getMediaItemAt(index)
+                    armCrossfadeStandby(index, nextItem)
+                }
+            }
         }
         override fun triggerAutoTransition(overlapMs: Long) {
             onMain {
-                nativeAutoMixEngine.get().triggerFadeNow()
+                runCatching { nativeAutoMixEngine.get().triggerFadeNow() }
+                val standby = currentStandby()
+                val nextIndex = player.nextMediaItemIndex
+                if (standby != null && crossfadeStandbyArmed && standby.playbackState == Player.STATE_READY) {
+                    handOffCrossfade(standby, overlapMs)
+                } else if (nextIndex != C.INDEX_UNSET && nextIndex in 0 until player.mediaItemCount) {
+                    resolveAndPlayQueueItem(nextIndex)
+                }
             }
         }
         override fun setLateTrackBuffering(isWaiting: Boolean) {
-            // Buffering
+            onMain {
+                _state.update { it.copy(isBuffering = isWaiting) }
+            }
         }
         override fun skipToNextPlayableItem(failedIndex: Int) {
             onMain {
@@ -898,6 +913,9 @@ class MusicPlayer @Inject constructor(
                 }
                 if (nextIndex != C.INDEX_UNSET && nextIndex in 0 until player.mediaItemCount) {
                     preloadNextTrack(nextIndex, player.getMediaItemAt(nextIndex).toPlayableTrack())
+                }
+                runCatching {
+                    autoDJController.get().onTrackTransition(currentIndex)
                 }
             }
         }
@@ -1720,6 +1738,23 @@ class MusicPlayer @Inject constructor(
                         updateSignalPath()
                     }
 
+                    if (player.isPlaying && playerDelegate.isInitialized()) {
+                        val djTransitionMs = if (automixEnabled) {
+                            val bars = automixBars.coerceIn(4, 16)
+                            minOf(bars * 1800L, if (dur > 0) dur / 3 else 12000L).coerceIn(4000L, 16000L)
+                        } else {
+                            crossfadeDurationMs
+                        }
+                        runCatching {
+                            autoDJController.get().onPlaybackTick(
+                                currentPositionMs = pos,
+                                durationMs = dur,
+                                isPlaying = player.isPlaying,
+                                transitionDurationMs = djTransitionMs,
+                            )
+                        }
+                    }
+
                     val previous = _state.value
                     val unchanged = !_state.value.isPlaying &&
                         previous.positionMs == pos &&
@@ -1799,7 +1834,7 @@ class MusicPlayer @Inject constructor(
                 }
                 if (playerDelegate.isInitialized()) {
                     onMain {
-                        if (!crossfadeEnabled || bitPerfectEnabled) cancelCrossfade()
+                        if ((!crossfadeEnabled && !automixEnabled) || bitPerfectEnabled) cancelCrossfade()
                         if (bitPerfectEnabled) {
                             // Bulletproofing: tempo stretch resamples and any
                             // leftover fade gain scales samples — both defeat
@@ -2672,7 +2707,7 @@ class MusicPlayer @Inject constructor(
 
     @MainThread
     private fun updateCrossfade(positionMs: Long): Boolean {
-        if (!crossfadeEnabled || bitPerfectEnabled) return false
+        if ((!crossfadeEnabled && !automixEnabled) || bitPerfectEnabled) return false
         outgoingPlayer?.let { outgoing ->
             // Drive the blend off the incoming (active) player position so a
             // pause parks the fade instead of counting down underneath it.
@@ -2722,6 +2757,13 @@ class MusicPlayer @Inject constructor(
             standbyQueue.getOrNull(nextIndex) == nextItem
         val standby = currentStandby()
 
+        val effectiveCrossfadeMs = if (automixEnabled) {
+            val bars = automixBars.coerceIn(4, 16)
+            minOf(bars * 1800L, if (timingDurationMs > 0) timingDurationMs / 3 else 12000L).coerceIn(4000L, 16000L)
+        } else {
+            crossfadeDurationMs
+        }
+
         val plan = planCrossfade(
             CrossfadePlanInput(
                 crossfadeEnabled = true,
@@ -2730,7 +2772,7 @@ class MusicPlayer @Inject constructor(
                 repeatOne = player.repeatMode == Player.REPEAT_MODE_ONE,
                 durationMs = timingDurationMs,
                 positionMs = livePosMs,
-                crossfadeMs = crossfadeDurationMs,
+                crossfadeMs = effectiveCrossfadeMs,
                 playbackSpeed = player.playbackParameters.speed,
                 hasNextItem = hasNext,
                 nextItemResolved = nextItem?.localConfiguration?.uri?.scheme != "neonsong",
@@ -3986,6 +4028,24 @@ class MusicPlayer @Inject constructor(
     fun resetPlaybackParameters() = onMain {
         setPlaybackParameters(1.0f, 1.0f)
     }
+
+    fun setAutomixEnabled(enabled: Boolean) {
+        applicationScope.launch {
+            settingsPreferences.setAutomixEnabled(enabled)
+        }
+    }
+
+    fun setAutomixBars(bars: Int) {
+        applicationScope.launch {
+            settingsPreferences.setAutomixBars(bars)
+        }
+    }
+
+    fun setAutoDJEnabled(enabled: Boolean) {
+        applicationScope.launch {
+            settingsPreferences.setAutoDJEnabled(enabled)
+        }
+    }
     fun cycleSleepTimer() = onMain {
         setSleepTimerMinutes(SLEEP_TIMER_MINUTES[(sleepTimerStep + 1) % SLEEP_TIMER_MINUTES.size])
     }
@@ -4726,7 +4786,7 @@ class MusicPlayer @Inject constructor(
 
                 withContext(Dispatchers.Main.immediate) {
                     if (!radioQueueActive || !playerDelegate.isInitialized()) return@withContext
-                    val current = player.currentMediaItem?.toPlayableTrack()
+                    val current = player.currentMediaItem?.toPlayableTrack() ?: _state.value.current
                     val stillCurrentSeed = resumePlaybackImmediately ||
                         (seed.videoId != null && current?.videoId == seed.videoId) ||
                         (current?.title.equals(seed.title, ignoreCase = true) && current?.artist.equals(seed.artist, ignoreCase = true))
@@ -7201,6 +7261,7 @@ class MusicPlayer @Inject constructor(
             sleepTimerRemainingMs = sleepTimerDeadlineMs?.minus(SystemClock.elapsedRealtime())?.coerceAtLeast(0),
             isAutoMixActive = isMixActive,
             isAutoMixEnabled = automixEnabled,
+            autoMixBars = automixBars,
             autoMixState = mixState,
             autoMixProgress = mixProgress,
             autoMixBpm = mixBpm,
@@ -7208,6 +7269,9 @@ class MusicPlayer @Inject constructor(
             autoDJStatus = djStatus,
             error = if (isPlayingState) null else previous.error,
         )
+        if (queue.size != previous.queue.size) {
+            runCatching { autoDJController.get().onQueueChanged() }
+        }
         persistPlaybackSession()
         updateSignalPath()
     }

@@ -154,6 +154,8 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -5180,6 +5182,77 @@ private fun AutoDJLiveMonitorCard(
                 }
             }
 
+            // Interactive Automix & Bar controls
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.45f))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Automix Beat-Matched Transitions",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = if (state.isAutoMixEnabled) "Dual-deck outro blend active" else "Seamless beat-matched crossfades",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = state.isAutoMixEnabled,
+                        onCheckedChange = { player.setAutomixEnabled(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color(0xFFDDD6FE),
+                            checkedTrackColor = Color(0xFF8B5CF6),
+                        ),
+                    )
+                }
+
+                if (state.isAutoMixEnabled) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = "Transition Phrase",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = state.autoMixBars == 8,
+                                onClick = { player.setAutomixBars(8) },
+                                label = { Text("8 Bars") },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFF8B5CF6),
+                                    selectedLabelColor = Color.White,
+                                ),
+                            )
+                            FilterChip(
+                                selected = state.autoMixBars == 16,
+                                onClick = { player.setAutomixBars(16) },
+                                label = { Text("16 Bars") },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFF8B5CF6),
+                                    selectedLabelColor = Color.White,
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+
             // Live Blending Bar & Crossover Details (when blending)
             if (isBlending) {
                 Column(
@@ -5313,7 +5386,7 @@ private fun AutoDJLiveMonitorCard(
                         text = when {
                             state.autoDJStatus != null -> "Auto DJ: ${state.autoDJStatus}"
                             state.isAutoDJActive -> "Auto DJ Queue: Continuous & Ready"
-                            else -> "Auto DJ: Queue prefetching disabled"
+                            else -> "Auto DJ: Continuous Queue OFF"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -5322,11 +5395,20 @@ private fun AutoDJLiveMonitorCard(
                     )
                 }
 
-                if (state.isBuffering || state.autoDJStatus != null) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(12.dp),
-                        strokeWidth = 1.5.dp,
-                        color = Color(0xFFF59E0B),
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (state.isBuffering || state.autoDJStatus != null) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(12.dp),
+                            strokeWidth = 1.5.dp,
+                            color = Color(0xFFF59E0B),
+                        )
+                    }
+                    Switch(
+                        checked = state.isAutoDJActive,
+                        onCheckedChange = { player.setAutoDJEnabled(it) },
                     )
                 }
             }
