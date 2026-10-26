@@ -61,6 +61,14 @@ class NativeAutoMixEngine @Inject constructor() : Closeable {
         withHandle(Unit) { nativeTriggerFadeNow(it) }
     }
 
+    fun triggerFadeBars(bars: Int) {
+        withHandle(Unit) { nativeTriggerFadeBars(it, bars.coerceIn(4, 16)) }
+    }
+
+    fun triggerFadeDurationMs(durationMs: Long) {
+        withHandle(Unit) { nativeTriggerFadeDurationMs(it, durationMs.coerceAtLeast(1L)) }
+    }
+
     fun reset() {
         withHandle(Unit) { nativeReset(it) }
     }
@@ -117,6 +125,8 @@ class NativeAutoMixEngine @Inject constructor() : Closeable {
         @JvmStatic private external fun nativeSetEnabled(handle: Long, enabled: Boolean)
         @JvmStatic private external fun nativeSetBarMode(handle: Long, bars: Int)
         @JvmStatic private external fun nativeTriggerFadeNow(handle: Long)
+        @JvmStatic private external fun nativeTriggerFadeBars(handle: Long, bars: Int)
+        @JvmStatic private external fun nativeTriggerFadeDurationMs(handle: Long, durationMs: Long)
         @JvmStatic private external fun nativeReset(handle: Long)
         @JvmStatic private external fun nativeWriteDeckBPcm(
             handle: Long,

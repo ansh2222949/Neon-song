@@ -40,6 +40,8 @@ class NativeProcessingAudioSink(
     private val onPlatformEffectsRequired: (Boolean) -> Unit = {},
     private val usbOutput: UsbBitPerfectOutput? = null,
     private val exclusiveUsb: ExclusiveUsbOutput? = null,
+    private val autoMixEngine: NativeAutoMixEngine? = null,
+    standbyAutoMixRole: Boolean = false,
 ) : AudioSink {
     private var activeDelegate: DefaultAudioSink = fallbackDelegate
     // Read on the main thread for the signal-path verdict, written on the
@@ -56,6 +58,8 @@ class NativeProcessingAudioSink(
     @Volatile private var hasConfigured = false
     @Volatile private var exclusiveWanted = false
     @Volatile private var usbExclusive = false
+    @Volatile private var autoMixEnabled = false
+    @Volatile private var autoMixActive = !standbyAutoMixRole
     @Volatile private var exclusiveStartFailed = false
     @Volatile private var exclusiveEnded = false
     /**
@@ -108,6 +112,16 @@ class NativeProcessingAudioSink(
 
     var onConfiguredFormat: ((sampleRateHz: Int, pcmEncoding: Int, channelCount: Int) -> Unit)? = null
     var bitDepthHintProvider: (() -> Int?)? = null
+
+    /** Updated by MusicPlayer when the dual-deck players swap roles. */
+    fun setAutoMixActive(active: Boolean) {
+        autoMixActive = active
+    }
+
+    /** Avoids a JNI availability query on every renderer callback. */
+    fun setAutoMixEnabled(enabled: Boolean) {
+        autoMixEnabled = enabled && autoMixEngine?.isAvailable == true
+    }
 
     override fun setListener(listener: AudioSink.Listener) {
         enhancedDelegate.setListener(listener)
@@ -637,11 +651,19 @@ class NativeProcessingAudioSink(
             pendingAccessUnitCount = encodedAccessUnitCount
             pendingOutputFrameCount = output.remaining() /
                 (Float.SIZE_BYTES * outputChannelCount)
+            routeAutoMixOutput(output)
         }
 
         val output = pendingOutput ?: return true
         if (output.hasRemaining()) {
-            activeDelegate.handleBuffer(output, pendingPresentationTimeUs, pendingAccessUnitCount)
+            if (!suppressStandbyAutoMixOutput()) {
+                activeDelegate.handleBuffer(output, pendingPresentationTimeUs, pendingAccessUnitCount)
+            } else {
+                // Deck B is a decoded producer for the native master. It must
+                // advance Media3's renderer without also reaching AudioTrack,
+                // otherwise the same incoming PCM is audible twice.
+                output.position(output.limit())
+            }
         }
         if (output.hasRemaining()) return false
 
@@ -653,6 +675,21 @@ class NativeProcessingAudioSink(
         clearPending()
         return true
     }
+
+    private fun routeAutoMixOutput(output: ByteBuffer) {
+        if (!autoMixEnabled || outputChannelCount != 2 || !output.isDirect) return
+        val frames = output.remaining() / (Float.SIZE_BYTES * outputChannelCount)
+        if (frames <= 0) return
+        val engine = autoMixEngine ?: return
+        if (autoMixActive) {
+            engine.process(output, frames)
+        } else {
+            engine.writeDeckBPcm(output, frames)
+        }
+    }
+
+    private fun suppressStandbyAutoMixOutput(): Boolean =
+        autoMixEnabled && !autoMixActive && outputChannelCount == 2
 
     override fun playToEndOfStream() {
         if (usbExclusive) {

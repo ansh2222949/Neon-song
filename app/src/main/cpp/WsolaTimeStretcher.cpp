@@ -25,16 +25,20 @@ void WsolaTimeStretcher::configure(double sampleRate, std::size_t channels) noex
             0.5 * (1.0 - std::cos(2.0 * M_PI * static_cast<double>(i) / static_cast<double>(kWindowSize))));
     }
 
-    inputBuffer_.reserve(kWindowSize * 8 * channels_);
-    outputBuffer_.reserve(kWindowSize * 8 * channels_);
+    inputBuffer_.assign(kInputCapacityFrames * channels_, 0.0F);
+    outputBuffer_.assign(kOutputCapacityFrames * channels_, 0.0F);
     prevTemplate_.resize(kWindowSize * channels_, 0.0F);
 
     reset();
 }
 
 void WsolaTimeStretcher::reset() noexcept {
-    inputBuffer_.clear();
-    outputBuffer_.clear();
+    inputReadPos_ = 0;
+    inputWritePos_ = 0;
+    inputFramesAvailable_ = 0;
+    outputReadPos_ = 0;
+    outputWritePos_ = 0;
+    outputFramesAvailable_ = 0;
     std::fill(prevTemplate_.begin(), prevTemplate_.end(), 0.0F);
     nominalAnalysisPos_ = 0.0;
     hasPreviousTemplate_ = false;
@@ -69,13 +73,13 @@ void WsolaTimeStretcher::updateRamp() noexcept {
 }
 
 std::size_t WsolaTimeStretcher::findBestOffset(std::size_t nominalPos) const noexcept {
-    if (!hasPreviousTemplate_ || inputBuffer_.size() < (nominalPos + kWindowSize + kSearchWindow) * channels_) {
+    if (!hasPreviousTemplate_ || inputFramesAvailable_ < nominalPos + kWindowSize + kSearchWindow) {
         return nominalPos;
     }
 
     const std::size_t minPos = (nominalPos >= kSearchWindow) ? (nominalPos - kSearchWindow) : 0;
     const std::size_t maxPos = nominalPos + kSearchWindow;
-    const std::size_t maxAllowed = (inputBuffer_.size() / channels_) - kWindowSize;
+    const std::size_t maxAllowed = inputFramesAvailable_ - kWindowSize;
     const std::size_t clampedMax = std::min(maxPos, maxAllowed);
 
     if (minPos >= clampedMax) return nominalPos;
@@ -85,11 +89,10 @@ std::size_t WsolaTimeStretcher::findBestOffset(std::size_t nominalPos) const noe
 
     for (std::size_t cand = minPos; cand <= clampedMax; cand += 2) {
         float score = 0.0F;
-        const float* candPtr = &inputBuffer_[cand * channels_];
         const float* prevPtr = prevTemplate_.data();
 
         for (std::size_t i = 0; i < kWindowSize; i += 2) {
-            score += prevPtr[i * channels_] * candPtr[i * channels_];
+            score += prevPtr[i * channels_] * inputSample(cand + i, 0);
         }
 
         if (score > bestScore) {
@@ -101,6 +104,56 @@ std::size_t WsolaTimeStretcher::findBestOffset(std::size_t nominalPos) const noe
     return bestPos;
 }
 
+void WsolaTimeStretcher::appendInput(const float* inputStereo, std::size_t inputFrames) noexcept {
+    if (inputStereo == nullptr || inputFrames == 0) return;
+    const std::size_t capacity = inputBuffer_.size() / channels_;
+    const std::size_t framesToCopy = std::min(inputFrames, capacity - inputFramesAvailable_);
+    for (std::size_t f = 0; f < framesToCopy; ++f) {
+        const std::size_t dst = inputWritePos_ * channels_;
+        for (std::size_t ch = 0; ch < channels_; ++ch) {
+            inputBuffer_[dst + ch] = inputStereo[f * channels_ + ch];
+        }
+        inputWritePos_ = (inputWritePos_ + 1) % capacity;
+    }
+    inputFramesAvailable_ += framesToCopy;
+}
+
+void WsolaTimeStretcher::consumeInput(std::size_t frames) noexcept {
+    const std::size_t consumed = std::min(frames, inputFramesAvailable_);
+    const std::size_t capacity = inputBuffer_.size() / channels_;
+    inputReadPos_ = (inputReadPos_ + consumed) % capacity;
+    inputFramesAvailable_ -= consumed;
+}
+
+float WsolaTimeStretcher::inputSample(std::size_t frame, std::size_t channel) const noexcept {
+    const std::size_t capacity = inputBuffer_.size() / channels_;
+    return inputBuffer_[((inputReadPos_ + frame) % capacity) * channels_ + channel];
+}
+
+void WsolaTimeStretcher::drainOutput(
+    float* outputStereo,
+    std::size_t& framesWritten,
+    std::size_t outputCapacityFrames,
+    std::size_t keepFrames) noexcept {
+    if (outputStereo == nullptr || framesWritten >= outputCapacityFrames) return;
+    const std::size_t drainable = outputFramesAvailable_ > keepFrames
+        ? outputFramesAvailable_ - keepFrames
+        : 0;
+    const std::size_t count = std::min(drainable, outputCapacityFrames - framesWritten);
+    const std::size_t capacity = outputBuffer_.size() / channels_;
+    for (std::size_t f = 0; f < count; ++f) {
+        const std::size_t src = outputReadPos_ * channels_;
+        for (std::size_t ch = 0; ch < channels_; ++ch) {
+            outputStereo[(framesWritten + f) * channels_ + ch] = outputBuffer_[src + ch];
+            outputBuffer_[src + ch] = 0.0F;
+        }
+        outputReadPos_ = (outputReadPos_ + 1) % capacity;
+    }
+    outputFramesAvailable_ -= count;
+    outputWritePos_ = outputReadPos_;
+    framesWritten += count;
+}
+
 std::size_t WsolaTimeStretcher::process(
     const float* inputStereo,
     std::size_t inputFrames,
@@ -108,16 +161,13 @@ std::size_t WsolaTimeStretcher::process(
     std::size_t outputCapacityFrames) noexcept {
     if (outputStereo == nullptr || outputCapacityFrames == 0) return 0;
 
-    // Append input to buffer
-    if (inputStereo != nullptr && inputFrames > 0) {
-        const std::size_t samples = inputFrames * channels_;
-        inputBuffer_.insert(inputBuffer_.end(), inputStereo, inputStereo + samples);
-    }
+    appendInput(inputStereo, inputFrames);
 
     const std::size_t minInputNeeded = (kWindowSize + kSearchWindow * 2) * channels_;
 
     // Generate synthesis hops
-    while (inputBuffer_.size() >= minInputNeeded) {
+    std::size_t framesWritten = 0;
+    while (inputFramesAvailable_ >= minInputNeeded) {
         updateRamp();
 
         const double analysisHop = static_cast<double>(kSynthesisHop) / static_cast<double>(currentRatio_);
@@ -126,24 +176,29 @@ std::size_t WsolaTimeStretcher::process(
 
         // Current start of new window in outputBuffer
         // The overlap region is the last (kWindowSize - kSynthesisHop) frames
-        const std::size_t currentOutFrames = outputBuffer_.size() / channels_;
+        // Drain output that is outside the overlap region before adding the
+        // next synthesis hop. This keeps the fixed ring bounded while the
+        // overlap region remains available for overlap-add.
+        drainOutput(outputStereo, framesWritten, outputCapacityFrames, kWindowSize - kSynthesisHop);
+        const std::size_t currentOutFrames = outputFramesAvailable_;
         const std::size_t synthesisStart = (currentOutFrames >= (kWindowSize - kSynthesisHop))
             ? (currentOutFrames - (kWindowSize - kSynthesisHop))
             : 0;
 
         // Resize outputBuffer to accommodate synthesisStart + kWindowSize frames
         const std::size_t requiredFrames = synthesisStart + kWindowSize;
-        if (currentOutFrames < requiredFrames) {
-            outputBuffer_.resize(requiredFrames * channels_, 0.0F);
+        if (requiredFrames > kOutputCapacityFrames) break;
+        for (std::size_t f = currentOutFrames; f < requiredFrames; ++f) {
+            const std::size_t idx = ((outputWritePos_ + f) % kOutputCapacityFrames) * channels_;
+            for (std::size_t ch = 0; ch < channels_; ++ch) outputBuffer_[idx + ch] = 0.0F;
         }
 
         // Overlap-add windowed segment
         for (std::size_t i = 0; i < kWindowSize; ++i) {
             const float w = hannWindow_[i];
-            const std::size_t outIdx = (synthesisStart + i) * channels_;
-            const std::size_t inIdx = (bestPos + i) * channels_;
+            const std::size_t outIdx = ((outputWritePos_ + synthesisStart + i) % kOutputCapacityFrames) * channels_;
             for (std::size_t ch = 0; ch < channels_; ++ch) {
-                outputBuffer_[outIdx + ch] += inputBuffer_[inIdx + ch] * w;
+                outputBuffer_[outIdx + ch] += inputSample(bestPos + i, ch) * w;
             }
         }
 
@@ -151,8 +206,8 @@ std::size_t WsolaTimeStretcher::process(
         for (std::size_t i = 0; i < kWindowSize; ++i) {
             const std::size_t srcIndex = bestPos + kSynthesisHop + i;
             for (std::size_t ch = 0; ch < channels_; ++ch) {
-                if (srcIndex * channels_ + ch < inputBuffer_.size()) {
-                    prevTemplate_[i * channels_ + ch] = inputBuffer_[srcIndex * channels_ + ch] * hannWindow_[i];
+                if (srcIndex < inputFramesAvailable_) {
+                    prevTemplate_[i * channels_ + ch] = inputSample(srcIndex, ch) * hannWindow_[i];
                 } else {
                     prevTemplate_[i * channels_ + ch] = 0.0F;
                 }
@@ -162,25 +217,12 @@ std::size_t WsolaTimeStretcher::process(
 
         // Advance input buffer by analysisHop
         const std::size_t consumedFrames = static_cast<std::size_t>(analysisHop);
-        if (consumedFrames * channels_ < inputBuffer_.size()) {
-            inputBuffer_.erase(inputBuffer_.begin(), inputBuffer_.begin() + consumedFrames * channels_);
-        } else {
-            inputBuffer_.clear();
-        }
+        consumeInput(consumedFrames);
+        outputFramesAvailable_ = requiredFrames;
         nominalAnalysisPos_ = 0.0;
     }
 
-    // Drain ready frames from outputBuffer_ to outputStereo
-    // Ready frames are those beyond the overlap region (up to outputBuffer_.size() - (kWindowSize - kSynthesisHop))
-    std::size_t framesWritten = 0;
-    const std::size_t overlapFrames = kWindowSize - kSynthesisHop;
-    if (outputBuffer_.size() > overlapFrames * channels_) {
-        const std::size_t availableFrames = (outputBuffer_.size() / channels_) - overlapFrames;
-        framesWritten = std::min(availableFrames, outputCapacityFrames);
-
-        std::memcpy(outputStereo, outputBuffer_.data(), framesWritten * channels_ * sizeof(float));
-        outputBuffer_.erase(outputBuffer_.begin(), outputBuffer_.begin() + framesWritten * channels_);
-    }
+    drainOutput(outputStereo, framesWritten, outputCapacityFrames);
 
     return framesWritten;
 }
@@ -188,14 +230,9 @@ std::size_t WsolaTimeStretcher::process(
 std::size_t WsolaTimeStretcher::flush(float* outputStereo, std::size_t outputCapacityFrames) noexcept {
     if (outputStereo == nullptr || outputCapacityFrames == 0) return 0;
 
-    const std::size_t availableFrames = outputBuffer_.size() / channels_;
-    const std::size_t framesToCopy = std::min(availableFrames, outputCapacityFrames);
-
-    if (framesToCopy > 0) {
-        std::memcpy(outputStereo, outputBuffer_.data(), framesToCopy * channels_ * sizeof(float));
-        outputBuffer_.erase(outputBuffer_.begin(), outputBuffer_.begin() + framesToCopy * channels_);
-    }
-    return framesToCopy;
+    std::size_t framesWritten = 0;
+    drainOutput(outputStereo, framesWritten, outputCapacityFrames);
+    return framesWritten;
 }
 
 } // namespace lastwave::audio

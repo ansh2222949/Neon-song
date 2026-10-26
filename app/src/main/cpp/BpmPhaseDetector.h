@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 #include <array>
+#include <atomic>
 
 namespace lastwave::audio {
 
@@ -19,6 +20,9 @@ public:
     static constexpr std::size_t kEnvelopeBufferSize = 1024; // ~5.12 seconds buffer
     static constexpr std::size_t kMinLag = 66;  // 181.8 BPM @ 200Hz
     static constexpr std::size_t kMaxLag = 200; // 60.0 BPM @ 200Hz
+    static constexpr std::size_t kCorrelationBufferSize = 256;
+    static constexpr std::uint64_t kAnalysisIntervalMs = 1750;
+    static constexpr float kConfidenceLockThreshold = 0.75F;
 
     BpmPhaseDetector() noexcept;
     void configure(double sampleRate) noexcept;
@@ -43,9 +47,13 @@ private:
     float decimationAccumulator_{0.0F};
     std::size_t decimationCounter_{0};
     std::uint64_t totalFramesProcessed_{0};
+    std::uint64_t nextAnalysisFrame_{0};
+    bool confidenceLocked_{false};
 
     // Ring buffer of decimated envelope
     std::vector<float> envelopeBuffer_;
+    std::vector<float> linearEnvelope_;
+    std::vector<float> correlationValues_;
     std::size_t envelopeWritePos_{0};
     bool envelopeFull_{false};
 
@@ -55,7 +63,9 @@ private:
     std::uint64_t lastPeakFrame_{0};
 
     // Cached result
-    BeatDetectionResult currentResult_{};
+    std::atomic<float> currentBpm_{120.0F};
+    std::atomic<float> currentConfidence_{0.0F};
+    std::atomic<std::uint64_t> currentDownbeatFrame_{0};
     void updateAutocorrelation() noexcept;
 };
 

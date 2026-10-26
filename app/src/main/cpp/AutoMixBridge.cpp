@@ -81,6 +81,30 @@ Java_com_neonsong_app_playback_NativeAutoMixEngine_nativeTriggerFadeNow(
 }
 
 JNIEXPORT void JNICALL
+Java_com_neonsong_app_playback_NativeAutoMixEngine_nativeTriggerFadeBars(
+    JNIEnv*,
+    jclass,
+    jlong handle,
+    jint bars) {
+    auto* engine = fromHandle(handle);
+    if (engine != nullptr) {
+        engine->triggerFadeBars(static_cast<int>(bars));
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_neonsong_app_playback_NativeAutoMixEngine_nativeTriggerFadeDurationMs(
+    JNIEnv*,
+    jclass,
+    jlong handle,
+    jlong durationMs) {
+    auto* engine = fromHandle(handle);
+    if (engine != nullptr) {
+        engine->triggerFadeDurationMs(static_cast<std::int64_t>(durationMs));
+    }
+}
+
+JNIEXPORT void JNICALL
 Java_com_neonsong_app_playback_NativeAutoMixEngine_nativeReset(
     JNIEnv*,
     jclass,

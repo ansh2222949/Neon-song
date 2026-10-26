@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <vector>
 #include <atomic>
-#include <mutex>
 
 namespace lastwave::audio {
 
@@ -36,6 +35,8 @@ public:
     [[nodiscard]] int getBarMode() const noexcept;
 
     void triggerFadeNow() noexcept; // 4 bars fast blend
+    void triggerFadeBars(int bars) noexcept;
+    void triggerFadeDurationMs(std::int64_t durationMs) noexcept;
     void reset() noexcept;
 
     // Writes decoded Float32 stereo PCM for Deck B (incoming track)
@@ -63,19 +64,17 @@ private:
     BpmPhaseDetector deckBDetector_;
     EchoTailProcessor deckAEcho_;
 
-    mutable std::mutex bufferMutex_;
     std::vector<float> deckBRingBuffer_;
-    std::size_t deckBReadPos_{0};
-    std::size_t deckBWritePos_{0};
-    std::size_t deckBAvailableFrames_{0};
+    std::atomic<std::uint64_t> deckBReadCounter_{0};
+    std::atomic<std::uint64_t> deckBWriteCounter_{0};
 
-    std::size_t deckBLeadingTrimFrames_{0};
+    std::atomic<std::size_t> deckBLeadingTrimFrames_{0};
     bool deckBTrimCalculated_{false};
 
     // Transition tracking
     std::size_t transitionTotalFrames_{0};
     std::size_t transitionCurrentFrame_{0};
-    float transitionProgress_{0.0F};
+    std::atomic<float> transitionProgress_{0.0F};
     bool bassSwapped_{false};
 
     // Outro energy tracking
@@ -87,8 +86,9 @@ private:
     std::vector<float> deckBScratch_;
     std::vector<float> deckBStretchedScratch_;
 
-    void startTransition(AutoMixState mode, int bars) noexcept;
+    void startTransition(AutoMixState mode, int bars, double durationOverrideSeconds = -1.0) noexcept;
     void trimDeckBLeadingSilence() noexcept;
+    void processBlock(float* deckAStereo, std::size_t frames) noexcept;
 };
 
 } // namespace lastwave::audio

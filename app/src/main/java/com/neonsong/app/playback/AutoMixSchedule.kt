@@ -56,13 +56,13 @@ data class AutoMixPlanInput(
     val barMs: Long
         get() {
             val safeBpm = if (bpm in 50f..220f) bpm else 120f
-            return ((4.0 * (60.0 / safeBpm)) * 1000.0).toLong().coerceIn(1000L, 5000L)
+            return ((4.0 * (60.0 / safeBpm)) * 1000.0).toLong()
         }
 
     /** 8-bar or 16-bar duration, bounded by 1/3 of total track duration */
     val transitionMs: Long
         get() {
-            val fullBars = barMode.coerceIn(4, 16) * barMs
+            val fullBars = (if (barMode >= 16) 16 else 8) * barMs
             return if (durationMs > 0L) minOf(fullBars, durationMs / 3) else fullBars
         }
 
@@ -109,7 +109,7 @@ fun planAutoMix(input: AutoMixPlanInput): AutoMixDecision = with(input) {
         remainingMs,
         standbyDurationMs.takeIf { it > 0L }?.div(3) ?: transitionMs,
         sustainableMs,
-    ).coerceAtLeast(1000L)
+    ).coerceAtLeast(if (durationMs > 0L) minOf(1000L, durationMs / 3) else 1000L)
 
     return AutoMixDecision.HandOff(overlapMs, barMode)
 }

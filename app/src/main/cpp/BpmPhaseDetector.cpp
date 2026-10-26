@@ -9,7 +9,9 @@ namespace lastwave::audio {
 #endif
 
 BpmPhaseDetector::BpmPhaseDetector() noexcept
-    : envelopeBuffer_(kEnvelopeBufferSize, 0.0F) {
+    : envelopeBuffer_(kEnvelopeBufferSize, 0.0F),
+      linearEnvelope_(kEnvelopeBufferSize, 0.0F),
+      correlationValues_(kCorrelationBufferSize, 0.0F) {
     configure(48000.0);
 }
 
@@ -42,11 +44,15 @@ void BpmPhaseDetector::reset() noexcept {
     decimationAccumulator_ = 0.0F;
     decimationCounter_ = 0;
     totalFramesProcessed_ = 0;
+    nextAnalysisFrame_ = 0;
+    confidenceLocked_ = false;
     envelopeWritePos_ = 0;
     envelopeFull_ = false;
     previousFiltered_ = 0.0F;
     lastPeakFrame_ = 0;
-    currentResult_ = BeatDetectionResult{120.0F, 0.0F, 0};
+    currentBpm_.store(120.0F, std::memory_order_release);
+    currentConfidence_.store(0.0F, std::memory_order_release);
+    currentDownbeatFrame_.store(0, std::memory_order_release);
     std::fill(envelopeBuffer_.begin(), envelopeBuffer_.end(), 0.0F);
 }
 
@@ -95,9 +101,15 @@ void BpmPhaseDetector::process(const float* stereoInterleaved, std::size_t frame
 
     totalFramesProcessed_ += frames;
 
-    // Run autocorrelation update periodically (e.g. once every ~0.5s of audio)
-    if (totalFramesProcessed_ >= sampleRate_ * 1.5) {
+    // Autocorrelation is intentionally rate limited. The old condition only
+    // checked the lower bound, so after 1.5s it ran on every 5-10ms callback.
+    // Once a stable tempo is found there is no reason to spend DSP budget
+    // re-solving the same track until the detector is reset for a new stream.
+    if (!confidenceLocked_ &&
+        totalFramesProcessed_ >= static_cast<std::uint64_t>(nextAnalysisFrame_)) {
         updateAutocorrelation();
+        nextAnalysisFrame_ = totalFramesProcessed_ + static_cast<std::uint64_t>(
+            sampleRate_ * (static_cast<double>(kAnalysisIntervalMs) / 1000.0));
     }
 }
 
@@ -105,21 +117,24 @@ void BpmPhaseDetector::updateAutocorrelation() noexcept {
     const std::size_t numBins = envelopeFull_ ? kEnvelopeBufferSize : envelopeWritePos_;
     if (numBins < kMaxLag + 50) return;
 
-    // Unroll linear view of envelope
-    std::vector<float> linearEnv(numBins);
+    // Unroll into storage reserved at construction/configuration time. This
+    // function runs from the audio callback and must never allocate.
+    float* linearEnv = linearEnvelope_.data();
     if (envelopeFull_) {
         for (std::size_t i = 0; i < numBins; ++i) {
             linearEnv[i] = envelopeBuffer_[(envelopeWritePos_ + i) % kEnvelopeBufferSize];
         }
     } else {
-        std::copy(envelopeBuffer_.begin(), envelopeBuffer_.begin() + numBins, linearEnv.begin());
+        std::copy_n(envelopeBuffer_.begin(), numBins, linearEnv);
     }
 
     // Mean-center envelope
     double sum = 0.0;
-    for (float v : linearEnv) sum += v;
-    const float mean = static_cast<float>(sum / numBins);
-    for (float& v : linearEnv) v = std::max(0.0F, v - mean);
+    for (std::size_t i = 0; i < numBins; ++i) sum += linearEnv[i];
+    const float mean = static_cast<float>(sum / static_cast<double>(numBins));
+    for (std::size_t i = 0; i < numBins; ++i) {
+        linearEnv[i] = std::max(0.0F, linearEnv[i] - mean);
+    }
 
     const double envRate = sampleRate_ / static_cast<double>(decimationFactor_);
     const std::size_t minLag = static_cast<std::size_t>(std::round((60.0 / 185.0) * envRate));
@@ -127,7 +142,8 @@ void BpmPhaseDetector::updateAutocorrelation() noexcept {
 
     float maxCorr = 0.0F;
     std::size_t bestLag = minLag;
-    std::vector<float> corrValues(maxLag + 2, 0.0F);
+    if (maxLag + 2 > correlationValues_.size()) return;
+    std::fill(correlationValues_.begin(), correlationValues_.end(), 0.0F);
 
     const std::size_t windowSize = numBins - maxLag;
     if (windowSize < 100) return;
@@ -138,7 +154,7 @@ void BpmPhaseDetector::updateAutocorrelation() noexcept {
             r += linearEnv[n] * linearEnv[n + lag];
         }
         const float corr = static_cast<float>(r);
-        corrValues[lag] = corr;
+        correlationValues_[lag] = corr;
         if (corr > maxCorr) {
             maxCorr = corr;
             bestLag = lag;
@@ -150,9 +166,9 @@ void BpmPhaseDetector::updateAutocorrelation() noexcept {
     // Parabolic interpolation around peak
     double refinedLag = static_cast<double>(bestLag);
     if (bestLag > minLag && bestLag < maxLag) {
-        const double y1 = corrValues[bestLag - 1];
-        const double y2 = corrValues[bestLag];
-        const double y3 = corrValues[bestLag + 1];
+        const double y1 = correlationValues_[bestLag - 1];
+        const double y2 = correlationValues_[bestLag];
+        const double y3 = correlationValues_[bestLag + 1];
         const double denom = (y1 - 2.0 * y2 + y3);
         if (std::abs(denom) > 1.0e-9) {
             refinedLag += (y1 - y3) / (2.0 * denom);
@@ -165,19 +181,28 @@ void BpmPhaseDetector::updateAutocorrelation() noexcept {
     double corrSum = 0.0;
     std::size_t count = 0;
     for (std::size_t l = minLag; l <= maxLag; ++l) {
-        corrSum += corrValues[l];
+        corrSum += correlationValues_[l];
         count++;
     }
-    const float avgCorr = (count > 0) ? static_cast<float>(corrSum / count) : 1.0F;
+    const float avgCorr = (count > 0)
+        ? static_cast<float>(corrSum / static_cast<double>(count))
+        : 1.0F;
     const float confidence = std::clamp((maxCorr - avgCorr) / (maxCorr + 1.0e-5F), 0.0F, 1.0F);
 
-    currentResult_.bpm = std::clamp(detectedBpm, 50.0F, 220.0F);
-    currentResult_.confidence = confidence;
-    currentResult_.lastDownbeatFrame = lastPeakFrame_;
+    currentBpm_.store(std::clamp(detectedBpm, 50.0F, 220.0F), std::memory_order_release);
+    currentConfidence_.store(confidence, std::memory_order_release);
+    currentDownbeatFrame_.store(lastPeakFrame_, std::memory_order_release);
+    if (confidence >= kConfidenceLockThreshold) {
+        confidenceLocked_ = true;
+    }
 }
 
 BeatDetectionResult BpmPhaseDetector::getResult() const noexcept {
-    return currentResult_;
+    return BeatDetectionResult{
+        currentBpm_.load(std::memory_order_acquire),
+        currentConfidence_.load(std::memory_order_acquire),
+        currentDownbeatFrame_.load(std::memory_order_acquire),
+    };
 }
 
 } // namespace lastwave::audio

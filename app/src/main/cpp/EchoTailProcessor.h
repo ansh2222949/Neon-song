@@ -51,6 +51,22 @@ public:
         filterState_[1] = 0.0F;
     }
 
+    // Changes tempo-dependent coefficients without rebuilding the delay
+    // storage. This is safe from the audio callback; configure() remains a
+    // setup-time operation because it sizes the backing vector.
+    void setTempo(float bpm) noexcept {
+        bpm = std::clamp(bpm, 50.0F, 220.0F);
+        const double beatSeconds = 60.0 / static_cast<double>(bpm);
+        double delaySeconds = beatSeconds * 0.5;
+        if (delaySeconds > 0.45) delaySeconds = beatSeconds * 0.25;
+        delaySeconds = std::clamp(delaySeconds, 0.18, 0.45);
+        const std::size_t capacity = buffer_.size() / 2;
+        delayFrames_ = std::min(
+            static_cast<std::size_t>(std::round(delaySeconds * sampleRate_)),
+            capacity > 0 ? capacity - 1 : 0);
+        feedbackGain_ = static_cast<float>(std::exp(-6.907755 * (delaySeconds / 1.2)));
+    }
+
     void reset() noexcept {
         std::fill(buffer_.begin(), buffer_.end(), 0.0F);
         writeIndex_ = 0;
