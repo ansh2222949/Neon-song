@@ -82,6 +82,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -2863,6 +2864,43 @@ private fun FullPlayer(
                                 )
                             }
                         }
+                        val isCustomAudio = state.speed != 1f || state.pitch != 1f || state.autoMixState != AutoMixState.IDLE || state.isAutoDJActive
+                        IconButton(
+                            onClick = {
+                                hapticManager.click()
+                                showAudioControls = true
+                            },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls)
+                                .then(
+                                    if (isCustomAudio) Modifier.border(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.55f), CircleShape)
+                                    else Modifier
+                                )
+                                .background(
+                                    if (isCustomAudio) Color(0xFF8B5CF6).copy(alpha = 0.26f)
+                                    else liquidGlassContainerColor(Color.White.copy(alpha = 0.14f)),
+                                ),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Filled.AutoAwesome,
+                                    contentDescription = "Auto DJ & Audio Studio",
+                                    modifier = Modifier.size(20.dp),
+                                    tint = if (isCustomAudio) Color(0xFFDDD6FE) else Color.White.copy(alpha = 0.94f),
+                                )
+                                if (isCustomAudio) {
+                                    Box(
+                                        Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = 2.dp, y = (-2).dp)
+                                            .size(5.dp)
+                                            .background(Color(0xFF8B5CF6), CircleShape)
+                                    )
+                                }
+                            }
+                        }
                         IconButton(
                             onClick = { showTrackMenu = true },
                             modifier = Modifier
@@ -4945,40 +4983,7 @@ private fun PlayerFloatingDock(
                         }
                     }
 
-                    // 4. Studio & Automix Controls
-                    val studioInteraction = remember { MutableInteractionSource() }
-                    val isStudioPressed by studioInteraction.collectIsPressedAsState()
-                    val studioScale by animateFloatAsState(if (isStudioPressed) 0.88f else 1.0f, ExpressiveMotion.appleTactileSpring(), label = "studioScale")
-                    val isCustomAudio = state.speed != 1f || state.pitch != 1f || state.autoMixState != AutoMixState.IDLE || state.isAutoDJActive
-                    val activeStudioBorder = BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.50f))
-
-                    Surface(
-                        onClick = {
-                            hapticManager.click()
-                            onOpenAudioControls()
-                        },
-                        interactionSource = studioInteraction,
-                        shape = RoundedCornerShape(100),
-                        color = if (isCustomAudio) Color(0xFF8B5CF6).copy(alpha = 0.22f) else Color.White.copy(alpha = 0.08f),
-                        border = if (isCustomAudio) activeStudioBorder else BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
-                        contentColor = if (isCustomAudio) Color(0xFFDDD6FE) else Color.White.copy(alpha = 0.90f),
-                        modifier = Modifier
-                            .height(dockItemHeight)
-                            .graphicsLayer { scaleX = studioScale; scaleY = studioScale },
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = if (compact) 8.dp else 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        ) {
-                            Icon(Icons.Filled.AutoAwesome, "Studio & Automix", Modifier.size(if (compact) 18.dp else 20.dp))
-                            if (isCustomAudio) {
-                                Box(Modifier.size(5.dp).background(Color(0xFF8B5CF6), CircleShape))
-                            }
-                        }
-                    }
-
-                    // 5. Playing Queue
+                    // 4. Playing Queue
                     val isQueueActive = currentTab == FullPlayerTab.QUEUE
                     val queueInteraction = remember { MutableInteractionSource() }
                     val isQueuePressed by queueInteraction.collectIsPressedAsState()

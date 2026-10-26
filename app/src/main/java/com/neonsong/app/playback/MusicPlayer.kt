@@ -254,6 +254,8 @@ class MusicPlayer @Inject constructor(
     private val songPlayStatsRepository: dagger.Lazy<com.neonsong.app.data.repository.SongPlayStatsRepository>,
     private val nativeAutoMixEngine: dagger.Lazy<NativeAutoMixEngine>,
     private val autoDJController: dagger.Lazy<com.neonsong.app.playback.autodj.AutoDJController>,
+    /** AutoEQ: started with the player so the saved correction is published before playback. */
+    private val autoEqController: com.neonsong.app.data.autoeq.AutoEqController,
 ) {
     private val appContext = context.applicationContext
     /**
@@ -3325,6 +3327,7 @@ class MusicPlayer @Inject constructor(
                 exclusiveHardwareVolume = hardwareVolume,
                 exclusiveFailureReason = exclusiveUsbOutput.lastFailureReason.takeIf { !exclusive },
                 clockFallbackResampled = clockFallback,
+                parametricEqActive = com.neonsong.app.playback.eq.ParametricEqNative.isEngaged(),
             ),
         )
     }

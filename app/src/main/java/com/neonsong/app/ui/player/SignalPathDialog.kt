@@ -489,6 +489,7 @@ private fun TelemetryCard(
 @Composable
 private fun verdictText(report: SignalPathReport): String {
     if (report.bitPerfect) return stringResource(R.string.signal_verdict_ok)
+    if (report.parametricEqActive) return stringResource(R.string.signal_verdict_direct_eq)
     val failing = report.checks.firstOrNull { !it.passed } ?: return ""
     return stringResource(failing.labelRes) +
         ": " +
@@ -499,16 +500,19 @@ private fun verdictText(report: SignalPathReport): String {
 private fun VerdictPill(report: SignalPathReport) {
     val bg = when {
         report.bitPerfect -> MaterialTheme.colorScheme.primary
+        report.parametricEqActive -> MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
         report.clockFallbackResampled -> Color(0xFFE65100).copy(alpha = 0.25f)
         else -> MaterialTheme.colorScheme.surfaceContainerHighest
     }
     val fg = when {
         report.bitPerfect -> MaterialTheme.colorScheme.onPrimary
+        report.parametricEqActive -> MaterialTheme.colorScheme.primary
         report.clockFallbackResampled -> Color(0xFFFFB74D)
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val text = when {
         report.bitPerfect -> stringResource(R.string.signal_bit_perfect)
+        report.parametricEqActive -> stringResource(R.string.signal_direct_eq)
         report.clockFallbackResampled -> stringResource(R.string.signal_resampled_dac)
         else -> stringResource(R.string.signal_check_path)
     }

@@ -80,6 +80,8 @@ add_library(
     AutoDJBridge.cpp
     WsolaTimeStretcher.cpp
     BpmPhaseDetector.cpp
+    ParametricEq.cpp
+    ParametricEqBridge.cpp
     NativeBridge.cpp
 )
 

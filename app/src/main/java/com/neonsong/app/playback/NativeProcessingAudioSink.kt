@@ -76,6 +76,15 @@ class NativeProcessingAudioSink(
      *  after the exclusive converter borrows the processor. */
     private var requestedOutputOverrideHz: Int? = null
 
+    /**
+     * AutoEQ on routes where PCM never enters the native Float32 DSP (USB
+     * exclusive, Bit-Perfect AudioTrack, platform fallback).
+     * The converter / processed paths get the same EQ inside the native DSP.
+     */
+    private val directEq = com.neonsong.app.playback.eq.DirectPcmEq()
+    /** Buffer already equalised: Media3 retries the same object until consumed. */
+    private var directEqBuffer: ByteBuffer? = null
+
     private var configuredFormat: Format? = null
     private var configuredBufferSize = 0
     private var configuredOutputChannels: IntArray? = null
@@ -157,6 +166,10 @@ class NativeProcessingAudioSink(
 
         if (format.sampleRate > 0) {
             onConfiguredFormat?.invoke(format.sampleRate, format.pcmEncoding, format.channelCount)
+        }
+        directEqBuffer = null
+        if (format.sampleMimeType == MimeTypes.AUDIO_RAW && format.sampleRate > 0) {
+            directEq.configure(format.sampleRate, format.channelCount, format.pcmEncoding)
         }
 
         if (tryConfigureExclusiveUsb(format)) {
@@ -418,6 +431,25 @@ class NativeProcessingAudioSink(
         encodedAccessUnitCount: Int,
     ): Boolean {
         maybeAdoptExclusiveUsb()
+        if (directEqBuffer !== buffer && isDirectEqRoute()) {
+            directEq.process(buffer)
+            directEqBuffer = buffer
+        }
+        val consumed = handleRoutedBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+        if (consumed) directEqBuffer = null
+        return consumed
+    }
+
+    private fun isDirectEqRoute(): Boolean = when {
+        usbExclusive -> !isExclusiveConverting()
+        else -> !processingActive
+    }
+
+    private fun handleRoutedBuffer(
+        buffer: ByteBuffer,
+        presentationTimeUs: Long,
+        encodedAccessUnitCount: Int,
+    ): Boolean {
         if (usbExclusive) {
             if (exclusiveUsb?.isPaused() == true) {
                 return false
@@ -1175,6 +1207,8 @@ class NativeProcessingAudioSink(
     }
 
     override fun flush() {
+        directEq.reset()
+        directEqBuffer = null
         clearPending()
         clearEndOfStream()
         exclusiveEnded = false
@@ -1204,6 +1238,8 @@ class NativeProcessingAudioSink(
     }
 
     override fun reset() {
+        directEq.reset()
+        directEqBuffer = null
         usbOutput?.setFormat(null)
         if (usbExclusive && exclusiveWanted) {
             exclusiveUsb?.prepareForNextItem()

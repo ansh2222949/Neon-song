@@ -64,6 +64,8 @@ data class SignalPathInput(
     val exclusiveFailureReason: String? = null,
     /** True when exclusive USB resampled through soxr because DAC clock unsupported. */
     val clockFallbackResampled: Boolean = false,
+    /** AutoEQ / manual parametric EQ is changing the signal (any route). */
+    val parametricEqActive: Boolean = false,
 )
 
 /**
@@ -91,6 +93,7 @@ data class SignalPathReport(
     val isPlaying: Boolean,
     val usbExclusiveActive: Boolean = false,
     val clockFallbackResampled: Boolean = false,
+    val parametricEqActive: Boolean = false,
 ) {
     companion object {
         fun initial() = SignalPathReport(
@@ -108,6 +111,7 @@ data class SignalPathReport(
             isPlaying = false,
             usbExclusiveActive = false,
             clockFallbackResampled = false,
+            parametricEqActive = false,
         )
     }
 }
@@ -216,6 +220,15 @@ fun evaluateSignalPath(i: SignalPathInput): SignalPathReport {
             R.string.signal_label_dsp,
             R.string.signal_detail_dsp_bypass,
             passed = true,
+        )
+    }
+
+    // 3b — AutoEQ / parametric EQ: a correction the user asked for.
+    if (i.parametricEqActive) {
+        checks += PathCheck(
+            R.string.signal_label_autoeq,
+            R.string.signal_detail_autoeq,
+            passed = false,
         )
     }
 
@@ -424,6 +437,7 @@ fun evaluateSignalPath(i: SignalPathInput): SignalPathReport {
         isPlaying = i.isPlaying,
         usbExclusiveActive = i.usbExclusiveActive,
         clockFallbackResampled = i.clockFallbackResampled,
+        parametricEqActive = i.parametricEqActive,
     )
 }
 
