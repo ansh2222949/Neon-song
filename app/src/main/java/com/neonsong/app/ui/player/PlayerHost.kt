@@ -123,6 +123,11 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.SurroundSound
 import androidx.compose.material.icons.filled.SmartDisplay
@@ -134,18 +139,25 @@ import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import kotlin.math.roundToInt
+import com.neonsong.app.playback.AutoMixState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -2327,6 +2339,7 @@ private fun FullPlayer(
 
     var showLyricsOffsetDialog by remember { mutableStateOf(false) }
     var showSignalPath by remember { mutableStateOf(false) }
+    var showAudioControls by remember { mutableStateOf(false) }
     val signalPath by player.signalPath.collectAsStateWithLifecycle()
     val configuration = LocalConfiguration.current
     val isLandscapeScreen = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -3707,6 +3720,7 @@ private fun FullPlayer(
                                             if (isVideoMode) closeVideoMode() else enterVideoMode()
                                         },
                                         onOpenSignalPath = { showSignalPath = true },
+                                        onOpenAudioControls = { showAudioControls = true },
                                         compact = isLandscape,
                                     )
                                 }
@@ -3938,6 +3952,13 @@ private fun FullPlayer(
             needsUsbPermission = dac != null && dac.hasUsbPeripheral && !dac.usbPermissionGranted,
             onRequestUsbAccess = player::requestUsbPermission,
             onDismiss = { showSignalPath = false },
+        )
+    }
+    if (showAudioControls) {
+        AudioControlsSheet(
+            player = player,
+            state = state,
+            onDismiss = { showAudioControls = false },
         )
     }
 }
@@ -4699,6 +4720,7 @@ private fun PlayerFloatingDock(
     hasVideo: Boolean,
     onToggleVideo: () -> Unit,
     onOpenSignalPath: () -> Unit,
+    onOpenAudioControls: () -> Unit = {},
     modifier: Modifier = Modifier,
     compact: Boolean = false,
 ) {
@@ -4923,7 +4945,40 @@ private fun PlayerFloatingDock(
                         }
                     }
 
-                    // 4. Playing Queue
+                    // 4. Studio & Automix Controls
+                    val studioInteraction = remember { MutableInteractionSource() }
+                    val isStudioPressed by studioInteraction.collectIsPressedAsState()
+                    val studioScale by animateFloatAsState(if (isStudioPressed) 0.88f else 1.0f, ExpressiveMotion.appleTactileSpring(), label = "studioScale")
+                    val isCustomAudio = state.speed != 1f || state.pitch != 1f || state.autoMixState != AutoMixState.IDLE || state.isAutoDJActive
+                    val activeStudioBorder = BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.50f))
+
+                    Surface(
+                        onClick = {
+                            hapticManager.click()
+                            onOpenAudioControls()
+                        },
+                        interactionSource = studioInteraction,
+                        shape = RoundedCornerShape(100),
+                        color = if (isCustomAudio) Color(0xFF8B5CF6).copy(alpha = 0.22f) else Color.White.copy(alpha = 0.08f),
+                        border = if (isCustomAudio) activeStudioBorder else BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+                        contentColor = if (isCustomAudio) Color(0xFFDDD6FE) else Color.White.copy(alpha = 0.90f),
+                        modifier = Modifier
+                            .height(dockItemHeight)
+                            .graphicsLayer { scaleX = studioScale; scaleY = studioScale },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = if (compact) 8.dp else 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Icon(Icons.Filled.AutoAwesome, "Studio & Automix", Modifier.size(if (compact) 18.dp else 20.dp))
+                            if (isCustomAudio) {
+                                Box(Modifier.size(5.dp).background(Color(0xFF8B5CF6), CircleShape))
+                            }
+                        }
+                    }
+
+                    // 5. Playing Queue
                     val isQueueActive = currentTab == FullPlayerTab.QUEUE
                     val queueInteraction = remember { MutableInteractionSource() }
                     val isQueuePressed by queueInteraction.collectIsPressedAsState()
@@ -5001,6 +5056,629 @@ private fun PlayerFloatingDock(
     }
 }
 
+@Composable
+private fun AutoDJLiveMonitorCard(
+    state: MusicPlayerState,
+    player: MusicPlayer,
+    modifier: Modifier = Modifier,
+) {
+    val isBlending = state.autoMixState == AutoMixState.FADING_AUTO || state.autoMixState == AutoMixState.FADING_FAST
+    val isArmed = state.autoMixState == AutoMixState.MONITORING_OUTRO
+    val isAnalyzing = state.autoMixState == AutoMixState.ANALYZING || state.autoMixState == AutoMixState.PREBUFFERING_DECK_B
+    val hasActiveAutoDJ = state.isAutoDJActive && state.autoDJStatus != null
+    val isAnyActive = state.isAutoMixActive || state.isAutoMixEnabled || state.isAutoDJActive
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // Header Row: Icon + Title + Live Status Pill
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isBlending) Color(0xFF8B5CF6).copy(alpha = 0.25f)
+                                else MaterialTheme.colorScheme.tertiaryContainer
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.AutoAwesome,
+                            contentDescription = null,
+                            tint = if (isBlending) Color(0xFFDDD6FE) else MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Auto DJ & Automix",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = if (isBlending) "Live Dual-Deck Outro Blend"
+                            else if (isArmed) "Outro Boundary Armed"
+                            else if (state.autoDJStatus != null) state.autoDJStatus
+                            else "Predictive Queue & Tempo Blends",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+
+                // Live status badge
+                val (badgeText, badgeBg, badgeFg) = when {
+                    isBlending -> Triple(
+                        "LIVE BLEND",
+                        Color(0xFF8B5CF6).copy(alpha = 0.30f),
+                        Color(0xFFDDD6FE)
+                    )
+                    isArmed -> Triple(
+                        "OUTRO ARMED",
+                        Color(0xFF10B981).copy(alpha = 0.25f),
+                        Color(0xFFA7F3D0)
+                    )
+                    isAnalyzing -> Triple(
+                        "PREPARING",
+                        Color(0xFF3B82F6).copy(alpha = 0.25f),
+                        Color(0xFFBFDBFE)
+                    )
+                    hasActiveAutoDJ -> Triple(
+                        "PREFETCHING",
+                        Color(0xFFF59E0B).copy(alpha = 0.25f),
+                        Color(0xFFFDE68A)
+                    )
+                    isAnyActive -> Triple(
+                        "ACTIVE",
+                        MaterialTheme.colorScheme.surfaceContainerHighest,
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    else -> Triple(
+                        "OFF",
+                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = badgeBg,
+                ) {
+                    Text(
+                        text = badgeText,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp,
+                        ),
+                        color = badgeFg,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    )
+                }
+            }
+
+            // Live Blending Bar & Crossover Details (when blending)
+            if (isBlending) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (state.autoMixState == AutoMixState.FADING_FAST) "Fast 4-bar Skip Blend" else "Deck A ➔ Deck B Cross-Blend",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "${(state.autoMixProgress * 100).roundToInt()}%",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF8B5CF6),
+                        )
+                    }
+
+                    LinearProgressIndicator(
+                        progress = { state.autoMixProgress.coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = Color(0xFF8B5CF6),
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        val bpmLabel = state.autoMixBpm?.let { "${it.roundToInt()} BPM" } ?: "Tempo Synced"
+                        Text(
+                            text = "• $bpmLabel (WSOLA)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        val bassDeck = if (state.autoMixProgress < 0.5f) "Deck A Bass" else "Deck B Bass"
+                        Text(
+                            text = "• 160Hz Linkwitz-Riley: $bassDeck",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            } else if (isArmed) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.GraphicEq,
+                        contentDescription = null,
+                        tint = Color(0xFF10B981),
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Column {
+                        Text(
+                            text = "Outro transition armed",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "Next track will blend automatically at the outro energy drop",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            } else if (isAnalyzing) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = if (state.autoMixState == AutoMixState.PREBUFFERING_DECK_B)
+                            "Prebuffering Deck B on FFmpeg..."
+                        else "Detecting kick-band BPM & phase alignment...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+
+            // Auto DJ Queue Lifecycle / Stream Resolution Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.QueueMusic,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = when {
+                            state.autoDJStatus != null -> "Auto DJ: ${state.autoDJStatus}"
+                            state.isAutoDJActive -> "Auto DJ Queue: Continuous & Ready"
+                            else -> "Auto DJ: Queue prefetching disabled"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
+                if (state.isBuffering || state.autoDJStatus != null) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(12.dp),
+                        strokeWidth = 1.5.dp,
+                        color = Color(0xFFF59E0B),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AudioControlsSheet(
+    player: MusicPlayer,
+    state: MusicPlayerState,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val haptics = LocalHapticFeedback.current
+    var isLocked by remember { mutableStateOf(true) }
+    var currentSpeed by remember(state.speed) { mutableFloatStateOf(state.speed) }
+    var currentPitch by remember(state.pitch) { mutableFloatStateOf(state.pitch) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        dragHandle = {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .size(width = 36.dp, height = 4.dp),
+            ) {}
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            // Header Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.VolumeUp,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Audio & Studio Controls",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "Volume, Slowed & Pitch Engine",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close")
+                }
+            }
+
+            // Volume Section Card
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "System Volume",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    VolumeSlider(
+                        isTranslucent = false,
+                        primaryColor = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+
+            // Auto DJ & Automix Live Section Card
+            AutoDJLiveMonitorCard(
+                state = state,
+                player = player,
+            )
+
+            // Studio Slowed & Pitch Section Card
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Slowed & Pitch Control",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = if (isLocked) "Linked tape varispeed mode" else "Independent time/pitch stretch",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
+                        // Lock Button Toggle
+                        FilterChip(
+                            selected = isLocked,
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                isLocked = !isLocked
+                                if (isLocked) {
+                                    // Snap pitch to speed
+                                    currentPitch = currentSpeed
+                                    player.setPlaybackParameters(currentSpeed, currentSpeed)
+                                }
+                            },
+                            label = {
+                                Text(
+                                    if (isLocked) "Linked" else "Free",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = if (isLocked) Icons.Filled.Lock else Icons.Filled.LockOpen,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            ),
+                        )
+                    }
+
+                    // Speed Slider
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Playback Speed",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                            ) {
+                                Text(
+                                    text = "${String.format(java.util.Locale.US, "%.2f", currentSpeed)}x",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                )
+                            }
+                        }
+                        Slider(
+                            value = currentSpeed,
+                            onValueChange = { value ->
+                                val rounded = ((value * 100).roundToInt() / 100f).coerceIn(0.50f, 1.50f)
+                                currentSpeed = rounded
+                                if (isLocked) {
+                                    currentPitch = rounded
+                                    player.setPlaybackParameters(rounded, rounded)
+                                } else {
+                                    player.setPlaybackParameters(rounded, currentPitch)
+                                }
+                            },
+                            valueRange = 0.50f..1.50f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    // Pitch Slider
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Audio Pitch (Tone)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                            ) {
+                                Text(
+                                    text = "${String.format(java.util.Locale.US, "%.2f", currentPitch)}x",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                )
+                            }
+                        }
+                        Slider(
+                            value = currentPitch,
+                            onValueChange = { value ->
+                                val rounded = ((value * 100).roundToInt() / 100f).coerceIn(0.50f, 1.50f)
+                                currentPitch = rounded
+                                if (isLocked) {
+                                    currentSpeed = rounded
+                                    player.setPlaybackParameters(rounded, rounded)
+                                } else {
+                                    player.setPlaybackParameters(currentSpeed, rounded)
+                                }
+                            },
+                            valueRange = 0.50f..1.50f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.secondary,
+                                activeTrackColor = MaterialTheme.colorScheme.secondary,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    // Quick Presets
+                    Text(
+                        text = "Studio Presets",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        SuggestionChip(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                currentSpeed = 0.85f
+                                currentPitch = 0.85f
+                                player.setPlaybackParameters(0.85f, 0.85f)
+                            },
+                            label = { Text("Slowed", style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        SuggestionChip(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                currentSpeed = 0.75f
+                                currentPitch = 0.75f
+                                player.setPlaybackParameters(0.75f, 0.75f)
+                            },
+                            label = { Text("Deep Slow", style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        SuggestionChip(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                currentSpeed = 1.0f
+                                currentPitch = 1.0f
+                                player.resetPlaybackParameters()
+                            },
+                            label = { Text("Normal", style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        SuggestionChip(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                currentSpeed = 1.15f
+                                currentPitch = 1.15f
+                                player.setPlaybackParameters(1.15f, 1.15f)
+                            },
+                            label = { Text("Nightcore", style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        SuggestionChip(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                currentSpeed = 1.25f
+                                currentPitch = 1.25f
+                                player.setPlaybackParameters(1.25f, 1.25f)
+                            },
+                            label = { Text("Sped Up", style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        SuggestionChip(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                currentSpeed = 1.0f
+                                currentPitch = 1.0f
+                                player.resetPlaybackParameters()
+                            },
+                            label = { Text("Reset", style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                            icon = { Icon(Icons.Filled.RestartAlt, null, modifier = Modifier.size(14.dp)) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+internal var isQueueLockedState by mutableStateOf(false)
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun QueuePanel(
@@ -5009,6 +5687,7 @@ private fun QueuePanel(
     ambientColor: Color = MaterialTheme.colorScheme.primary,
     modifier: Modifier = Modifier,
 ) {
+    val isQueueLocked = isQueueLockedState
     val listState = rememberLazyListState()
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
@@ -5078,7 +5757,7 @@ private fun QueuePanel(
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.White.copy(alpha = 0.70f),
                 )
-                if (state.queue.size > 1) {
+                if (state.queue.size > 1 && !isQueueLocked) {
                     Text(
                         stringResource(com.neonsong.app.R.string.queue_rearrange_hint),
                         style = MaterialTheme.typography.bodySmall,
@@ -5090,7 +5769,51 @@ private fun QueuePanel(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (state.queue.size > state.currentIndex + 1) {
+                val statsText = remember(state.queue) {
+                    QueueStatsFormatter.formatQueueStats(state.queue)
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.12f))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = statsText,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White.copy(alpha = 0.90f),
+                        maxLines = 1,
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        isQueueLockedState = !isQueueLockedState
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    },
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(
+                            if (isQueueLocked) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                            else Color.White.copy(alpha = 0.12f)
+                        )
+                        .border(
+                            0.8.dp,
+                            if (isQueueLocked) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                            else Color.White.copy(alpha = 0.16f),
+                            RoundedCornerShape(16.dp)
+                        ),
+                ) {
+                    Icon(
+                        imageVector = if (isQueueLocked) Icons.Filled.Lock else Icons.Filled.LockOpen,
+                        contentDescription = if (isQueueLocked) "Unlock queue" else "Lock queue",
+                        tint = if (isQueueLocked) MaterialTheme.colorScheme.primary
+                        else Color.White.copy(alpha = 0.90f),
+                    )
+                }
+                if (state.queue.size > state.currentIndex + 1 && !isQueueLocked) {
                     IconButton(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -5212,6 +5935,8 @@ private fun QueuePanel(
                 )
                 androidx.compose.material3.SwipeToDismissBox(
                     state = dismissState,
+                    enableDismissFromStartToEnd = !isQueueLocked,
+                    enableDismissFromEndToStart = !isQueueLocked,
                     modifier = Modifier.animateItem(),
                     backgroundContent = {
                         // The delete background must only exist while a swipe
@@ -5296,75 +6021,77 @@ private fun QueuePanel(
                                 tint = Color.White.copy(alpha = 0.75f),
                             )
                         }
-                        Icon(
-                            Icons.Filled.DragHandle,
-                            stringResource(com.neonsong.app.R.string.queue_drag_hint),
-                            tint = if (isDragging) ambientColor else Color.White.copy(alpha = 0.60f),
-                            modifier = Modifier
-                                .padding(start = 8.dp)
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(
-                                    if (isDragging) ambientColor.copy(alpha = 0.28f)
-                                    else Color.White.copy(alpha = 0.08f),
-                                )
-                                .padding(8.dp)
-                                .pointerInput(stableKey) {
-                                    detectDragGesturesAfterLongPress(
-                                        onDragStart = {
-                                            draggingIndex = index
-                                            dragOffsetY = 0f
-                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        },
-                                        onDragEnd = {
-                                            draggingIndex = -1
-                                            dragOffsetY = 0f
-                                        },
-                                        onDragCancel = {
-                                            draggingIndex = -1
-                                            dragOffsetY = 0f
-                                        },
-                                        onDrag = { change, dragAmount ->
-                                            change.consume()
-                                            val source = draggingIndex
-                                            if (source < 0) return@detectDragGesturesAfterLongPress
-                                            dragOffsetY += dragAmount.y
-                                            val layoutInfo = listState.layoutInfo
-                                            val draggedInfo = layoutInfo.visibleItemsInfo
-                                                .firstOrNull { it.index == source }
-                                                ?: return@detectDragGesturesAfterLongPress
-                                            val draggedCenter = draggedInfo.offset + draggedInfo.size / 2 + dragOffsetY.toInt()
-                                            val target = layoutInfo.visibleItemsInfo.firstOrNull { info ->
-                                                info.index != source &&
-                                                    info.index in state.queue.indices &&
-                                                    draggedCenter in info.offset..(info.offset + info.size)
-                                            }?.index
-                                            if (target != null && target != source) {
-                                                player.moveQueueItem(source, target)
-                                                // Keep the row glued under the finger across
-                                                // the layout shift caused by the move.
-                                                val targetInfo = layoutInfo.visibleItemsInfo
-                                                    .firstOrNull { it.index == target }
-                                                if (targetInfo != null) {
-                                                    dragOffsetY += (draggedInfo.offset - targetInfo.offset).toFloat()
-                                                }
-                                                draggingIndex = target
-                                                haptics.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
-                                            }
-                                            // Edge auto-scroll while dragging.
-                                            val viewportStart = layoutInfo.viewportStartOffset
-                                            val viewportEnd = layoutInfo.viewportEndOffset
-                                            val edgeZone = 180
-                                            when {
-                                                draggedCenter < viewportStart + edgeZone ->
-                                                    scope.launch { listState.scrollBy(-28f) }
-                                                draggedCenter > viewportEnd - edgeZone ->
-                                                    scope.launch { listState.scrollBy(28f) }
-                                            }
-                                        },
+                        if (!isQueueLocked) {
+                            Icon(
+                                Icons.Filled.DragHandle,
+                                stringResource(com.neonsong.app.R.string.queue_drag_hint),
+                                tint = if (isDragging) ambientColor else Color.White.copy(alpha = 0.60f),
+                                modifier = Modifier
+                                    .padding(start = 8.dp)
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(
+                                        if (isDragging) ambientColor.copy(alpha = 0.28f)
+                                        else Color.White.copy(alpha = 0.08f),
                                     )
-                                },
-                        )
+                                    .padding(8.dp)
+                                    .pointerInput(stableKey) {
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = {
+                                                draggingIndex = index
+                                                dragOffsetY = 0f
+                                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            },
+                                            onDragEnd = {
+                                                draggingIndex = -1
+                                                dragOffsetY = 0f
+                                            },
+                                            onDragCancel = {
+                                                draggingIndex = -1
+                                                dragOffsetY = 0f
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                val source = draggingIndex
+                                                if (source < 0) return@detectDragGesturesAfterLongPress
+                                                dragOffsetY += dragAmount.y
+                                                val layoutInfo = listState.layoutInfo
+                                                val draggedInfo = layoutInfo.visibleItemsInfo
+                                                    .firstOrNull { it.index == source }
+                                                    ?: return@detectDragGesturesAfterLongPress
+                                                val draggedCenter = draggedInfo.offset + draggedInfo.size / 2 + dragOffsetY.toInt()
+                                                val target = layoutInfo.visibleItemsInfo.firstOrNull { info ->
+                                                    info.index != source &&
+                                                        info.index in state.queue.indices &&
+                                                        draggedCenter in info.offset..(info.offset + info.size)
+                                                }?.index
+                                                if (target != null && target != source) {
+                                                    player.moveQueueItem(source, target)
+                                                    // Keep the row glued under the finger across
+                                                    // the layout shift caused by the move.
+                                                    val targetInfo = layoutInfo.visibleItemsInfo
+                                                        .firstOrNull { it.index == target }
+                                                    if (targetInfo != null) {
+                                                        dragOffsetY += (draggedInfo.offset - targetInfo.offset).toFloat()
+                                                    }
+                                                    draggingIndex = target
+                                                    haptics.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+                                                }
+                                                // Edge auto-scroll while dragging.
+                                                val viewportStart = layoutInfo.viewportStartOffset
+                                                val viewportEnd = layoutInfo.viewportEndOffset
+                                                val edgeZone = 180
+                                                when {
+                                                    draggedCenter < viewportStart + edgeZone ->
+                                                        scope.launch { listState.scrollBy(-28f) }
+                                                    draggedCenter > viewportEnd - edgeZone ->
+                                                        scope.launch { listState.scrollBy(28f) }
+                                                }
+                                            },
+                                        )
+                                    },
+                            )
+                        }
                     }
                 }
                 }
@@ -5382,7 +6109,7 @@ private fun QueuePanel(
                 capabilities = com.neonsong.app.ui.common.TrackMenuCapabilities(showCopyActions = true),
                 playableTrack = itemTrack,
                 onDismiss = { menuIndex = null },
-                onRemoveFromQueue = { player.removeQueueItem(index) }
+                onRemoveFromQueue = if (isQueueLocked) null else ({ player.removeQueueItem(index) })
             )
         } else {
             menuIndex = null

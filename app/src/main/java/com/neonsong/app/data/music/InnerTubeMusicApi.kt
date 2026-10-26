@@ -719,6 +719,105 @@ class InnerTubeMusicApi @Inject constructor(
         }.getOrDefault(emptyList())
     }
 
+    suspend fun fetchHomeShelves(): List<HomeShelf> = withContext(Dispatchers.IO) {
+        val isAuth = ytAuth.connection.value.isConnected
+        val root = runCatching {
+            browseRoot(YT_HOME_BROWSE_ID, authenticated = isAuth)
+        }.recoverCatching { error ->
+            if (isAuth) browseRoot(YT_HOME_BROWSE_ID, authenticated = false) else throw error
+        }.getOrNull()
+
+        if (root == null) emptyList() else runCatching { parseHomeShelves(root) }.getOrDefault(emptyList())
+    }
+
+    /**
+     * Fetches the default YouTube Music Home page: native shelves, mood/activity chips,
+     * and continuation token for pagination. Reuses the existing shelf parser.
+     * Uses the same authenticated/guest handling with automatic fallback to guest mode on auth failure.
+     */
+    suspend fun fetchHomePage(): HomePage = withContext(Dispatchers.IO) {
+        val isAuth = ytAuth.connection.value.isConnected
+        val root = runCatching {
+            browseRoot(YT_HOME_BROWSE_ID, authenticated = isAuth)
+        }.recoverCatching { error ->
+            if (isAuth) browseRoot(YT_HOME_BROWSE_ID, authenticated = false) else throw error
+        }.getOrNull()
+
+        if (root == null) return@withContext HomePage()
+
+        val shelves = runCatching { parseHomeShelves(root) }.getOrDefault(emptyList())
+        val chips = runCatching { parseHomeChips(root) }.getOrDefault(emptyList())
+        val continuationToken = runCatching { parseHomeContinuationToken(root) }.getOrNull()
+
+        HomePage(
+            shelves = shelves,
+            chips = chips,
+            continuationToken = continuationToken,
+        )
+    }
+
+    /**
+     * Fetches the next page of YouTube Music Home carousel shelves using [token].
+     * Returns additional shelves and the next continuation token if available.
+     * Preserves authenticated context with fallback to guest mode on auth failure.
+     */
+    suspend fun fetchHomeContinuation(token: String): HomePage = withContext(Dispatchers.IO) {
+        if (token.isBlank()) return@withContext HomePage()
+        val isAuth = ytAuth.connection.value.isConnected
+        val root = runCatching {
+            browseContinuation(token, authenticated = isAuth)
+        }.recoverCatching { error ->
+            if (isAuth) browseContinuation(token, authenticated = false) else throw error
+        }.getOrNull()
+
+        if (root == null) return@withContext HomePage()
+
+        val shelves = runCatching { parseHomeContinuationShelves(root) }.getOrDefault(emptyList())
+            .ifEmpty { runCatching { parseHomeShelves(root) }.getOrDefault(emptyList()) }
+        val nextToken = runCatching { parseHomeContinuationToken(root) }.getOrNull()
+
+        HomePage(
+            shelves = shelves,
+            chips = emptyList(),
+            continuationToken = nextToken,
+        )
+    }
+
+    /**
+     * Fetches the YouTube Music Home page filtered by a mood/activity [chip].
+     * Passes the dynamic chip params from YTM's response to the browse endpoint.
+     * Uses the same authenticated/guest handling with automatic fallback to guest mode on auth failure.
+     */
+    suspend fun fetchHomeChip(chip: HomeChip): HomePage = withContext(Dispatchers.IO) {
+        val browseId = chip.browseId?.takeIf { it.isNotBlank() } ?: YT_HOME_BROWSE_ID
+        val params = chip.params?.takeIf { it.isNotBlank() }
+        val isAuth = ytAuth.connection.value.isConnected
+
+        val root = runCatching {
+            browseRoot(browseId, authenticated = isAuth, params = params)
+        }.recoverCatching { error ->
+            if (isAuth) browseRoot(browseId, authenticated = false, params = params) else throw error
+        }.getOrNull()
+
+        if (root == null) return@withContext HomePage()
+
+        val shelves = runCatching { parseHomeShelves(root) }.getOrDefault(emptyList())
+        val continuationToken = runCatching { parseHomeContinuationToken(root) }.getOrNull()
+
+        HomePage(
+            shelves = shelves,
+            chips = emptyList(),
+            continuationToken = continuationToken,
+        )
+    }
+
+    suspend fun fetchPlaylistPreview(playlistId: String): PlaylistPreview? = withContext(Dispatchers.IO) {
+        val id = playlistId.removePrefix("VL").trim()
+        if (id.isEmpty()) return@withContext null
+        val root = browseRoot("VL$id", authenticated = ytAuth.connection.value.isConnected)
+        if (root == null) null else parsePlaylistPreview(root)
+    }
+
     /**
      * Returns the per-play `videostatsPlaybackUrl` tracking URL for [videoId]
      * from an AUTHENTICATED `player` response, or null when there is no
@@ -1318,13 +1417,16 @@ class InnerTubeMusicApi @Inject constructor(
             }.getOrElse { false }
         }
 
-    private suspend fun browseRoot(browseId: String, authenticated: Boolean): JsonObject {
+    private suspend fun browseRoot(browseId: String, authenticated: Boolean, params: String? = null): JsonObject {
         val config = getWebConfig()
         return post(
             url = "$MUSIC_API/browse?key=${config.apiKey}&prettyPrint=false",
             body = buildJsonObject {
                 put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
                 put("browseId", browseId)
+                if (!params.isNullOrBlank()) {
+                    put("params", params)
+                }
             },
             clientName = "WEB_REMIX",
             clientVersion = config.clientVersion,
@@ -3136,6 +3238,312 @@ class InnerTubeMusicApi @Inject constructor(
         return songs.distinctBy { it.videoId }.filter { it.videoId.isNotBlank() }
     }
 
+    /**
+     * Extracts the shelf title, optional strapline/subtitle, and the "more"
+     * chevron's browse destination from a carousel renderer header.
+     * Pattern follows YouTube Music's musicCarouselShelfBasicHeaderRenderer.
+     * The triple is (title, subtitle, moreBrowseId); subtitle folds strapline
+     * and subtitle the same way the previous Pair returned it.
+     */
+    internal fun parseCarouselShelfHeaderFull(carouselRenderer: JsonObject): Triple<String, String?, String?>? {
+        val header = carouselRenderer.obj("header")?.obj("musicCarouselShelfBasicHeaderRenderer")
+            ?: carouselRenderer.obj("header")?.obj("musicShelfHeaderRenderer")
+            ?: return null
+        val title = header.obj("title")?.array("runs")?.joinToString("") {
+            it.asObject()?.string("text").orEmpty()
+        }?.trim()?.takeIf { it.isNotBlank() }
+            ?: header.obj("title")?.string("simpleText")?.trim()?.takeIf { it.isNotBlank() }
+            ?: return null
+
+        val subtitle = (header.obj("strapline") ?: header.obj("subtitle"))?.array("runs")?.joinToString("") {
+            it.asObject()?.string("text").orEmpty()
+        }?.trim()?.takeIf { it.isNotBlank() }
+            ?: (header.obj("strapline") ?: header.obj("subtitle"))?.string("simpleText")?.trim()?.takeIf { it.isNotBlank() }
+
+        val moreBrowseId = header.obj("moreContentButton")
+            ?.obj("buttonRenderer")
+            ?.obj("navigationEndpoint")
+            ?.obj("browseEndpoint")
+            ?.string("browseId")
+            ?.takeIf { it.isNotBlank() }
+
+        return Triple(title, subtitle, moreBrowseId)
+    }
+
+    internal fun parseCarouselShelfHeader(carouselRenderer: JsonObject): Pair<String, String?>? {
+        val full = parseCarouselShelfHeaderFull(carouselRenderer) ?: return null
+        return full.first to full.second
+    }
+
+    /**
+     * Parses a single musicCarouselShelfRenderer into a HomeShelf.
+     * Extracts title and subtitle via [parseCarouselShelfHeader], then parses
+     * child items (musicTwoRowItemRenderer and musicResponsiveListItemRenderer) into
+     * [HomeShelfItem.Track] or [HomeShelfItem.Playlist], skipping items without a usable ID.
+     *
+     * Adapted from Metrolist's HomePage.Section.fromMusicCarouselShelfRenderer (GPL-3.0).
+     */
+    internal fun parseCarouselShelf(carouselRenderer: JsonObject): HomeShelf? {
+        val headerFull = parseCarouselShelfHeaderFull(carouselRenderer) ?: return null
+        val title = headerFull.first
+        val subtitle = headerFull.second
+        val moreBrowseId = headerFull.third
+        val contents = carouselRenderer.array("contents") ?: return null
+        val items = mutableListOf<HomeShelfItem>()
+
+        for (contentElement in contents) {
+            val contentObj = contentElement.asObject() ?: continue
+            val twoRow = contentObj.obj("musicTwoRowItemRenderer")
+            if (twoRow != null) {
+                val twoRowNav = twoRow.obj("navigationEndpoint")
+                val extras = parseHomeItemExtras(twoRow, twoRowNav, ::parseSong)
+                val cardData = parseHomeCardData(twoRow)
+                // Check if this two-row card is a playable song
+                val song = parseTwoRowSong(twoRow)
+                if (song != null && song.videoId.isNotBlank()) {
+                    items.add(
+                        HomeShelfItem.Track(
+                            song,
+                            aspectRatio = extras.aspectRatio,
+                            itemType = extras.itemType,
+                            caption = extras.caption,
+                            cardData = cardData,
+                        )
+                    )
+                    continue
+                }
+
+                // Otherwise check if it's a playlist or album card
+                val nav = twoRowNav?.obj("browseEndpoint")
+                    ?: twoRow.obj("title")?.array("runs")?.firstOrNull()?.asObject()?.obj("navigationEndpoint")?.obj("browseEndpoint")
+                    ?: twoRow.obj("thumbnailOverlay")?.obj("musicItemThumbnailOverlayRenderer")?.obj("content")
+                        ?.obj("musicPlayButtonRenderer")?.obj("playNavigationEndpoint")?.obj("watchEndpoint")
+                    ?: twoRow.obj("onTap")?.obj("browseEndpoint")
+                val browseId = nav?.string("browseId") ?: nav?.string("playlistId")
+
+                // Skip cards with no id or artist cards (UC-prefixed browse IDs)
+                if (browseId.isNullOrBlank() || browseId.startsWith("UC")) continue
+
+                val playlistId = if (browseId.startsWith("VL")) browseId.removePrefix("VL") else browseId
+                val itemTitle = twoRow.obj("title")?.array("runs")?.joinToString("") {
+                    it.asObject()?.string("text").orEmpty()
+                }?.trim()?.takeIf { it.isNotBlank() }
+                    ?: twoRow.obj("title")?.string("simpleText")?.trim()?.takeIf { it.isNotBlank() }
+                    ?: continue
+
+                val subtitleRuns = twoRow.obj("subtitle")?.array("runs")?.mapNotNull { it.asObject() }.orEmpty()
+                val author = subtitleRuns.firstOrNull {
+                    it.obj("navigationEndpoint")?.obj("browseEndpoint")?.string("browseId")?.startsWith("UC") == true
+                }?.string("text") ?: subtitleRuns.firstOrNull()?.string("text")
+                    ?.takeUnless { it.equals("Playlist", ignoreCase = true) }
+                val trackCountText = subtitleRuns.mapNotNull { it.string("text") }
+                    .lastOrNull { "song" in it.lowercase() || "track" in it.lowercase() }
+                val artwork = extractThumbnailsUrl(twoRow)
+
+                items.add(
+                    HomeShelfItem.Playlist(
+                        YouTubePlaylistSummary(
+                            id = playlistId,
+                            title = itemTitle,
+                            author = author?.trim(),
+                            trackCountText = trackCountText,
+                            artworkUrl = artwork,
+                        ),
+                        aspectRatio = extras.aspectRatio,
+                        itemType = extras.itemType ?: "playlist",
+                        caption = extras.caption,
+                        collageArtworkUrls = extras.collageArtworkUrls,
+                        previewSongs = extras.previewSongs,
+                        cardData = cardData,
+                    )
+                )
+                continue
+            }
+
+            val responsive = contentObj.obj("musicResponsiveListItemRenderer")
+            if (responsive != null) {
+                val song = parseSong(responsive)
+                if (song != null && song.videoId.isNotBlank()) {
+                    items.add(HomeShelfItem.Track(song))
+                    continue
+                }
+
+                // Check for playlist/album responsive row
+                val nav = responsive.array("flexColumns")?.firstOrNull()?.asObject()
+                    ?.obj("musicResponsiveListItemFlexColumnRenderer")?.obj("text")
+                    ?.array("runs")?.firstOrNull()?.asObject()
+                    ?.obj("navigationEndpoint")?.obj("browseEndpoint")
+                    ?: responsive.obj("navigationEndpoint")?.obj("browseEndpoint")
+                val browseId = nav?.string("browseId") ?: nav?.string("playlistId")
+                if (browseId.isNullOrBlank() || browseId.startsWith("UC")) continue
+
+                val playlistId = if (browseId.startsWith("VL")) browseId.removePrefix("VL") else browseId
+                val itemTitle = responsive.array("flexColumns")?.firstOrNull()?.asObject()
+                    ?.obj("musicResponsiveListItemFlexColumnRenderer")?.obj("text")
+                    ?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }?.trim()
+                    ?: continue
+                if (itemTitle.isBlank()) continue
+
+                val subtitleRuns = responsive.array("flexColumns")?.getOrNull(1)?.asObject()
+                    ?.obj("musicResponsiveListItemFlexColumnRenderer")?.obj("text")?.array("runs")
+                    ?.mapNotNull { it.asObject() }.orEmpty()
+                val author = subtitleRuns.firstOrNull {
+                    it.obj("navigationEndpoint")?.obj("browseEndpoint")?.string("browseId")?.startsWith("UC") == true
+                }?.string("text") ?: subtitleRuns.firstOrNull()?.string("text")
+                val artwork = extractThumbnailsUrl(responsive)
+
+                items.add(
+                    HomeShelfItem.Playlist(
+                        YouTubePlaylistSummary(
+                            id = playlistId,
+                            title = itemTitle,
+                            author = author?.trim(),
+                            trackCountText = null,
+                            artworkUrl = artwork,
+                        ),
+                        itemType = "playlist",
+                    )
+                )
+            }
+        }
+
+        if (items.isEmpty()) return null
+        return HomeShelf(
+            title = title,
+            subtitle = subtitle,
+            items = items,
+            strapline = subtitle,
+            moreBrowseId = moreBrowseId,
+            playAllButton = parseHomePlayAllButton(carouselRenderer),
+            sourceItemCount = contents.size,
+        )
+    }
+
+    /**
+     * Parses the Home feed response into native YouTube Music carousel shelves in original order.
+     * Walks contents.singleColumnBrowseResultsRenderer.tabs[0].tabRenderer.content.sectionListRenderer.contents
+     * and maps each musicCarouselShelfRenderer using [parseCarouselShelf].
+     */
+    internal fun parseHomeShelves(root: JsonElement): List<HomeShelf> {
+        val rootObj = root.asObject() ?: return emptyList()
+        val sectionContents = rootObj.obj("contents")
+            ?.obj("singleColumnBrowseResultsRenderer")
+            ?.array("tabs")
+            ?.firstOrNull()?.asObject()
+            ?.obj("tabRenderer")
+            ?.obj("content")
+            ?.obj("sectionListRenderer")
+            ?.array("contents")
+
+        val carousels = if (sectionContents != null) {
+            sectionContents.mapNotNull { it.asObject()?.obj("musicCarouselShelfRenderer") }
+        } else {
+            val collected = mutableListOf<JsonObject>()
+            collectObjects(root, "musicCarouselShelfRenderer", collected)
+            collected
+        }
+
+        return carousels.mapNotNull { parseCarouselShelf(it) }
+    }
+
+    /**
+     * Parses the mood/activity chips row from YouTube Music Home response.
+     * Walks sectionListRenderer.header.chipCloudRenderer.chips and extracts
+     * title and browse parameters. Chips with missing title or params are skipped safely.
+     */
+    internal fun parseHomeChips(root: JsonElement): List<HomeChip> {
+        val rootObj = root.asObject() ?: return emptyList()
+        val secList = rootObj.obj("contents")
+            ?.obj("singleColumnBrowseResultsRenderer")
+            ?.array("tabs")
+            ?.firstOrNull()?.asObject()
+            ?.obj("tabRenderer")
+            ?.obj("content")
+            ?.obj("sectionListRenderer")
+
+        val chipElements = secList?.obj("header")?.obj("chipCloudRenderer")?.array("chips")
+            ?: run {
+                val collected = mutableListOf<JsonObject>()
+                collectObjects(root, "chipCloudRenderer", collected)
+                collected.firstOrNull()?.array("chips")
+            } ?: return emptyList()
+
+        return chipElements.mapNotNull { element ->
+            val renderer = element.asObject()?.obj("chipCloudChipRenderer") ?: return@mapNotNull null
+            val title = renderer.obj("text")?.array("runs")?.firstOrNull()?.asObject()?.string("text")?.trim()
+                ?: renderer.obj("text")?.string("simpleText")?.trim()
+            if (title.isNullOrBlank()) return@mapNotNull null
+
+            val endpoint = renderer.obj("navigationEndpoint")?.obj("browseEndpoint")
+            val params = endpoint?.string("params")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val browseId = endpoint.string("browseId")?.takeIf { it.isNotBlank() }
+
+            HomeChip(
+                title = title,
+                params = params,
+                browseId = browseId,
+            )
+        }
+    }
+
+    /**
+     * Extracts the Home continuation token for pagination.
+     * Checks sectionListRenderer.continuations on page 1,
+     * sectionListContinuation.continuations on subsequent continuation pages,
+     * with fallback to [genericContinuationToken].
+     */
+    internal fun parseHomeContinuationToken(root: JsonElement): String? {
+        val rootObj = root.asObject() ?: return null
+
+        // 1. Check page 1 sectionListRenderer.continuations
+        val page1Continuations = rootObj.obj("contents")
+            ?.obj("singleColumnBrowseResultsRenderer")
+            ?.array("tabs")
+            ?.firstOrNull()?.asObject()
+            ?.obj("tabRenderer")
+            ?.obj("content")
+            ?.obj("sectionListRenderer")
+            ?.array("continuations")
+
+        page1Continuations?.mapNotNull { it.asObject() }?.firstNotNullOfOrNull {
+            it.obj("nextContinuationData")?.string("continuation")?.takeIf(String::isNotBlank)
+        }?.let { return it }
+
+        // 2. Check continuation page sectionListContinuation.continuations
+        val contContinuations = rootObj.obj("continuationContents")
+            ?.obj("sectionListContinuation")
+            ?.array("continuations")
+
+        contContinuations?.mapNotNull { it.asObject() }?.firstNotNullOfOrNull {
+            it.obj("nextContinuationData")?.string("continuation")?.takeIf(String::isNotBlank)
+        }?.let { return it }
+
+        // 3. Fallback to generic continuation token anywhere in tree
+        return genericContinuationToken(root)
+    }
+
+    /**
+     * Parses additional carousel shelves from a Home continuation response.
+     * Walks continuationContents.sectionListContinuation.contents and maps each
+     * musicCarouselShelfRenderer using [parseCarouselShelf].
+     */
+    internal fun parseHomeContinuationShelves(root: JsonElement): List<HomeShelf> {
+        val rootObj = root.asObject() ?: return emptyList()
+        val secContContents = rootObj.obj("continuationContents")
+            ?.obj("sectionListContinuation")
+            ?.array("contents")
+
+        val carousels = if (secContContents != null) {
+            secContContents.mapNotNull { it.asObject()?.obj("musicCarouselShelfRenderer") }
+        } else {
+            val collected = mutableListOf<JsonObject>()
+            collectObjects(root, "musicCarouselShelfRenderer", collected)
+            collected
+        }
+
+        return carousels.mapNotNull { parseCarouselShelf(it) }
+    }
+
     private fun directWatchVideoId(renderer: JsonObject): String? =
         renderer.obj("playlistItemData")?.string("videoId")
             ?: renderer.obj("navigationEndpoint")?.obj("watchEndpoint")?.string("videoId")
@@ -3796,12 +4204,12 @@ class InnerTubeMusicApi @Inject constructor(
     }
 }
 
-private fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
-private fun JsonObject.array(key: String): JsonArray? = this[key] as? JsonArray
-private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
-private fun JsonObject.int(key: String): Int? = string(key)?.toIntOrNull()
-private fun JsonElement.asObject(): JsonObject? = this as? JsonObject
-private fun JsonElement.obj(key: String): JsonObject? = (this as? JsonObject)?.obj(key)
-private fun JsonElement.array(key: String): JsonArray? = (this as? JsonObject)?.array(key)
-private fun JsonElement.string(key: String): String? = (this as? JsonObject)?.string(key)
-private fun JsonElement.int(key: String): Int? = (this as? JsonObject)?.int(key)
+internal fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
+internal fun JsonObject.array(key: String): JsonArray? = this[key] as? JsonArray
+internal fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+internal fun JsonObject.int(key: String): Int? = string(key)?.toIntOrNull()
+internal fun JsonElement.asObject(): JsonObject? = this as? JsonObject
+internal fun JsonElement.obj(key: String): JsonObject? = (this as? JsonObject)?.obj(key)
+internal fun JsonElement.array(key: String): JsonArray? = (this as? JsonObject)?.array(key)
+internal fun JsonElement.string(key: String): String? = (this as? JsonObject)?.string(key)
+internal fun JsonElement.int(key: String): Int? = (this as? JsonObject)?.int(key)

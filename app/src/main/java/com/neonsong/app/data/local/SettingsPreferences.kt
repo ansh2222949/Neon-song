@@ -134,6 +134,13 @@ data class MiscSettings(
     val crossfadeEnabled: Boolean = false,
     /** Crossfade length in seconds; kept within the native settings slider range. */
     val crossfadeSeconds: Int = 5,
+    val automixEnabled: Boolean = false,
+    val automixBars: Int = 8,
+    val autoDJEnabled: Boolean = true,
+    val musicVideoEnabled: Boolean = false,
+    val ytMusicHiddenSections: Set<String> = emptySet(),
+    val ytMusicSectionsOrder: List<String> = emptyList(),
+    val suppressYouTubeLoginPrompt: Boolean = false,
     /** When true (default), uses the multi-layer dynamic wavy seekbar.
      *  When false, uses the classic standard progress slider in the player tab. */
     val wavySeekbarEnabled: Boolean = true,
@@ -261,6 +268,9 @@ class SettingsPreferences @Inject constructor(
         val LYRICS_FONT_SCALE = floatPreferencesKey("lw_lyrics_font_scale")
         val CROSSFADE_ENABLED = booleanPreferencesKey("lw_crossfade_enabled")
         val CROSSFADE_SECONDS = intPreferencesKey("lw_crossfade_seconds")
+        val AUTOMIX_ENABLED = booleanPreferencesKey("lw_automix_enabled")
+        val AUTOMIX_BARS = intPreferencesKey("lw_automix_bars")
+        val AUTODJ_ENABLED = booleanPreferencesKey("lw_autodj_enabled")
         val WAVY_SEEKBAR_ENABLED = booleanPreferencesKey("lw_wavy_seekbar_enabled")
         val ROTATING_BACKGROUND_ENABLED = booleanPreferencesKey("lw_rotating_background_enabled")
         val DOWNLOAD_LYRICS = booleanPreferencesKey("lw_download_lyrics")
@@ -269,15 +279,19 @@ class SettingsPreferences @Inject constructor(
         val DOWNLOAD_TREE_URI = stringPreferencesKey("lw_download_tree_uri")
         val DOWNLOAD_STRUCTURE = stringPreferencesKey("lw_download_structure")
         val SYSTEM_EFFECTS_MODE = booleanPreferencesKey("lw_system_effects_mode")
+        val MUSIC_VIDEO_ENABLED = booleanPreferencesKey("lw_music_video_enabled")
         val USE_ALBUM_ARTIST_FOLDERS = booleanPreferencesKey("lw_use_album_artist_folders")
         val PRIMARY_ARTIST_ONLY = booleanPreferencesKey("lw_primary_artist_only")
         val HIDDEN_HOME_SECTIONS = stringSetPreferencesKey("lw_hidden_home_sections")
+        val YT_MUSIC_HIDDEN_SECTIONS = stringSetPreferencesKey("lw_yt_music_hidden_sections")
+        val YT_MUSIC_SECTIONS_ORDER = stringPreferencesKey("lw_yt_music_sections_order")
         val ADDON_URL = stringPreferencesKey("lw_addon_url")
         val ADDON_NAME = stringPreferencesKey("lw_addon_name")
         val ADDON_ENABLED = booleanPreferencesKey("lw_addon_enabled")
         val CANVAS_ENABLED = booleanPreferencesKey("lw_canvas_enabled")
         val CANVAS_FULL_BLEED = booleanPreferencesKey("lw_canvas_full_bleed")
         val CANVAS_OVER_CELLULAR = booleanPreferencesKey("lw_canvas_over_cellular")
+        val SUPPRESS_YOUTUBE_LOGIN_PROMPT = booleanPreferencesKey("lw_suppress_youtube_login_prompt")
     }
 
     val settings: Flow<MiscSettings> = dataStore.data
@@ -293,6 +307,7 @@ class SettingsPreferences @Inject constructor(
                 losslessQuality = p.readSafely(Keys.LOSSLESS_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES } ?: 27,
                 downloadQuality = p.readSafely(Keys.DOWNLOAD_QUALITY)?.takeIf { it in DOWNLOAD_QUALITIES } ?: 27,
                 systemEffectsMode = p.readSafely(Keys.SYSTEM_EFFECTS_MODE) ?: false,
+                musicVideoEnabled = p.readSafely(Keys.MUSIC_VIDEO_ENABLED) ?: false,
                 isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: true,
                 clarityPreset = p.readSafely(Keys.CLARITY_PRESET)?.takeIf { it in 0..3 } ?: 0,
                 clarityAtmosBypass = p.readSafely(Keys.CLARITY_ATMOS_BYPASS) ?: false,
@@ -305,6 +320,9 @@ class SettingsPreferences @Inject constructor(
                 lyricsFontScale = (p.readSafely(Keys.LYRICS_FONT_SCALE) ?: 1.0f).coerceIn(0.7f, 1.5f),
                 crossfadeEnabled = p.readSafely(Keys.CROSSFADE_ENABLED) ?: false,
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 12),
+                automixEnabled = p.readSafely(Keys.AUTOMIX_ENABLED) ?: false,
+                automixBars = (p.readSafely(Keys.AUTOMIX_BARS) ?: 8).let { if (it >= 16) 16 else 8 },
+                autoDJEnabled = p.readSafely(Keys.AUTODJ_ENABLED) ?: true,
                 wavySeekbarEnabled = p.readSafely(Keys.WAVY_SEEKBAR_ENABLED) ?: true,
                 rotatingBackgroundEnabled = p.readSafely(Keys.ROTATING_BACKGROUND_ENABLED) ?: true,
                 downloadLyrics = p.readSafely(Keys.DOWNLOAD_LYRICS) ?: true,
@@ -317,12 +335,15 @@ class SettingsPreferences @Inject constructor(
                 hiddenHomeSections = p.readSafely(Keys.HIDDEN_HOME_SECTIONS)
                     ?.filter { id -> HomeSection.entries.any { it.id == id } }?.toSet()
                     ?: emptySet(),
+                ytMusicHiddenSections = p.readSafely(Keys.YT_MUSIC_HIDDEN_SECTIONS) ?: emptySet(),
+                ytMusicSectionsOrder = p.readSafely(Keys.YT_MUSIC_SECTIONS_ORDER)?.split("|||")?.filter { it.isNotBlank() } ?: emptyList(),
                 addonUrl = p.readSafely(Keys.ADDON_URL)?.trim().orEmpty(),
                 addonName = p.readSafely(Keys.ADDON_NAME)?.trim().orEmpty(),
                 addonEnabled = p.readSafely(Keys.ADDON_ENABLED) ?: true,
                 canvasEnabled = p.readSafely(Keys.CANVAS_ENABLED) ?: true,
                 canvasFullBleed = p.readSafely(Keys.CANVAS_FULL_BLEED) ?: true,
                 canvasOverCellular = p.readSafely(Keys.CANVAS_OVER_CELLULAR) ?: true,
+                suppressYouTubeLoginPrompt = p.readSafely(Keys.SUPPRESS_YOUTUBE_LOGIN_PROMPT) ?: false,
             )
         }
 
@@ -441,12 +462,58 @@ class SettingsPreferences @Inject constructor(
         dataStore.edit { it[Keys.LYRICS_FONT_SCALE] = scale.coerceIn(0.7f, 1.5f) }
     }
 
+    suspend fun setMusicVideoEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.MUSIC_VIDEO_ENABLED] = enabled }
+    }
+
     suspend fun setCrossfadeEnabled(enabled: Boolean) {
-        dataStore.edit { it[Keys.CROSSFADE_ENABLED] = enabled }
+        dataStore.edit {
+            it[Keys.CROSSFADE_ENABLED] = enabled
+            if (enabled) {
+                it[Keys.AUTOMIX_ENABLED] = false
+            }
+        }
     }
 
     suspend fun setCrossfadeSeconds(seconds: Int) {
         dataStore.edit { it[Keys.CROSSFADE_SECONDS] = seconds.coerceIn(1, 12) }
+    }
+
+    suspend fun setAutomixEnabled(enabled: Boolean) {
+        dataStore.edit {
+            it[Keys.AUTOMIX_ENABLED] = enabled
+            if (enabled) {
+                it[Keys.CROSSFADE_ENABLED] = false
+            }
+        }
+    }
+
+    suspend fun setAutomixBars(bars: Int) {
+        dataStore.edit { it[Keys.AUTOMIX_BARS] = if (bars >= 16) 16 else 8 }
+    }
+
+    suspend fun setAutoDJEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.AUTODJ_ENABLED] = enabled }
+    }
+
+    suspend fun setSuppressYouTubeLoginPrompt(suppress: Boolean) {
+        dataStore.edit { it[Keys.SUPPRESS_YOUTUBE_LOGIN_PROMPT] = suppress }
+    }
+
+    suspend fun saveYtMusicSections(order: List<String>, hidden: Set<String>) {
+        dataStore.edit { prefs ->
+            prefs[Keys.YT_MUSIC_SECTIONS_ORDER] = order.joinToString("|||")
+            prefs[Keys.YT_MUSIC_HIDDEN_SECTIONS] = hidden
+        }
+    }
+
+    suspend fun setYtMusicSections(order: List<String>, hidden: Set<String>) = saveYtMusicSections(order, hidden)
+
+    suspend fun resetYtMusicSections() {
+        dataStore.edit { prefs ->
+            prefs.remove(Keys.YT_MUSIC_SECTIONS_ORDER)
+            prefs.remove(Keys.YT_MUSIC_HIDDEN_SECTIONS)
+        }
     }
 
     suspend fun setWavySeekbarEnabled(enabled: Boolean) {

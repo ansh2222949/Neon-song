@@ -50,6 +50,8 @@ data class ThemeUiState(
      *  true, container roles in [colorScheme] are semi-translucent and the
      *  chrome surfaces get specular glass dressing. */
     val liquidGlass: Boolean = false,
+    val md3NavBar: Boolean = false,
+    val hideNavTabs: Boolean = false,
     /** True when the "Dynamic Now Playing" artwork override is currently
      *  driving the schemes. NeonSongTheme uses this so S+ system dynamic
      *  (wallpaper) only takes over when no now-playing color is active:
@@ -250,6 +252,8 @@ class ThemeRepository @Inject constructor(
             accentColorHex = prefs.accentColor,
             useCustomFont = misc.useCustomFont,
             liquidGlass = isGlass,
+            md3NavBar = prefs.md3NavBar,
+            hideNavTabs = prefs.hideNavTabs,
             isNowPlayingThemed = nowPlayingActive,
         )
     }.stateIn(
@@ -265,6 +269,8 @@ class ThemeRepository @Inject constructor(
             accentColorHex = "#00E5FF",
             useCustomFont = true,
             liquidGlass = false,
+            md3NavBar = false,
+            hideNavTabs = false,
         ),
     )
 
@@ -290,6 +296,10 @@ class ThemeRepository @Inject constructor(
     suspend fun setAmoled(enabled: Boolean) = themePreferences.setAmoled(enabled)
 
     suspend fun setLiquidGlass(enabled: Boolean) = themePreferences.setLiquidGlass(enabled)
+
+    suspend fun setMd3NavBar(enabled: Boolean) = themePreferences.setMd3NavBar(enabled)
+
+    suspend fun setHideNavTabs(enabled: Boolean) = themePreferences.setHideNavTabs(enabled)
 
     /** Turning this on used to just flip the DataStore flag and wait for
      *  Home's own poll loop to eventually call updateNowPlayingArtwork() —

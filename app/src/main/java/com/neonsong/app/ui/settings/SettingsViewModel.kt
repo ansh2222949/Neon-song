@@ -437,6 +437,8 @@ class SettingsViewModel @Inject constructor(
     fun setThemeMode(mode: ThemeMode) = launchSettingsAction("update theme mode") { themeRepository.setThemeMode(mode) }
     fun setAmoled(enabled: Boolean) = launchSettingsAction("update AMOLED mode") { themeRepository.setAmoled(enabled) }
     fun setLiquidGlass(enabled: Boolean) = launchSettingsAction("update Liquid Glass") { themeRepository.setLiquidGlass(enabled) }
+    fun setMd3NavBar(enabled: Boolean) = launchSettingsAction("update MD3 Navigation Bar") { themeRepository.setMd3NavBar(enabled) }
+    fun setHideNavTabs(enabled: Boolean) = launchSettingsAction("update Hide Navigation Tabs") { themeRepository.setHideNavTabs(enabled) }
     fun setAccentMode(mode: AccentMode) = launchSettingsAction("update accent mode") { themeRepository.setMode(mode) }
     fun setManualAccent(color: Color) = launchSettingsAction("update accent color") { themeRepository.setManualAccent(color) }
     fun openColorWheel() = _uiState.update { it.copy(showColorWheel = true) }
@@ -505,6 +507,11 @@ class SettingsViewModel @Inject constructor(
         settingsPreferences.setSystemEffectsMode(enabled)
     }
 
+    /** Synced Music Video (Settings -> Experimental, default OFF). */
+    fun setMusicVideoEnabled(enabled: Boolean) = launchSettingsAction("update music video setting") {
+        settingsPreferences.setMusicVideoEnabled(enabled)
+    }
+
     // ── USB exclusive output (direct DAC, default OFF) ──
 
     val usbExclusiveEnabled: StateFlow<Boolean> =
@@ -564,6 +571,17 @@ class SettingsViewModel @Inject constructor(
     fun setCrossfadeEnabled(enabled: Boolean) = launchSettingsAction("update crossfade") { settingsPreferences.setCrossfadeEnabled(enabled) }
     fun setCrossfadeSeconds(seconds: Int) = launchSettingsAction("update crossfade duration") {
         settingsPreferences.setCrossfadeSeconds(seconds.coerceIn(1, 12))
+    }
+    fun setAutomixEnabled(enabled: Boolean) = launchSettingsAction("update automix") { settingsPreferences.setAutomixEnabled(enabled) }
+    fun setAutomixBars(bars: Int) = launchSettingsAction("update automix bars") {
+        settingsPreferences.setAutomixBars(bars)
+    }
+    fun setAutoDJEnabled(enabled: Boolean) = launchSettingsAction("update autodj") { settingsPreferences.setAutoDJEnabled(enabled) }
+    fun saveYtMusicSections(order: List<String>, hidden: Set<String>) = launchSettingsAction("save YouTube Music sections") {
+        settingsPreferences.setYtMusicSections(order, hidden)
+    }
+    fun resetYtMusicSections() = launchSettingsAction("reset YouTube Music sections") {
+        settingsPreferences.resetYtMusicSections()
     }
     fun setWavySeekbarEnabled(enabled: Boolean) = launchSettingsAction("update seekbar style") {
         settingsPreferences.setWavySeekbarEnabled(enabled)

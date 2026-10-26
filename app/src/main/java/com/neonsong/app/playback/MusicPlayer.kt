@@ -18,8 +18,14 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import com.neonsong.app.playback.AutoMixState
+import com.neonsong.app.playback.NativeAutoMixEngine
+import com.neonsong.app.playback.autodj.AutoDJController
+import com.neonsong.app.playback.autodj.AutoDJPlaybackHost
+import com.neonsong.app.playback.autodj.AutoDJStatus
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
@@ -149,6 +155,7 @@ internal data class PersistedPlaybackSession(
     val shuffleEnabled: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val speed: Float = 1f,
+    val pitch: Float = 1f,
     val durationMs: Long = 0L,
 )
 
@@ -168,12 +175,20 @@ data class MusicPlayerState(
     val shuffleEnabled: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val speed: Float = 1f,
+    val pitch: Float = 1f,
     val bitrateKbps: Int? = null,
     val audioCodec: String? = null,
     val isLossless: Boolean = false,
     val bitDepth: Int? = null,
     val samplingRateKHz: Double? = null,
     val sleepTimerRemainingMs: Long? = null,
+    val isAutoMixActive: Boolean = false,
+    val isAutoMixEnabled: Boolean = false,
+    val autoMixState: AutoMixState = AutoMixState.IDLE,
+    val autoMixProgress: Float = 0f,
+    val autoMixBpm: Float? = null,
+    val isAutoDJActive: Boolean = true,
+    val autoDJStatus: String? = null,
     val error: String? = null,
 )
 
@@ -237,6 +252,8 @@ class MusicPlayer @Inject constructor(
     private val usbDacMonitor: UsbDacMonitor,
     private val exclusiveUsbOutput: ExclusiveUsbOutput,
     private val songPlayStatsRepository: dagger.Lazy<com.neonsong.app.data.repository.SongPlayStatsRepository>,
+    private val nativeAutoMixEngine: dagger.Lazy<NativeAutoMixEngine>,
+    private val autoDJController: dagger.Lazy<com.neonsong.app.playback.autodj.AutoDJController>,
 ) {
     private val appContext = context.applicationContext
     /**
@@ -436,6 +453,78 @@ class MusicPlayer @Inject constructor(
     private var lastCrossfadeResolveIndex = C.INDEX_UNSET
     private var lastCrossfadeLogKey: String? = null
     private var lastCrossfadeLogAtMs = 0L
+
+    @Volatile private var automixEnabled: Boolean = false
+    @Volatile private var automixBars: Int = 8
+
+    private fun currentAutoMixState(): AutoMixState =
+        if (nativeAutoMixEngine.get().isAvailable) nativeAutoMixEngine.get().state else AutoMixState.IDLE
+
+    private fun currentAutoDJStatusString(): String? =
+        when (val s = autoDJController.get().status.value) {
+            is AutoDJStatus.Resolving -> "Resolving ${s.title}"
+            is AutoDJStatus.WaitingLate -> "Buffering ${s.title}"
+            is AutoDJStatus.Ready -> "Deck B Armed (${s.title})"
+            else -> null
+        }
+
+    private val autoDJHost = object : AutoDJPlaybackHost {
+        override fun getTrackAt(index: Int): PlayableTrack? {
+            return _state.value.queue.getOrNull(index)
+        }
+        override fun getQueueSize(): Int {
+            return _state.value.queue.size
+        }
+        override fun getCurrentIndex(): Int {
+            return _state.value.currentIndex
+        }
+        override fun isCurrentItem(index: Int): Boolean {
+            return _state.value.currentIndex == index
+        }
+        override fun registerResolvedStream(index: Int, track: PlayableTrack, stream: ResolvedStream) {
+            onMain {
+                registerPreparedStream(stream)
+                stagePendingQuality(track.mediaIdKey(), stream)
+                track.videoId?.let { stagePendingQuality(it, stream) }
+                if (index in 0 until player.mediaItemCount) {
+                    replaceMediaItemPreservingShuffle(index, track.toMediaItem(stream))
+                }
+            }
+        }
+        override fun armStandbyForNext(index: Int, track: PlayableTrack) {
+            // Standby armed
+        }
+        override fun triggerAutoTransition(overlapMs: Long) {
+            onMain {
+                nativeAutoMixEngine.get().triggerFadeNow()
+            }
+        }
+        override fun setLateTrackBuffering(isWaiting: Boolean) {
+            // Buffering
+        }
+        override fun skipToNextPlayableItem(failedIndex: Int) {
+            onMain {
+                if (failedIndex in _state.value.queue.indices) {
+                    scheduleUnavailableMediaSkip(
+                        failedIndex,
+                        _state.value.queue[failedIndex].mediaIdKey(),
+                        playRequestGeneration.get(),
+                        Exception("AutoDJ skip unplayable track"),
+                        allowAutoSkip = true
+                    )
+                }
+            }
+        }
+        override fun requestQueueRefill() {
+            onMain {
+                val index = _state.value.currentIndex
+                if (index >= 0) {
+                    extendDiscoverQueueIfNeeded(index)
+                    extendRadioQueueIfNeeded(index)
+                }
+            }
+        }
+    }
     private val _state = MutableStateFlow(MusicPlayerState())
     val state: StateFlow<MusicPlayerState> = _state.asStateFlow()
     val chromeState: StateFlow<PlaybackChromeState> = state
@@ -1414,7 +1503,11 @@ class MusicPlayer @Inject constructor(
                     // A persisted tempo stretch resamples by definition — it
                     // must not survive into a Bit-Perfect session.
                     val restoredSpeed = restoredSession.speed.coerceIn(0.5f, 2f)
-                    restoredPlayer.setPlaybackSpeed(if (bitPerfectEnabled) 1f else restoredSpeed)
+                    val restoredPitch = restoredSession.pitch.coerceIn(0.5f, 2f)
+                    restoredPlayer.playbackParameters = PlaybackParameters(
+                        if (bitPerfectEnabled) 1f else restoredSpeed,
+                        if (bitPerfectEnabled) 1f else restoredPitch,
+                    )
                     restoredPlayer.pause()
                 }
             }
@@ -1425,6 +1518,7 @@ class MusicPlayer @Inject constructor(
 
     init {
         setupSpatializerListener()
+        runCatching { autoDJController.get().attachHost(autoDJHost, applicationScope, streamResolver) }
         runCatching { restorePlaybackSession() }.getOrElse { error ->
             // A corrupt session or OEM media-stack failure must not become a
             // permanent launch-crash loop. Discard only the resumable session.
@@ -1671,6 +1765,12 @@ class MusicPlayer @Inject constructor(
                 cachedMiscSettings = settings
                 crossfadeEnabled = settings.crossfadeEnabled
                 crossfadeDurationMs = settings.crossfadeSeconds.coerceIn(1, 12) * 1000L
+                automixEnabled = settings.automixEnabled
+                automixBars = settings.automixBars
+                runCatching {
+                    nativeAutoMixEngine.get().setEnabled(settings.automixEnabled)
+                    nativeAutoMixEngine.get().setBarMode(settings.automixBars)
+                }
                 val wasBitPerfect = bitPerfectEnabled
                 bitPerfectEnabled = settings.isBitPerfectEnabled
                 systemEffectsModePref = settings.systemEffectsMode
@@ -1778,9 +1878,17 @@ class MusicPlayer @Inject constructor(
         startIndex: Int = 0,
         sourceLabel: String = "Neon Song",
         startShuffled: Boolean = false,
+        enableRadioContinuation: Boolean = false,
     ) = onMain {
         disableRadioQueue()
-        playQueueInternal(tracks, startIndex, endlessDiscover = false, sourceLabel = sourceLabel, startShuffled = startShuffled)
+        playQueueInternal(
+            tracks,
+            startIndex,
+            endlessDiscover = false,
+            sourceLabel = sourceLabel,
+            startShuffled = startShuffled,
+            enableRadioContinuation = enableRadioContinuation,
+        )
     }
 
     fun playDiscoverQueue(tracks: List<PlayableTrack>, startIndex: Int = 0) = onMain {
@@ -1794,12 +1902,17 @@ class MusicPlayer @Inject constructor(
         endlessDiscover: Boolean,
         sourceLabel: String = if (endlessDiscover) "Discover" else "Neon Song",
         startShuffled: Boolean = false,
+        enableRadioContinuation: Boolean = false,
     ) {
         if (tracks.isEmpty()) return
         pendingRestoredSession = null
         discoverQueueLoadJob?.cancel()
         discoverQueueActive = endlessDiscover
-        disableRadioQueue()
+        if (enableRadioContinuation) {
+            radioQueueActive = true
+        } else {
+            disableRadioQueue()
+        }
         val selectedIndex = startIndex.coerceIn(tracks.indices)
         playRequest?.cancel()
         queueEnrichmentJob?.cancel()
@@ -1816,9 +1929,13 @@ class MusicPlayer @Inject constructor(
             selectedIndex = selectedIndex,
             startPositionMs = 0L,
             sourceLabel = sourceLabel,
-            endlessDiscover = endlessDiscover,
+            endlessDiscover = endlessDiscover || enableRadioContinuation,
             startShuffled = startShuffled,
         )
+        if (enableRadioContinuation) {
+            _state.update { it.copy(isEndlessQueue = true) }
+            startRadioQueue(tracks[selectedIndex])
+        }
     }
 
     private fun startResolvedQueuePlayback(
@@ -2264,6 +2381,11 @@ class MusicPlayer @Inject constructor(
         )
         return true
     }
+
+    /** Returns the live sub-millisecond playback position of the active audio player. */
+    fun currentPositionMs(): Long =
+        runCatching { player.currentPosition.coerceAtLeast(0L) }.getOrDefault(_state.value.positionMs)
+
     fun seekTo(positionMs: Long) = onMain {
         if (isCasting) {
             castPlayback?.seek(positionMs.coerceAtLeast(0))
@@ -3838,6 +3960,28 @@ class MusicPlayer @Inject constructor(
             else -> 0.75f
         }
         player.setPlaybackSpeed(next)
+    }
+
+    fun setPlaybackParameters(speed: Float, pitch: Float) = onMain {
+        val clampedSpeed = speed.coerceIn(0.25f, 3.0f)
+        val clampedPitch = pitch.coerceIn(0.25f, 3.0f)
+        if (playerDelegate.isInitialized()) {
+            player.playbackParameters = PlaybackParameters(clampedSpeed, clampedPitch)
+        }
+        _state.update { it.copy(speed = clampedSpeed, pitch = clampedPitch) }
+        persistPlaybackSession()
+    }
+
+    fun setSpeed(speed: Float) = onMain {
+        setPlaybackParameters(speed, _state.value.pitch)
+    }
+
+    fun setPitch(pitch: Float) = onMain {
+        setPlaybackParameters(_state.value.speed, pitch)
+    }
+
+    fun resetPlaybackParameters() = onMain {
+        setPlaybackParameters(1.0f, 1.0f)
     }
     fun cycleSleepTimer() = onMain {
         setSleepTimerMinutes(SLEEP_TIMER_MINUTES[(sleepTimerStep + 1) % SLEEP_TIMER_MINUTES.size])
@@ -6877,6 +7021,7 @@ class MusicPlayer @Inject constructor(
             shuffleEnabled = session.shuffleEnabled,
             repeatMode = session.repeatMode,
             speed = session.speed,
+            pitch = session.pitch,
         )
         durationOwnerMediaId = restoredQueue[restoredIndex].mediaIdKey()
         pendingRestoredSession = session.copy(
@@ -6940,6 +7085,7 @@ class MusicPlayer @Inject constructor(
             shuffleEnabled = snapshot.shuffleEnabled,
             repeatMode = snapshot.repeatMode,
             speed = snapshot.speed,
+            pitch = snapshot.pitch,
             durationMs = currentDuration,
         )
         lastPersistedSignature = signature
@@ -7022,6 +7168,13 @@ class MusicPlayer @Inject constructor(
                 ?: current?.let { findPreparedStreamFor(it, it.videoId, it.mediaIdKey() in losslessBypassMediaIds) }
         } else null
 
+        val autoMixEng = nativeAutoMixEngine.get()
+        val mixState = if (autoMixEng.isAvailable) autoMixEng.state else AutoMixState.IDLE
+        val isMixActive = mixState != AutoMixState.IDLE
+        val mixProgress = if (autoMixEng.isAvailable) autoMixEng.transitionProgress else 0f
+        val mixBpm = if (autoMixEng.isAvailable && isMixActive) autoMixEng.deckABpm.takeIf { it > 0f } else null
+        val djStatus = currentAutoDJStatusString()
+
         _state.value = MusicPlayerState(
             current = current,
             queue = queue,
@@ -7036,12 +7189,20 @@ class MusicPlayer @Inject constructor(
             shuffleEnabled = player.shuffleModeEnabled,
             repeatMode = player.repeatMode,
             speed = player.playbackParameters.speed,
+            pitch = player.playbackParameters.pitch,
             bitrateKbps = previous.bitrateKbps.takeIf { hasExplicitPrevious } ?: streamForCurrent?.bitrateKbps,
             audioCodec = previous.audioCodec.takeIf { hasExplicitPrevious } ?: streamForCurrent?.audioCodec,
             isLossless = (previous.isLossless && sameTrack) || (streamForCurrent?.isLossless == true),
             bitDepth = previous.bitDepth.takeIf { hasExplicitPrevious } ?: streamForCurrent?.bitDepth,
             samplingRateKHz = previous.samplingRateKHz.takeIf { hasExplicitPrevious } ?: streamForCurrent?.samplingRateKHz,
             sleepTimerRemainingMs = sleepTimerDeadlineMs?.minus(SystemClock.elapsedRealtime())?.coerceAtLeast(0),
+            isAutoMixActive = isMixActive,
+            isAutoMixEnabled = automixEnabled,
+            autoMixState = mixState,
+            autoMixProgress = mixProgress,
+            autoMixBpm = mixBpm,
+            isAutoDJActive = autoDJController.get().isEnabled,
+            autoDJStatus = djStatus,
             error = if (isPlayingState) null else previous.error,
         )
         persistPlaybackSession()
@@ -7269,10 +7430,37 @@ private fun PlayableTrack.toMediaItem(resolved: MusicPlayer.ResolvedStream? = nu
         .build()
 }
 
-    private fun PlayableTrack.mediaIdKey(): String = when {
+internal fun PlayableTrack.mediaIdKey(): String = when {
     !playbackUrl.isNullOrBlank() -> "local:${playbackUrl}"
     !videoId.isNullOrBlank() -> videoId
     else -> "query:${artist.lowercase()}|${title.lowercase()}"
+}
+
+internal fun com.neonsong.app.playback.resolve.StreamCache.toPlayerStream(): MusicPlayer.ResolvedStream {
+    val ytStream = toYouTubeAudioStream()
+    val trueBitrate = ytStream.bitrate.takeIf { it > 0 }?.let { (it + 500) / 1_000 }
+    val rawCodec = ytStream.codec?.substringBefore(',')?.trim()?.uppercase()?.ifBlank {
+        ytStream.mimeType?.substringAfter("audio/")?.substringBefore(';')?.uppercase()?.ifBlank { "WEBM" } ?: "WEBM"
+    } ?: "WEBM"
+    val codec = when {
+        rawCodec.contains("OPUS") || rawCodec == "WEBM" -> "OPUS"
+        rawCodec.contains("M4A") || rawCodec.contains("MP4") || rawCodec.contains("MP4A") || rawCodec.contains("AAC") -> "AAC"
+        else -> rawCodec
+    }
+    val cleanMime = ytStream.mimeType?.substringBefore(';')?.trim().orEmpty()
+    return MusicPlayer.ResolvedStream(
+        url = ytStream.url,
+        mimeType = cleanMime,
+        bitrateKbps = trueBitrate,
+        audioCodec = codec,
+        cacheKey = ytStream.mediaCacheKey,
+        requestHeaders = ytStream.requestHeaders,
+        isLossless = false,
+        samplingRateKHz = ytStream.sampleRateHz?.let { it / 1_000.0 },
+        youtubeCandidate = ytStream,
+        durationMs = ytStream.durationMs?.takeIf { it > 0 },
+        expiresAtEpochMs = ytStream.expiresAtEpochMs,
+    )
 }
 
 private fun MediaItem.toPlayableTrack(): PlayableTrack {

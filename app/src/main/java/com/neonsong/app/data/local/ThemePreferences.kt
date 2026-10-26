@@ -42,6 +42,8 @@ data class ThemePrefs(
     /** Experimental iOS-style liquid-glass materials. Off by default — the
      *  classic opaque look stays untouched until the user opts in. */
     val liquidGlass: Boolean = false,
+    val md3NavBar: Boolean = false,
+    val hideNavTabs: Boolean = false,
 )
 
 @Singleton
@@ -55,6 +57,8 @@ class ThemePreferences @Inject constructor(
         val ACCENT_MODE = stringPreferencesKey("lw_accentMode")
         val AMOLED = booleanPreferencesKey("lw_amoled")
         val LIQUID_GLASS = booleanPreferencesKey("lw_liquidGlass")
+        val MD3_NAV_BAR = booleanPreferencesKey("lw_md3NavBar")
+        val HIDE_NAV_TABS = booleanPreferencesKey("lw_hideNavTabs")
     }
 
     val prefs: Flow<ThemePrefs> = dataStore.data
@@ -67,6 +71,8 @@ class ThemePreferences @Inject constructor(
                 accentMode = AccentMode.fromStorage(p.readSafely(Keys.ACCENT_MODE)),
                 amoled = p.readSafely(Keys.AMOLED) ?: false,
                 liquidGlass = p.readSafely(Keys.LIQUID_GLASS) ?: false,
+                md3NavBar = p.readSafely(Keys.MD3_NAV_BAR) ?: false,
+                hideNavTabs = p.readSafely(Keys.HIDE_NAV_TABS) ?: false,
             )
         }
 
@@ -92,5 +98,13 @@ class ThemePreferences @Inject constructor(
 
     suspend fun setLiquidGlass(enabled: Boolean) {
         dataStore.edit { it[Keys.LIQUID_GLASS] = enabled }
+    }
+
+    suspend fun setMd3NavBar(enabled: Boolean) {
+        dataStore.edit { it[Keys.MD3_NAV_BAR] = enabled }
+    }
+
+    suspend fun setHideNavTabs(enabled: Boolean) {
+        dataStore.edit { it[Keys.HIDE_NAV_TABS] = enabled }
     }
 }

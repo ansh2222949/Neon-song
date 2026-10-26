@@ -74,6 +74,12 @@ add_library(
     SHARED
     AudioEngine.cpp
     DspProcessor.cpp
+    AutoMixEngine.cpp
+    AutoMixBridge.cpp
+    AutoDJProcessor.cpp
+    AutoDJBridge.cpp
+    WsolaTimeStretcher.cpp
+    BpmPhaseDetector.cpp
     NativeBridge.cpp
 )
 

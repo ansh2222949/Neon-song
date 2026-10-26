@@ -13,6 +13,10 @@ import com.neonsong.app.data.generate.TasteProfileProvider
 import com.neonsong.app.data.model.FriendEntry
 import com.neonsong.app.data.model.RecentTrack
 import com.neonsong.app.data.music.InnerTubeMusicApi
+import com.neonsong.app.data.music.HomeChip
+import com.neonsong.app.data.music.HomePage
+import com.neonsong.app.data.music.HomeShelf
+import com.neonsong.app.data.music.HomeShelfItem
 import com.neonsong.app.data.music.YouTubeMusicTrack
 import com.neonsong.app.data.music.YouTubePlaylistSummary
 import com.neonsong.app.data.playlist.PlaylistRepository
@@ -82,6 +86,9 @@ data class FeedData(
     val hasYtMixes: Boolean = false,
     val hasPersonalContent: Boolean = false,
     val tasteTags: List<String> = emptyList(),
+    val nativeShelves: List<HomeShelf> = emptyList(),
+    val homeChips: List<HomeChip> = emptyList(),
+    val homeContinuationToken: String? = null,
     val ytSuggestedPlaylists: List<YouTubePlaylistSummary> = emptyList(),
     val spotlight: FeedSpotlight? = null,
     val quickTiles: List<FeedQuickTile> = emptyList(),
@@ -132,6 +139,9 @@ class FeedRepository @Inject constructor(
         val homeSongsDef = async(Dispatchers.IO) {
             if (isYtConnected) emptyList() else runCatching { innerTube.fetchHomeSongs() }.getOrDefault(emptyList())
         }
+        val homePageDef = async(Dispatchers.IO) {
+            runCatching { innerTube.fetchHomePage() }.getOrDefault(HomePage())
+        }
 
         val ytTasteDef = async(Dispatchers.IO) {
             if (isYtConnected) {
@@ -181,6 +191,12 @@ class FeedRepository @Inject constructor(
             it.id.startsWith("PL") || it.id.startsWith("RD") || it.id.startsWith("OLAK") || it.id == "LM"
         }
         val homeSongs = homeSongsDef.await()
+        val homePage = homePageDef.await()
+        val nativeShelves = homePage.shelves.ifEmpty {
+            runCatching { innerTube.fetchHomeShelves() }.getOrDefault(emptyList())
+        }
+        val homeChips = homePage.chips
+        val homeContinuationToken = homePage.continuationToken
         val recentTracks = recentTracksDef.await()
         val friends = friendsDef.await()
         val tasteProfile = tasteProfileDef.await()
@@ -283,6 +299,9 @@ class FeedRepository @Inject constructor(
             userName = username,
             hasYtRecommendations = ytTaste?.feedTracks?.isNotEmpty() == true,
             hasPersonalContent = tasteProfile?.hasPersonalSignals == true || ytLikedSongs.isNotEmpty() || ytRecentSongs.isNotEmpty(),
+            nativeShelves = nativeShelves.ifEmpty { previous?.nativeShelves.orEmpty() },
+            homeChips = homeChips.ifEmpty { previous?.homeChips.orEmpty() },
+            homeContinuationToken = homeContinuationToken ?: previous?.homeContinuationToken,
             quickPicks = quickPicks,
             ytLikedSongs = ytLikedSongs,
             ytRecentSongs = ytRecentSongs,
@@ -698,9 +717,11 @@ class FeedRepository @Inject constructor(
                 artworkUrl = quickPicks.lastOrNull()?.artworkUrl ?: quickPicks.firstOrNull()?.artworkUrl, collection = "radio"))
 
             // 3. Discover Mix
-            val savedDiscoverMix = homePlaylists.firstOrNull { it.title.equals("Discover Mix", ignoreCase = true) }
+            val savedDiscoverMix = homePlaylists.firstOrNull { it.title.contains("Discover Mix", ignoreCase = true) }
+                ?: nativeShelves.flatMap { it.items }.filterIsInstance<HomeShelfItem.Playlist>()
+                    .map { it.playlist }.firstOrNull { it.title.contains("Discover Mix", ignoreCase = true) }
             add(savedDiscoverMix?.let {
-                FeedQuickTile(title = it.title, subtitle = it.author.takeIf { a -> !a.isNullOrBlank() } ?: "New discoveries", artworkUrl = it.artworkUrl, playlistId = it.id)
+                FeedQuickTile(title = "Discover Mix", subtitle = it.author.takeIf { a -> !a.isNullOrBlank() } ?: "New discoveries", artworkUrl = it.artworkUrl, playlistId = it.id, collection = "discover_mix")
             } ?: FeedQuickTile(title = "Discover Mix", subtitle = "New discoveries",
                 artworkUrl = ytRecentSongs.firstOrNull()?.artworkUrl, collection = "discover_mix"))
 
@@ -734,6 +755,9 @@ class FeedRepository @Inject constructor(
             hasYtMixes = false,
             hasPersonalContent = hasPersonalContent,
             tasteTags = tasteTags,
+            nativeShelves = nativeShelves,
+            homeChips = homeChips,
+            homeContinuationToken = homeContinuationToken,
             ytSuggestedPlaylists = homePlaylists.filter { it.id != "LM" }.take(12),
             spotlight = spotlight,
             quickTiles = quickTiles,
