@@ -74,10 +74,12 @@ import com.neonsong.app.data.generate.RECOMMENDATION_TRACK_COUNT
 import com.neonsong.app.ui.common.ExpressiveGroup
 import com.neonsong.app.ui.common.ExpressiveGroupSelectRow
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.rememberExpressiveHeaderBackdrop
 import com.neonsong.app.ui.common.adaptiveContentWidth
 import com.neonsong.app.ui.common.wobbleOverscroll
 import com.neonsong.app.ui.shell.FloatingNavDefaults
 import com.neonsong.app.ui.theme.ExpressivePillShape
+import com.neonsong.app.ui.theme.liquidGlassSource
 
 // Local expressive shape scale, matching the Settings screen's redesign so
 // Generator feels like part of the same premium visual language.
@@ -99,6 +101,7 @@ fun GenerateScreen(
     viewModel: GenerateViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val headerBackdrop = rememberExpressiveHeaderBackdrop()
 
     LaunchedEffect(Unit) {
         viewModel.navEvents.collect { event ->
@@ -122,13 +125,19 @@ fun GenerateScreen(
             title = "Generator",
             subtitle = "Choose a mode to generate a playlist",
             onBack = onBack,
+            backdrop = headerBackdrop,
         )
 
         com.neonsong.app.ui.common.WithoutPlatformOverscroll {
         LazyColumn(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = FloatingNavDefaults.contentBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth().weight(1f).clipToBounds().wobbleOverscroll(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clipToBounds()
+                .liquidGlassSource(headerBackdrop)
+                .wobbleOverscroll(),
         ) {
             if (state.isGenerating) {
                 item(key = "loadingOverlay") {

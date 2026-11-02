@@ -139,7 +139,7 @@ fun ConnectedButtonGroup(
                         }
                         Text(
                             text = item.label,
-                            style = MaterialTheme.typography.labelLarge,
+                            style = MaterialTheme.typography.labelMedium,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                             color = contentColor,
                             maxLines = 1,

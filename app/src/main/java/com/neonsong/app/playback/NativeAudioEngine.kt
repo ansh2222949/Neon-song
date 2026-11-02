@@ -265,6 +265,162 @@ class NativeAudioEngine @Inject constructor(
         return accepted
     }
 
+    /**
+     * Enqueues PCM into a specific deck (0 = Deck A, 1 = Deck B).
+     * Returns accepted frames. A partial write indicates backpressure;
+     * buffer position is advanced by accepted frames only.
+     */
+    fun writeDeckPcm(
+        deckId: Int,
+        buffer: ByteBuffer,
+        frameCount: Int,
+        encoding: NativePcmEncoding,
+        inputSampleRate: Int,
+        inputChannelCount: Int,
+    ): Int {
+        require(buffer.isDirect) { "NativeAudioEngine requires a direct ByteBuffer" }
+        require(deckId in 0..1) { "deckId must be 0 or 1" }
+        require(inputChannelCount == 1 || inputChannelCount == 2) {
+            "Only mono or stereo PCM is supported"
+        }
+        require(inputSampleRate > 0) { "inputSampleRate must be positive" }
+        require(frameCount >= 0) { "frameCount must not be negative" }
+        val requiredBytes = frameCount.toLong() * inputChannelCount * encoding.bytesPerSample
+        require(requiredBytes <= buffer.remaining().toLong()) { "PCM buffer is too small" }
+        if (frameCount == 0) return 0
+
+        val accepted = withHandle(-3) { handle ->
+            nativeWriteDeckPcm(
+                handle,
+                deckId,
+                buffer,
+                buffer.position(),
+                frameCount,
+                encoding.nativeValue,
+                inputSampleRate,
+                inputChannelCount,
+            )
+        }
+        if (accepted > 0) {
+            buffer.position(buffer.position() + accepted * inputChannelCount * encoding.bytesPerSample)
+        }
+        return accepted
+    }
+
+    fun flushDeck(deckId: Int) {
+        if (deckId in 0..1) {
+            withHandle(Unit) { nativeFlushDeck(it, deckId) }
+        }
+    }
+
+    fun getDeckBufferedFrames(deckId: Int): Long {
+        return if (deckId in 0..1) {
+            withHandle(0L) { nativeGetDeckBufferedFrames(it, deckId) }
+        } else {
+            0L
+        }
+    }
+
+    fun setDeckVolume(deckId: Int, volume: Float) {
+        if (deckId in 0..1) {
+            withHandle(Unit) { nativeSetDeckVolume(it, deckId, volume.coerceIn(0f, 1f)) }
+        }
+    }
+
+    fun setCrossfade(progress: Float) {
+        withHandle(Unit) { nativeSetCrossfade(it, progress.coerceIn(0f, 1f)) }
+    }
+
+    fun getCrossfade(): Float {
+        return withHandle(0f) { nativeGetCrossfade(it) }
+    }
+
+    fun setDeckPlaybackParameters(deckId: Int, speed: Float, pitch: Float) {
+        if (deckId in 0..1) {
+            val clampedSpeed = speed.coerceIn(0.25f, 3.0f)
+            val clampedPitch = pitch.coerceIn(0.25f, 3.0f)
+            withHandle(Unit) { nativeSetDeckPlaybackParameters(it, deckId, clampedSpeed, clampedPitch) }
+        }
+    }
+
+    fun getDeckSpeed(deckId: Int): Float {
+        return if (deckId in 0..1) {
+            withHandle(1.0f) { nativeGetDeckSpeed(it, deckId) }
+        } else {
+            1.0f
+        }
+    }
+
+    fun getDeckPitch(deckId: Int): Float {
+        return if (deckId in 0..1) {
+            withHandle(1.0f) { nativeGetDeckPitch(it, deckId) }
+        } else {
+            1.0f
+        }
+    }
+
+    fun setDeckTimeRatio(deckId: Int, ratio: Float) {
+        if (deckId in 0..1) {
+            withHandle(Unit) { nativeSetDeckTimeRatio(it, deckId, ratio.coerceIn(0.25f, 3.0f)) }
+        }
+    }
+
+    fun getDeckTimeRatio(deckId: Int): Float {
+        return if (deckId in 0..1) {
+            withHandle(1.0f) { nativeGetDeckTimeRatio(it, deckId) }
+        } else {
+            1.0f
+        }
+    }
+
+    fun setDeckPlaying(deckId: Int, playing: Boolean) {
+        if (deckId in 0..1) {
+            withHandle(Unit) { nativeSetDeckPlaying(it, deckId, playing) }
+        }
+    }
+
+    fun isDeckPlaying(deckId: Int): Boolean {
+        return if (deckId in 0..1) {
+            withHandle(false) { nativeIsDeckPlaying(it, deckId) }
+        } else {
+            false
+        }
+    }
+
+    fun drainDeckResampler(deckId: Int) {
+        if (deckId in 0..1) {
+            withHandle(Unit) { nativeDrainDeckResampler(it, deckId) }
+        }
+    }
+
+    fun isDeckResamplerDrained(deckId: Int): Boolean {
+        return if (deckId in 0..1) {
+            withHandle(true) { nativeIsDeckResamplerDrained(it, deckId) }
+        } else {
+            true
+        }
+    }
+
+    fun isDeckWsolaDrained(deckId: Int): Boolean {
+        return if (deckId in 0..1) {
+            withHandle(true) { nativeIsDeckWsolaDrained(it, deckId) }
+        } else {
+            true
+        }
+    }
+
+    fun getDeckFramesRendered(deckId: Int): Long {
+        return if (deckId in 0..1) {
+            withHandle(0L) { nativeGetDeckFramesRendered(it, deckId) }
+        } else {
+            0L
+        }
+    }
+
+    fun getPresentationLatencyUs(): Long {
+        return withHandle(0L, ::nativeGetPresentationLatencyUs)
+    }
+
     /** Enqueues Float32 PCM already processed at the active Oboe sample rate. */
     internal fun writeProcessedPcm(
         buffer: ByteBuffer,
@@ -413,6 +569,33 @@ class NativeAudioEngine @Inject constructor(
         inputSampleRate: Int,
         inputChannelCount: Int,
     ): Int
+    private external fun nativeWriteDeckPcm(
+        handle: Long,
+        deckId: Int,
+        buffer: ByteBuffer,
+        byteOffset: Int,
+        frameCount: Int,
+        encoding: Int,
+        inputSampleRate: Int,
+        inputChannelCount: Int,
+    ): Int
+    private external fun nativeFlushDeck(handle: Long, deckId: Int)
+    private external fun nativeGetDeckBufferedFrames(handle: Long, deckId: Int): Long
+    private external fun nativeSetDeckVolume(handle: Long, deckId: Int, volume: Float)
+    private external fun nativeSetCrossfade(handle: Long, progress: Float)
+    private external fun nativeGetCrossfade(handle: Long): Float
+    private external fun nativeSetDeckPlaybackParameters(handle: Long, deckId: Int, speed: Float, pitch: Float)
+    private external fun nativeGetDeckSpeed(handle: Long, deckId: Int): Float
+    private external fun nativeGetDeckPitch(handle: Long, deckId: Int): Float
+    private external fun nativeSetDeckTimeRatio(handle: Long, deckId: Int, ratio: Float)
+    private external fun nativeGetDeckTimeRatio(handle: Long, deckId: Int): Float
+    private external fun nativeSetDeckPlaying(handle: Long, deckId: Int, playing: Boolean)
+    private external fun nativeIsDeckPlaying(handle: Long, deckId: Int): Boolean
+    private external fun nativeDrainDeckResampler(handle: Long, deckId: Int)
+    private external fun nativeIsDeckResamplerDrained(handle: Long, deckId: Int): Boolean
+    private external fun nativeIsDeckWsolaDrained(handle: Long, deckId: Int): Boolean
+    private external fun nativeGetDeckFramesRendered(handle: Long, deckId: Int): Long
+    private external fun nativeGetPresentationLatencyUs(handle: Long): Long
     private external fun nativeWriteProcessedPcm(
         handle: Long,
         buffer: ByteBuffer,

@@ -17,10 +17,51 @@ import kotlin.math.roundToInt
  */
 object Md3SchemeBuilder {
 
+    /**
+     * Boosts only the chromatic roles of a system Monet scheme, retaining
+     * each role's hue and lightness so contrast and surface hierarchy remain intact.
+     */
+    fun enrichDynamicColors(scheme: ColorScheme): ColorScheme = scheme.copy(
+        primary = boostSaturation(scheme.primary, 1.55f),
+        primaryContainer = boostSaturation(scheme.primaryContainer, 1.75f),
+        secondary = boostSaturation(scheme.secondary, 1.55f),
+        secondaryContainer = boostSaturation(scheme.secondaryContainer, 1.75f),
+        tertiary = boostSaturation(scheme.tertiary, 1.55f),
+        tertiaryContainer = boostSaturation(scheme.tertiaryContainer, 1.75f),
+        inversePrimary = boostSaturation(scheme.inversePrimary, 1.55f),
+    )
+
+    private fun boostSaturation(color: Color, factor: Float): Color {
+        val red = color.red
+        val green = color.green
+        val blue = color.blue
+        val max = maxOf(red, green, blue)
+        val min = minOf(red, green, blue)
+        val delta = max - min
+        val lightness = (max + min) / 2f
+        val saturation = if (delta == 0f) {
+            0f
+        } else {
+            delta / (1f - kotlin.math.abs(2f * lightness - 1f))
+        }
+        val hue = when {
+            delta == 0f -> 0f
+            max == red -> 60f * (((green - blue) / delta) % 6f)
+            max == green -> 60f * ((blue - red) / delta + 2f)
+            else -> 60f * ((red - green) / delta + 4f)
+        }.let { if (it < 0f) it + 360f else it }
+
+        return hsl(
+            hue.roundToInt(),
+            (saturation * factor * 100f).roundToInt().coerceAtMost(92),
+            (lightness * 100f).roundToInt(),
+        )
+    }
+
     /** Chroma levels (CSS HSL %), match app.js constants exactly. */
-    private const val CHROMA_PRIMARY = 30
-    private const val CHROMA_SECONDARY = 14
-    private const val CHROMA_TERTIARY = 22
+    private const val CHROMA_PRIMARY = 42
+    private const val CHROMA_SECONDARY = 28
+    private const val CHROMA_TERTIARY = 36
     private const val CHROMA_NEUTRAL = 5
     private const val CHROMA_NEUTRAL_VARIANT = 8
 

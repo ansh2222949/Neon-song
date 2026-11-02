@@ -77,10 +77,12 @@ import androidx.lifecycle.viewModelScope
 import com.neonsong.app.data.local.HomeSection
 import com.neonsong.app.data.local.SettingsPreferences
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.rememberExpressiveHeaderBackdrop
 import com.neonsong.app.ui.common.adaptiveContentWidth
 import com.neonsong.app.ui.common.safeDrawingBottomPadding
 import com.neonsong.app.ui.common.safeHorizontalContentPadding
 import com.neonsong.app.ui.player.LocalMiniPlayerScrollClearance
+import com.neonsong.app.ui.theme.liquidGlassSource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -181,6 +183,7 @@ fun HomeSectionsScreen(
     val ytOrder by viewModel.ytMusicSectionsOrder.collectAsStateWithLifecycle()
     val visibleCount = HomeSection.entries.size - hidden.size
     var showYtMusicSheet by remember { mutableStateOf(false) }
+    val headerBackdrop = rememberExpressiveHeaderBackdrop()
 
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -200,6 +203,7 @@ fun HomeSectionsScreen(
                     HomeSection.entries.size,
                 ),
                 onBack = onBack,
+                backdrop = headerBackdrop,
                 actions = {
                     TextButton(onClick = viewModel::showAll, enabled = hidden.isNotEmpty()) {
                         Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -224,7 +228,7 @@ fun HomeSectionsScreen(
                     bottom = 32.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxSize().safeHorizontalContentPadding(),
+                modifier = Modifier.fillMaxSize().safeHorizontalContentPadding().liquidGlassSource(headerBackdrop),
             ) {
                 // Top Action: YouTube Music Selection
                 item(key = "yt_music_selection_card") {

@@ -101,6 +101,7 @@ import com.neonsong.app.data.music.YouTubePlaylistSummary
 import com.neonsong.app.data.playlist.SavedPlaylist
 import com.neonsong.app.ui.common.ArtworkImage
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.rememberExpressiveHeaderBackdrop
 import com.neonsong.app.ui.common.groupPositionFor
 import com.neonsong.app.ui.common.groupShape
 import com.neonsong.app.ui.common.safeDrawingBottomPadding
@@ -108,6 +109,10 @@ import com.neonsong.app.ui.common.adaptiveContentWidth
 import com.neonsong.app.ui.player.LocalMiniPlayerScrollClearance
 import com.neonsong.app.ui.shell.FloatingNavDefaults
 import com.neonsong.app.ui.theme.ArtworkShape
+import androidx.compose.ui.graphics.Color
+import com.neonsong.app.ui.common.EdgeToEdgeDialogWindow
+import com.neonsong.app.ui.theme.liquidGlassChrome
+import com.neonsong.app.ui.theme.liquidGlassSource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -121,6 +126,7 @@ fun YouTubePlaylistImportScreen(
     val clipboard = LocalClipboardManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val haptic = LocalHapticFeedback.current
+    val headerBackdrop = rememberExpressiveHeaderBackdrop()
 
     val quickPills = listOf("Top Hits 2024", "Pop Classics", "Lofi Chill", "Hip Hop Gold", "Workout Energy", "Deep Focus")
 
@@ -158,6 +164,7 @@ fun YouTubePlaylistImportScreen(
                 title = "Import Playlist",
                 subtitle = "YouTube Music, Links & CSV Files",
                 onBack = onBack,
+                backdrop = headerBackdrop,
                 actions = {
                     val activeList = when (state.selectedTab) {
                         ImportTab.LIBRARY -> state.libraryPlaylists
@@ -214,7 +221,7 @@ fun YouTubePlaylistImportScreen(
                             modifier = Modifier.weight(1f).height(44.dp),
                         ) {
                             Box(
-                                modifier = Modifier.fillMaxSize(),
+                                modifier = Modifier.fillMaxSize().liquidGlassSource(headerBackdrop),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
@@ -770,9 +777,22 @@ private fun PlaylistPreviewModal(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        modifier = Modifier.liquidGlassChrome(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), true),
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor = Color.Transparent,
+        scrimColor = Color.Black.copy(alpha = 0.32f),
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+        dragHandle = {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .size(width = 36.dp, height = 4.dp),
+            ) {}
+        },
     ) {
+        EdgeToEdgeDialogWindow()
         Column(
             modifier = Modifier
                 .fillMaxWidth()

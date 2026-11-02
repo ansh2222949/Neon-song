@@ -1,59 +1,66 @@
 package com.neonsong.app.ui.common
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.isSpecified
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-
+import com.neonsong.app.ui.theme.SquircleShape
+import com.neonsong.app.ui.theme.liquidGlassSurface
 
 /**
- * Keeps content composition stable when Liquid Glass is toggled.
+ * Premium Liquid Glass Card with translucent material depth, directional specular border,
+ * optical curved-glass top sheen, and water-like touch response.
  */
 @Composable
 fun LiquidGlassCard(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(24.dp),
-    enabled: Boolean = false,
+    shape: Shape = SquircleShape(24.dp),
+    enabled: Boolean = true,
     tintColor: Color = Color.Unspecified,
     contentColor: Color = Color.Unspecified,
+    accentTint: Color = Color.Unspecified,
+    borderWidth: Dp = 1.dp,
+    contentPadding: PaddingValues = PaddingValues(16.dp),
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val resolvedAccent = when {
+        accentTint.isSpecified -> accentTint
+        tintColor.isSpecified -> tintColor
+        else -> MaterialTheme.colorScheme.primary
+    }
+
     val resolvedContentColor = if (contentColor.isSpecified) {
         contentColor
     } else {
         MaterialTheme.colorScheme.onSurface
     }
 
-    val baseColor = if (tintColor.isSpecified) tintColor else MaterialTheme.colorScheme.surfaceContainer
-    val clickModifier = if (onClick != null) {
-        Modifier.clickable(
-            role = Role.Button,
-            onClick = onClick,
-        )
-    } else Modifier
-
-    Card(
-        modifier = modifier.then(clickModifier),
-        shape = shape,
-        colors = CardDefaults.cardColors(
-            containerColor = baseColor,
-            contentColor = resolvedContentColor,
-        ),
+    Box(
+        modifier = modifier
+            .liquidGlassSurface(
+                shape = shape,
+                borderWidth = borderWidth,
+                accentTint = resolvedAccent,
+                interactive = onClick != null && enabled,
+                onClick = if (enabled) onClick else null,
+            )
+            .padding(contentPadding),
     ) {
-        Column(Modifier.padding(16.dp), content = content)
+        CompositionLocalProvider(LocalContentColor provides resolvedContentColor) {
+            Column(content = content)
+        }
     }
 }

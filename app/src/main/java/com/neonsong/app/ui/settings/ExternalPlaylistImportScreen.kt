@@ -63,10 +63,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.neonsong.app.data.playlist.ExternalTrackRow
 import com.neonsong.app.data.playlist.SavedPlaylist
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.rememberExpressiveHeaderBackdrop
 import com.neonsong.app.ui.common.adaptiveContentWidth
 import com.neonsong.app.ui.common.groupPositionFor
 import com.neonsong.app.ui.common.groupShape
 import com.neonsong.app.ui.player.LocalMiniPlayerScrollClearance
+import com.neonsong.app.ui.theme.liquidGlassSource
 
 /** How many preview rows are listed before a "+N more tracks" footer. */
 private const val PREVIEW_ROW_LIMIT = 50
@@ -90,6 +92,7 @@ fun ExternalPlaylistImportScreen(
     val clipboard = LocalClipboardManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val haptic = LocalHapticFeedback.current
+    val headerBackdrop = rememberExpressiveHeaderBackdrop()
 
     val preview = state.preview
     val rows = preview?.rows.orEmpty()
@@ -106,6 +109,7 @@ fun ExternalPlaylistImportScreen(
                 title = "Import Playlist",
                 subtitle = "Spotify & Apple Music links",
                 onBack = onBack,
+                backdrop = headerBackdrop,
             )
 
             LazyColumn(
@@ -116,7 +120,7 @@ fun ExternalPlaylistImportScreen(
                     bottom = 96.dp + LocalMiniPlayerScrollClearance.current,
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().liquidGlassSource(headerBackdrop),
             ) {
                 // Link input + Preview action
                 item {

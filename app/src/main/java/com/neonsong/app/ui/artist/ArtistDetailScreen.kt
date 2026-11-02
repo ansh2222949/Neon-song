@@ -1,4 +1,5 @@
 package com.neonsong.app.ui.artist
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -31,7 +32,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Album
@@ -93,6 +93,8 @@ import com.neonsong.app.data.model.ArtistSummaryItem
 import com.neonsong.app.playback.PlayableTrack
 import com.neonsong.app.ui.common.ArtworkImage
 import com.neonsong.app.ui.common.ExpressiveLoadingIndicator
+import com.neonsong.app.ui.theme.LiquidGlassIconButton
+import com.neonsong.app.ui.theme.liquidGlassSurface
 import com.neonsong.app.ui.common.TrackContextMenuSheet
 import com.neonsong.app.ui.common.TrackMenuCapabilities
 import com.neonsong.app.ui.common.TrackMenuTarget
@@ -727,14 +729,19 @@ fun ArtistDetailScreen(
             }
         }
 
-        Surface(
-            color = if (showScrolledHeader) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.98f) else Color.Transparent,
-            tonalElevation = if (showScrolledHeader) 4.dp else 0.dp,
-            shadowElevation = if (showScrolledHeader) 6.dp else 0.dp,
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .zIndex(10f)
-                .align(Alignment.TopCenter),
+                .align(Alignment.TopCenter)
+                .then(
+                    if (showScrolledHeader) {
+                        Modifier.liquidGlassSurface(
+                            shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                            borderWidth = 1.dp,
+                        )
+                    } else Modifier
+                ),
         ) {
             Row(
                 modifier = Modifier
@@ -744,14 +751,16 @@ fun ArtistDetailScreen(
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(
+                LiquidGlassIconButton(
                     onClick = onBack,
-                    modifier = Modifier.size(44.dp),
+                    modifier = Modifier.size(40.dp),
+                    contentDescription = "Back",
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
                         tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp),
                     )
                 }
 

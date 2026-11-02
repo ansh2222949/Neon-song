@@ -383,7 +383,7 @@ class ArtworkRepository @Inject constructor(
                 .maxByOrNull { com.neonsong.app.data.music.TextMatch.matchScore(it, name, artist) }
                 ?.takeIf { ytVerified(it.title, it.artist, name, artist) }
             val raw = best?.artworkUrl ?: return@withContext null
-            ArtworkNormalizer.upscaleYoutubeArtwork(raw)
+            ArtworkNormalizer.upscaleYoutubeArtwork(raw) ?: raw
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (_: Exception) {

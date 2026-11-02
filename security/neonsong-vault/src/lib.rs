@@ -359,3 +359,78 @@ pub extern "system" fn Java_com_neonsong_app_data_lossless_NativeSecrets_nativeS
 
     env.new_string(result).map(|s| s.into_raw()).unwrap_or(empty_str)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_addon_url_valid() {
+        let (path, tok) = parse_addon_url("https://addons.neonsong.com/a/token_xyz/stream?param=1#head").unwrap();
+        assert_eq!(path, "/a/token_xyz/stream");
+        assert_eq!(tok, "token_xyz");
+
+        let (path2, tok2) = parse_addon_url("/a/standalone_tok/action").unwrap();
+        assert_eq!(path2, "/a/standalone_tok/action");
+        assert_eq!(tok2, "standalone_tok");
+    }
+
+    #[test]
+    fn test_parse_addon_url_invalid() {
+        assert!(parse_addon_url("https://addons.neonsong.com/no_token/stream").is_none());
+        assert!(parse_addon_url("/a//stream").is_none());
+        assert!(parse_addon_url("invalid_url_without_slashes").is_none());
+    }
+
+    #[test]
+    fn test_derive_keystream_deterministic() {
+        let key = b"0123456789abcdef0123456789abcdef";
+        let salt = [0x5Au8; 16];
+        let ks1 = derive_keystream(key, &salt, 32);
+        let ks2 = derive_keystream(key, &salt, 32);
+        assert_eq!(ks1, ks2);
+        assert_eq!(ks1.len(), 32);
+
+        let diff_key = b"0123456789abcdef0123456789abcde0";
+        let ks3 = derive_keystream(diff_key, &salt, 32);
+        assert_ne!(ks1, ks3);
+    }
+
+    #[test]
+    fn test_hmac_sha256_vector() {
+        let key = b"Jefe";
+        let data = b"what do ya want for nothing?";
+        let sig = hmac_sha256_digest(key, data);
+        let hex: String = sig.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+    }
+
+    #[test]
+    fn test_secret_tamper_rejection() {
+        let correct_cert_hash = sha256_digest(b"GENUINE_RELEASE_CERT_BYTES");
+        let wrong_cert_hash = sha256_digest(b"TAMPERED_DEBUG_CERT_BYTES");
+        let salt = [0xA1; 16];
+
+        let original_secret = b"my_super_secret_token";
+        let ks = derive_keystream(&correct_cert_hash, &salt, original_secret.len());
+        let ciphertext: Vec<u8> = original_secret.iter().zip(ks.iter()).map(|(a, b)| a ^ b).collect();
+
+        // Legitimate decryption
+        let legitimate_ks = derive_keystream(&correct_cert_hash, &salt, original_secret.len());
+        let decrypted: Vec<u8> = ciphertext.iter().zip(legitimate_ks.iter()).map(|(a, b)| a ^ b).collect();
+        assert_eq!(decrypted, original_secret);
+
+        // Tampered / attacker certificate decryption
+        let attacker_ks = derive_keystream(&wrong_cert_hash, &salt, original_secret.len());
+        let tampered_decrypted: Vec<u8> = ciphertext.iter().zip(attacker_ks.iter()).map(|(a, b)| a ^ b).collect();
+        assert_ne!(tampered_decrypted, original_secret);
+    }
+
+    #[test]
+    fn test_zeroization() {
+        let mut buffer = vec![0x42u8; 32];
+        assert_eq!(buffer[0], 0x42);
+        buffer.zeroize();
+        assert!(buffer.iter().all(|&b| b == 0));
+    }
+}

@@ -25,6 +25,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
@@ -34,6 +36,11 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.withStyle
 import com.neonsong.app.ui.common.HeaderActionIcon
+import com.neonsong.app.ui.common.EdgeToEdgeDialogWindow
+import com.neonsong.app.ui.theme.liquidGlassChrome
+import com.neonsong.app.ui.theme.LocalLiquidGlassBackdrop
+import com.neonsong.app.ui.theme.liquidGlassSource
+import com.neonsong.app.ui.theme.rememberLayerBackdrop
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -75,7 +82,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.ui.composed
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Dp
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -479,22 +489,22 @@ fun SettingsScreen(
             }
         }
     }
-    var showQualityDialog by remember { mutableStateOf(false) }
-    var showDownloadQualityDialog by remember { mutableStateOf(false) }
-    var showEqSheet by remember { mutableStateOf(false) }
-    var showAutoEq by remember { mutableStateOf(false) }
-    var showLyricsAnimationSheet by remember { mutableStateOf(false) }
-    var showLyricsProviderDialog by remember { mutableStateOf(false) }
-    var showLyricsOffsetDialog by remember { mutableStateOf(false) }
-    var showLyricsSizeDialog by remember { mutableStateOf(false) }
-    var showLoudnessDialog by remember { mutableStateOf(false) }
-    var showClarityPresetDialog by remember { mutableStateOf(false) }
-    var showSyncPlaylistsSheet by remember { mutableStateOf(false) }
-    var showYtLibraryVisibilitySheet by remember { mutableStateOf(false) }
-    var showYtChannelSheet by remember { mutableStateOf(false) }
-    var showYtDisconnectConfirm by remember { mutableStateOf(false) }
-    var showLanguageDialog by remember { mutableStateOf(false) }
-    var showUpdateUrlDialog by remember { mutableStateOf(false) }
+    var showQualityDialog by rememberSaveable { mutableStateOf(false) }
+    var showDownloadQualityDialog by rememberSaveable { mutableStateOf(false) }
+    var showEqSheet by rememberSaveable { mutableStateOf(false) }
+    var showAutoEq by rememberSaveable { mutableStateOf(false) }
+    var showLyricsAnimationSheet by rememberSaveable { mutableStateOf(false) }
+    var showLyricsProviderDialog by rememberSaveable { mutableStateOf(false) }
+    var showLyricsOffsetDialog by rememberSaveable { mutableStateOf(false) }
+    var showLyricsSizeDialog by rememberSaveable { mutableStateOf(false) }
+    var showLoudnessDialog by rememberSaveable { mutableStateOf(false) }
+    var showClarityPresetDialog by rememberSaveable { mutableStateOf(false) }
+    var showSyncPlaylistsSheet by rememberSaveable { mutableStateOf(false) }
+    var showYtLibraryVisibilitySheet by rememberSaveable { mutableStateOf(false) }
+    var showYtChannelSheet by rememberSaveable { mutableStateOf(false) }
+    var showYtDisconnectConfirm by rememberSaveable { mutableStateOf(false) }
+    var showLanguageDialog by rememberSaveable { mutableStateOf(false) }
+    var showUpdateUrlDialog by rememberSaveable { mutableStateOf(false) }
     val currentLanguage = remember(misc.appLanguageTag) { AppLanguage.fromTag(misc.appLanguageTag) }
 
     // Sends the user to Android's own Notification Listener access screen
@@ -536,6 +546,11 @@ fun SettingsScreen(
     }
 
     var showYouTubeImportSheet by remember { mutableStateOf(false) }
+    val settingsBackground = MaterialTheme.colorScheme.background
+    val settingsBackdrop = rememberLayerBackdrop {
+        drawRect(settingsBackground)
+        drawContent()
+    }
 
     // Lets the user pick exactly where the backup file is saved (SAF), so
     // it's guaranteed to be somewhere restoreLauncher's picker can browse
@@ -544,18 +559,23 @@ fun SettingsScreen(
         if (uri != null) viewModel.exportBackup(uri, appVersionName(context))
     }
 
+    CompositionLocalProvider(LocalLiquidGlassBackdrop provides settingsBackdrop) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.TopCenter,
     ) {
-        Column(
-            Modifier
+        Box(
+            modifier = Modifier
                 .fillMaxSize()
                 .adaptiveContentWidth(maxWidth = 760.dp),
+            contentAlignment = Alignment.TopCenter,
         ) {
-        var activeTab by remember { mutableStateOf<SettingsTab?>(null) }
+        var activeTab by rememberSaveable { mutableStateOf<SettingsTab?>(null) }
         var isSearchBarVisible by rememberSaveable { mutableStateOf(false) }
         var highlightedSettingId by remember { mutableStateOf<String?>(null) }
+        var headerHeightPx by remember { mutableIntStateOf(0) }
+        val density = LocalDensity.current
+        val headerHeight = with(density) { headerHeightPx.toDp() }
         val focusManager = LocalFocusManager.current
 
         val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
@@ -577,58 +597,10 @@ fun SettingsScreen(
             }
         }
 
-        ExpressiveHeader(
-            title = if (searchQuery.isNotBlank()) stringResource(R.string.settings_search_title) else (activeTab?.title ?: stringResource(R.string.settings)),
-            onBack = {
-                if (searchQuery.isNotBlank() || isSearchBarVisible) {
-                    viewModel.clearSearch()
-                    isSearchBarVisible = false
-                } else if (activeTab != null) {
-                    activeTab = null
-                } else {
-                    onBack()
-                }
-            },
-            actions = {
-                HeaderActionIcon(
-                    icon = if (isSearchBarVisible || searchQuery.isNotBlank()) Icons.Filled.Close else Icons.Filled.Search,
-                    contentDescription = if (isSearchBarVisible || searchQuery.isNotBlank()) stringResource(R.string.settings_search_clear) else stringResource(R.string.settings_search_title),
-                    onClick = {
-                        if (isSearchBarVisible || searchQuery.isNotBlank()) {
-                            viewModel.clearSearch()
-                            isSearchBarVisible = false
-                        } else {
-                            isSearchBarVisible = true
-                        }
-                    },
-                )
-            },
-        )
-
-        AnimatedVisibility(
-            visible = isSearchBarVisible,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut(),
-        ) {
-            SettingsSearchBar(
-                query = searchQuery,
-                onQueryChange = viewModel::onSearchQueryChange,
-                onClear = {
-                    if (searchQuery.isNotBlank()) {
-                        viewModel.clearSearch()
-                    } else {
-                        isSearchBarVisible = false
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-            )
-        }
-
         if (searchQuery.isNotBlank()) {
             SettingsSearchResultsList(
                 query = searchQuery,
+                topPadding = headerHeight + if (isSearchBarVisible) 68.dp else 0.dp,
                 results = searchResults,
                 onResultClick = { entry ->
                     focusManager.clearFocus()
@@ -637,7 +609,9 @@ fun SettingsScreen(
                     activeTab = entry.parentTab
                     highlightedSettingId = entry.id
                 },
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .liquidGlassSource(settingsBackdrop),
             )
         } else {
         AnimatedContent(
@@ -656,7 +630,9 @@ fun SettingsScreen(
                 }
             },
             label = "SettingsTabTransition",
-            modifier = Modifier.weight(1f).fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxSize()
+                .liquidGlassSource(settingsBackdrop),
         ) { tab ->
             val listState = remember(tab) { LazyListState() }
 
@@ -678,7 +654,7 @@ fun SettingsScreen(
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     end = 16.dp,
-                    top = 16.dp,
+                    top = headerHeight + 16.dp + if (isSearchBarVisible) 68.dp else 0.dp,
                     bottom = 32.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),
                 ),
                 verticalArrangement = Arrangement.spacedBy(24.dp),
@@ -784,7 +760,8 @@ fun SettingsScreen(
                                         )
                                     }
                                 }
-                            }
+
+                        }
                         }
 
                         item {
@@ -897,6 +874,11 @@ fun SettingsScreen(
                         -1 -> "YouTube Music (AAC / Opus)"
                         else -> "Max (Up to 24-bit / 192 kHz)"
                     }
+                    AudioStudioHero(
+                        quality = qualitySubtitle.substringBefore(" ("),
+                        bitPerfectEnabled = misc.isBitPerfectEnabled,
+                        autoDjEnabled = misc.autoDJEnabled,
+                    )
                     val downloadQualitySubtitle = when (misc.downloadQuality) {
                         28 -> "Dolby Atmos (Spatial Immersive Audio)"
                         27 -> "Hi-Res (24-bit / 192 kHz FLAC)"
@@ -916,7 +898,11 @@ fun SettingsScreen(
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = stringResource(R.string.settings_streaming_quality),
-                                subtitle = if (misc.losslessQuality == -1) "YouTube Music • Native stream" else "$qualitySubtitle • YouTube Music fallback",
+                                subtitle = if (misc.losslessQuality == -1) {
+                                    "YouTube Music • Native stream"
+                                } else {
+                                    "Preferred max: $qualitySubtitle • YouTube fallback"
+                                },
                                 onClick = { showQualityDialog = true },
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "audio.streaming_quality"),
@@ -928,7 +914,11 @@ fun SettingsScreen(
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                 title = stringResource(R.string.settings_download_quality),
-                                subtitle = "$downloadQualitySubtitle \u2022 Lossless & YouTube",
+                                subtitle = if (misc.downloadQuality == -1) {
+                                    "YouTube Music • Source quality"
+                                } else {
+                                    "Preferred max: $downloadQualitySubtitle"
+                                },
                                 onClick = { showDownloadQualityDialog = true },
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "audio.download_quality"),
@@ -1193,6 +1183,12 @@ fun SettingsScreen(
                         item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel(stringResource(R.string.settings_section_appearance))
+                    AppearanceStudioHero(
+                        themeMode = theme?.themeMode ?: ThemeMode.SYSTEM,
+                        dynamicColorsEnabled = theme?.mode == AccentMode.DYNAMIC,
+                        liquidGlassEnabled = theme?.liquidGlass ?: false,
+                        nowPlayingColorsEnabled = misc.dynamicNowPlayingEnabled,
+                    )
                     SettingsGroup(rowCount = 8) { index, position ->
                         when (index) {
                             0 -> ThemeModeSelectorCard(
@@ -1338,7 +1334,7 @@ fun SettingsScreen(
                         item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel(stringResource(R.string.settings_section_experimental))
-                    SettingsGroup(rowCount = 6) { index, position ->
+                    SettingsGroup(rowCount = 7) { index, position ->
                         when (index) {
                             0 -> SettingsActionCard(
                                 icon = Icons.Filled.Lyrics,
@@ -1424,6 +1420,21 @@ fun SettingsScreen(
                                 onClick = { showLyricsSizeDialog = true },
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.lyrics_size"),
+                            )
+                            6 -> SettingsToggleCard(
+                                icon = Icons.Filled.PlayCircle,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = "Button Now playing",
+                                subtitle = if (misc.buttonNowPlayingEnabled) {
+                                    "Floating button mode active \u2022 Card hidden"
+                                } else {
+                                    "Classic bottom now playing card"
+                                },
+                                checked = misc.buttonNowPlayingEnabled,
+                                onCheckedChange = viewModel::setButtonNowPlayingEnabled,
+                                position = position,
+                                isHighlighted = (highlightedSettingId == "appearance.button_now_playing"),
                             )
                         }
                     }
@@ -1852,6 +1863,69 @@ fun SettingsScreen(
                 }
             }
         }
+
+        AnimatedVisibility(
+            visible = isSearchBarVisible,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = headerHeight),
+        ) {
+            SettingsSearchBar(
+                query = searchQuery,
+                onQueryChange = viewModel::onSearchQueryChange,
+                onClear = {
+                    if (searchQuery.isNotBlank()) {
+                        viewModel.clearSearch()
+                    } else {
+                        isSearchBarVisible = false
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+            )
+        }
+
+        ExpressiveHeader(
+            title = if (searchQuery.isNotBlank()) {
+                stringResource(R.string.settings_search_title)
+            } else {
+                when (activeTab) {
+                    SettingsTab.APPEARANCE -> "Appearance"
+                    else -> activeTab?.title ?: stringResource(R.string.settings)
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .onSizeChanged { headerHeightPx = it.height },
+            onBack = {
+                if (searchQuery.isNotBlank() || isSearchBarVisible) {
+                    viewModel.clearSearch()
+                    isSearchBarVisible = false
+                } else if (activeTab != null) {
+                    activeTab = null
+                } else {
+                    onBack()
+                }
+            },
+            actions = {
+                HeaderActionIcon(
+                    icon = if (isSearchBarVisible || searchQuery.isNotBlank()) Icons.Filled.Close else Icons.Filled.Search,
+                    contentDescription = if (isSearchBarVisible || searchQuery.isNotBlank()) stringResource(R.string.settings_search_clear) else stringResource(R.string.settings_search_title),
+                    onClick = {
+                        if (isSearchBarVisible || searchQuery.isNotBlank()) {
+                            viewModel.clearSearch()
+                            isSearchBarVisible = false
+                        } else {
+                            isSearchBarVisible = true
+                        }
+                    },
+                )
+            },
+        )
+
         }
     }
     }
@@ -2183,8 +2257,12 @@ fun SettingsScreen(
         ModalBottomSheet(
             onDismissRequest = { showQualityDialog = false },
             sheetState = sheetState,
+            modifier = Modifier.fillMaxHeight(0.92f),
             shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+            tonalElevation = 0.dp,
+            scrimColor = Color.Black.copy(alpha = 0.32f),
+            contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
             dragHandle = {
                 Surface(
                     shape = RoundedCornerShape(50),
@@ -2195,6 +2273,7 @@ fun SettingsScreen(
                 ) {}
             },
         ) {
+            EdgeToEdgeDialogWindow()
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2239,7 +2318,7 @@ fun SettingsScreen(
                 }
 
                 Text(
-                    "YouTube Music plays strictly as-is (never upgrades). Dolby Atmos plays only when selected — otherwise it never plays. Atmos falls back to Hi-Res → CD → 320 kbps → YouTube. Hi-Res steps down to lower lossless tiers, then YouTube last.",
+                    "This is your preferred maximum, not a guarantee: the source and provider determine the quality available for each track. YouTube Music uses its native stream.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.outline,
                 )
@@ -2301,12 +2380,16 @@ fun SettingsScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
                                         Text(
                                             title,
                                             style = MaterialTheme.typography.bodyLarge,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
                                             color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
                                         Spacer(Modifier.width(8.dp))
                                         Surface(
@@ -2327,6 +2410,8 @@ fun SettingsScreen(
                                         subtitle,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
 
@@ -2370,8 +2455,12 @@ fun SettingsScreen(
         ModalBottomSheet(
             onDismissRequest = { showDownloadQualityDialog = false },
             sheetState = sheetState,
+            modifier = Modifier.fillMaxHeight(0.92f),
             shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+            tonalElevation = 0.dp,
+            scrimColor = Color.Black.copy(alpha = 0.32f),
+            contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
             dragHandle = {
                 Surface(
                     shape = RoundedCornerShape(50),
@@ -2382,6 +2471,7 @@ fun SettingsScreen(
                 ) {}
             },
         ) {
+            EdgeToEdgeDialogWindow()
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2426,7 +2516,7 @@ fun SettingsScreen(
                 }
 
                 Text(
-                    "YouTube Music downloads strictly as-is (never upgrades). Dolby Atmos downloads only when selected — otherwise it never downloads. Atmos falls back to Hi-Res → CD → 320 kbps → YouTube. Hi-Res steps down to lower tiers, then YouTube last.",
+                    "This is your preferred maximum, not a guarantee: downloads use the best matching source available for each track. YouTube Music files keep their source quality.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.outline,
                 )
@@ -2458,6 +2548,8 @@ fun SettingsScreen(
                                             style = MaterialTheme.typography.bodyLarge,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
                                             color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
                                         Spacer(Modifier.width(8.dp))
                                         Surface(
@@ -2478,6 +2570,8 @@ fun SettingsScreen(
                                         subtitle,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
 
@@ -2503,6 +2597,7 @@ fun SettingsScreen(
                 }
             }
         }
+    }
     }
 
     if (showYouTubeImportSheet) {
@@ -2553,11 +2648,232 @@ private fun appVersionName(context: android.content.Context): String = try {
 private fun rememberPressScale(interactionSource: MutableInteractionSource): Float {
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.97f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        targetValue = if (pressed) 0.94f else 1f,
+        animationSpec = spring(dampingRatio = 0.52f, stiffness = Spring.StiffnessMedium),
         label = "pressScale",
     )
     return scale
+}
+
+@Composable
+private fun AudioStudioHero(
+    quality: String,
+    bitPerfectEnabled: Boolean,
+    autoDjEnabled: Boolean,
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+    val shape = RoundedCornerShape(28.dp)
+
+    Card(
+        shape = shape,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.62f),
+        ),
+        border = BorderStroke(
+            width = 1.2.dp,
+            brush = Brush.linearGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.52f),
+                    primary.copy(alpha = 0.42f),
+                    secondary.copy(alpha = 0.24f),
+                ),
+            ),
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            primary.copy(alpha = 0.20f),
+                            secondary.copy(alpha = 0.10f),
+                            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.18f),
+                        ),
+                    ),
+                ),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = primary.copy(alpha = 0.20f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.30f)),
+                        modifier = Modifier.size(52.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.GraphicEq,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(28.dp),
+                            )
+                        }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            text = "Audio Studio",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "$quality streaming",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AudioStatusPill(
+                        label = if (bitPerfectEnabled) "Bit-perfect on" else "Bit-perfect off",
+                        tint = if (bitPerfectEnabled) primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    AudioStatusPill(
+                        label = if (autoDjEnabled) "Auto DJ on" else "Auto DJ off",
+                        tint = if (autoDjEnabled) secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudioStatusPill(
+    label: String,
+    tint: Color,
+) {
+    Surface(
+        shape = CircleShape,
+        color = tint.copy(alpha = 0.14f),
+        border = BorderStroke(1.dp, tint.copy(alpha = 0.35f)),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+        )
+    }
+}
+
+@Composable
+private fun AppearanceStudioHero(
+    themeMode: ThemeMode,
+    dynamicColorsEnabled: Boolean,
+    liquidGlassEnabled: Boolean,
+    nowPlayingColorsEnabled: Boolean,
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val shape = RoundedCornerShape(28.dp)
+    val themeModeLabel = when (themeMode) {
+        ThemeMode.SYSTEM -> "System"
+        ThemeMode.LIGHT -> "Light"
+        ThemeMode.DARK -> "Dark"
+        ThemeMode.AMOLED -> "AMOLED"
+    }
+
+    Card(
+        shape = shape,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.62f),
+        ),
+        border = BorderStroke(
+            width = 1.2.dp,
+            brush = Brush.linearGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.52f),
+                    primary.copy(alpha = 0.42f),
+                    tertiary.copy(alpha = 0.28f),
+                ),
+            ),
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            primary.copy(alpha = 0.18f),
+                            tertiary.copy(alpha = 0.13f),
+                            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.18f),
+                        ),
+                    ),
+                ),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = tertiary.copy(alpha = 0.20f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.30f)),
+                        modifier = Modifier.size(52.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.Palette,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.size(27.dp),
+                            )
+                        }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            text = "Visual Studio",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = if (dynamicColorsEnabled) {
+                                if (nowPlayingColorsEnabled) "Dynamic palette • artwork accents" else "Dynamic palette • system accents"
+                            } else {
+                                if (nowPlayingColorsEnabled) "Custom palette • artwork accents" else "Custom palette • your chosen accent"
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AudioStatusPill(
+                        label = "$themeModeLabel theme",
+                        tint = primary,
+                    )
+                    AudioStatusPill(
+                        label = if (liquidGlassEnabled) "Liquid Glass on" else "Liquid Glass off",
+                        tint = if (liquidGlassEnabled) tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -2645,11 +2961,15 @@ private fun ThemeModeSelectorCard(
     Card(
         shape = shape,
         colors = CardDefaults.cardColors(
-            containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceContainerHigh
+            containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.70f)
         ),
         border = BorderStroke(
             width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f)
+            brush = Brush.verticalGradient(
+                0.0f to Color.White.copy(alpha = 0.38f),
+                0.55f to Color.White.copy(alpha = 0.10f),
+                1.0f to MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+            )
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = Modifier
@@ -2681,10 +3001,10 @@ private fun ThemeModeSelectorCard(
             }
             Spacer(Modifier.height(14.dp))
             val items = listOf(
-                ConnectedButtonItem(stringResource(R.string.theme_mode_system), Icons.Filled.BrightnessAuto),
-                ConnectedButtonItem(stringResource(R.string.theme_mode_light), Icons.Filled.LightMode),
-                ConnectedButtonItem(stringResource(R.string.theme_mode_dark), Icons.Filled.DarkMode),
-                ConnectedButtonItem(stringResource(R.string.theme_mode_amoled), Icons.Filled.Contrast),
+                ConnectedButtonItem(stringResource(R.string.theme_mode_system)),
+                ConnectedButtonItem(stringResource(R.string.theme_mode_light)),
+                ConnectedButtonItem(stringResource(R.string.theme_mode_dark)),
+                ConnectedButtonItem(stringResource(R.string.theme_mode_amoled)),
             )
             val selectedIdx = when (currentThemeMode) {
                 ThemeMode.SYSTEM -> 0
@@ -2730,7 +3050,7 @@ private fun SettingsToggleCard(
 
     val glassBorder = Brush.linearGradient(
         listOf(
-            Color.White.copy(alpha = 0.32f),
+            Color.White.copy(alpha = 0.40f),
             Color.White.copy(alpha = 0.08f),
             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f),
         ),
@@ -2749,7 +3069,7 @@ private fun SettingsToggleCard(
         shape = shape,
         enabled = enabled,
         colors = CardDefaults.cardColors(
-            containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.78f),
+            containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.70f),
             disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
         ),
         border = BorderStroke(
@@ -3312,7 +3632,7 @@ private fun BentoQuickActionGrid(
                 onOpenAudio()
             },
             shape = RoundedCornerShape(26.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.78f)),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.70f)),
             border = BorderStroke(1.2.dp, audioGlassBorder),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.5.dp, pressedElevation = 0.5.dp),
             modifier = Modifier
@@ -3397,7 +3717,7 @@ private fun BentoQuickActionGrid(
                 onOpenAppearance()
             },
             shape = RoundedCornerShape(26.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.78f)),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.70f)),
             border = BorderStroke(1.2.dp, appearanceGlassBorder),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.5.dp, pressedElevation = 0.5.dp),
             modifier = Modifier
@@ -3504,7 +3824,7 @@ private fun SettingsActionCard(
 
     val glassBorder = Brush.linearGradient(
         listOf(
-            Color.White.copy(alpha = 0.32f),
+            Color.White.copy(alpha = 0.40f),
             Color.White.copy(alpha = 0.08f),
             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f),
         ),
@@ -3519,7 +3839,7 @@ private fun SettingsActionCard(
         },
         shape = shape,
         colors = CardDefaults.cardColors(
-            containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.78f)
+            containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.70f)
         ),
         border = BorderStroke(
             width = 1.2.dp,
@@ -3589,7 +3909,7 @@ private fun SettingsPhotoCard(
 
     val glassBorder = Brush.linearGradient(
         listOf(
-            Color.White.copy(alpha = 0.32f),
+            Color.White.copy(alpha = 0.40f),
             Color.White.copy(alpha = 0.08f),
             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f),
         ),
@@ -3604,7 +3924,7 @@ private fun SettingsPhotoCard(
         },
         shape = shape,
         colors = CardDefaults.cardColors(
-            containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.78f),
+            containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.70f),
         ),
         border = BorderStroke(1.2.dp, glassBorder),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp, pressedElevation = 0.5.dp),
@@ -3782,13 +4102,14 @@ private fun SettingsSearchResultsList(
     query: String,
     results: List<MatchResult>,
     onResultClick: (SettingsEntry) -> Unit,
+    topPadding: Dp,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
         contentPadding = PaddingValues(
             start = 16.dp,
             end = 16.dp,
-            top = 8.dp,
+            top = topPadding + 8.dp,
             bottom = 32.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),
         ),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -4781,7 +5102,25 @@ private fun ColorWheelSheet(onDismiss: () -> Unit, onApply: (Color) -> Unit) {
     var lightness by remember { mutableStateOf(0.5f) }
     val previewColor = Color.hsl(hue, saturation, lightness)
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        modifier = Modifier.liquidGlassChrome(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), true),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = Color.Transparent,
+        scrimColor = Color.Black.copy(alpha = 0.32f),
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+        dragHandle = {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .size(width = 36.dp, height = 4.dp),
+            ) {}
+        },
+    ) {
+        EdgeToEdgeDialogWindow()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -4840,6 +5179,18 @@ private fun EqualizerCurveGraph(
     val outlineVariant = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
     val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
 
+    val baselineDash = remember { PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f) }
+    val gridDash = remember { PathEffect.dashPathEffect(floatArrayOf(4f, 6f), 0f) }
+    val curvePath = remember { Path() }
+    val fillCurvePath = remember { Path() }
+    val fillGradientColors = remember(primaryColor) {
+        listOf(
+            primaryColor.copy(alpha = 0.35f),
+            primaryColor.copy(alpha = 0.05f),
+            Color.Transparent,
+        )
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -4865,7 +5216,7 @@ private fun EqualizerCurveGraph(
                 start = Offset(paddingX, baselineY),
                 end = Offset(w - paddingX, baselineY),
                 strokeWidth = 1.5.dp.toPx(),
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f),
+                pathEffect = baselineDash,
             )
             // +8 dB line
             drawLine(
@@ -4873,7 +5224,7 @@ private fun EqualizerCurveGraph(
                 start = Offset(paddingX, topY),
                 end = Offset(w - paddingX, topY),
                 strokeWidth = 1.dp.toPx(),
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 6f), 0f),
+                pathEffect = gridDash,
             )
             // -8 dB line
             drawLine(
@@ -4881,50 +5232,49 @@ private fun EqualizerCurveGraph(
                 start = Offset(paddingX, bottomY),
                 end = Offset(w - paddingX, bottomY),
                 strokeWidth = 1.dp.toPx(),
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 6f), 0f),
+                pathEffect = gridDash,
             )
 
             if (gains.isEmpty()) return@Canvas
 
             val count = gains.size
             val stepX = availableW / (count - 1).coerceAtLeast(1)
-            val points = List(count) { i ->
-                val x = paddingX + i * stepX
+
+            curvePath.reset()
+            fillCurvePath.reset()
+
+            fun pointX(i: Int) = paddingX + i * stepX
+            fun pointY(i: Int): Float {
                 val gain = if (enabled) gains[i].coerceIn(-EQ_MAX_DB, EQ_MAX_DB) else 0f
-                val y = baselineY - (gain / EQ_MAX_DB) * maxDbPx
-                Offset(x, y)
+                return baselineY - (gain / EQ_MAX_DB) * maxDbPx
             }
 
-            val path = Path()
-            val fillPath = Path()
+            val p0x = pointX(0)
+            val p0y = pointY(0)
+            curvePath.moveTo(p0x, p0y)
+            fillCurvePath.moveTo(p0x, baselineY)
+            fillCurvePath.lineTo(p0x, p0y)
 
-            path.moveTo(points.first().x, points.first().y)
-            fillPath.moveTo(points.first().x, baselineY)
-            fillPath.lineTo(points.first().x, points.first().y)
-
-            for (i in 0 until points.size - 1) {
-                val p0 = points[i]
-                val p1 = points[i + 1]
-                val controlX1 = p0.x + (p1.x - p0.x) / 2f
-                val controlY1 = p0.y
-                val controlX2 = p0.x + (p1.x - p0.x) / 2f
-                val controlY2 = p1.y
-                path.cubicTo(controlX1, controlY1, controlX2, controlY2, p1.x, p1.y)
-                fillPath.cubicTo(controlX1, controlY1, controlX2, controlY2, p1.x, p1.y)
+            var prevX = p0x
+            var prevY = p0y
+            for (i in 1 until count) {
+                val currX = pointX(i)
+                val currY = pointY(i)
+                val midX = prevX + (currX - prevX) / 2f
+                curvePath.cubicTo(midX, prevY, midX, currY, currX, currY)
+                fillCurvePath.cubicTo(midX, prevY, midX, currY, currX, currY)
+                prevX = currX
+                prevY = currY
             }
 
-            fillPath.lineTo(points.last().x, baselineY)
-            fillPath.close()
+            fillCurvePath.lineTo(prevX, baselineY)
+            fillCurvePath.close()
 
             if (enabled) {
                 drawPath(
-                    path = fillPath,
+                    path = fillCurvePath,
                     brush = Brush.verticalGradient(
-                        colors = listOf(
-                            primaryColor.copy(alpha = 0.35f),
-                            primaryColor.copy(alpha = 0.05f),
-                            Color.Transparent,
-                        ),
+                        colors = fillGradientColors,
                         startY = topY,
                         endY = bottomY,
                     ),
@@ -4932,7 +5282,7 @@ private fun EqualizerCurveGraph(
             }
 
             drawPath(
-                path = path,
+                path = curvePath,
                 color = if (enabled) primaryColor else onSurfaceVariant.copy(alpha = 0.4f),
                 style = Stroke(
                     width = 3.dp.toPx(),
@@ -4941,18 +5291,21 @@ private fun EqualizerCurveGraph(
                 ),
             )
 
-            for (p in points) {
-                val hasBoostOrCut = Math.abs(p.y - baselineY) > 2f && enabled
+            for (i in 0 until count) {
+                val px = pointX(i)
+                val py = pointY(i)
+                val centerOffset = Offset(px, py)
+                val hasBoostOrCut = kotlin.math.abs(py - baselineY) > 2f && enabled
                 drawCircle(
                     color = if (hasBoostOrCut) primaryColor else if (enabled) primaryColor.copy(alpha = 0.7f) else onSurfaceVariant.copy(alpha = 0.3f),
                     radius = if (hasBoostOrCut) 4.5.dp.toPx() else 3.dp.toPx(),
-                    center = p,
+                    center = centerOffset,
                 )
                 if (hasBoostOrCut) {
                     drawCircle(
                         color = Color.White,
                         radius = 2.dp.toPx(),
-                        center = p,
+                        center = centerOffset,
                     )
                 }
             }
@@ -5005,7 +5358,10 @@ private fun EqualizerSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+        tonalElevation = 0.dp,
+        scrimColor = Color.Black.copy(alpha = 0.32f),
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         dragHandle = {
             Surface(
                 shape = RoundedCornerShape(50),
@@ -5016,6 +5372,7 @@ private fun EqualizerSheet(
             ) {}
         },
     ) {
+        EdgeToEdgeDialogWindow()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -5033,7 +5390,10 @@ private fun EqualizerSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Box(
                         modifier = Modifier
                             .size(44.dp)
@@ -5049,17 +5409,20 @@ private fun EqualizerSheet(
                         )
                     }
                     Spacer(Modifier.width(14.dp))
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             "Equalizer",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            "15-band hardware acoustic tuning",
+                            "15-band audio equalizer",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
@@ -5073,7 +5436,12 @@ private fun EqualizerSheet(
                 ) {
                     Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Reset", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        "Reset",
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
             }
 
@@ -5142,11 +5510,7 @@ private fun EqualizerSheet(
                 tonalElevation = 2.dp,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                val curveAlpha by animateFloatAsState(
-                    targetValue = if (eq.enabled) 1f else 0.38f,
-                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                    label = "eqCurveAlpha",
-                )
+                val curveAlpha = if (eq.enabled) 1f else 0.38f
 
                 Column(
                     modifier = Modifier
@@ -5443,9 +5807,22 @@ private fun YouTubeChannelSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        modifier = Modifier.liquidGlassChrome(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), true),
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor = Color.Transparent,
+        scrimColor = Color.Black.copy(alpha = 0.32f),
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+        dragHandle = {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .size(width = 36.dp, height = 4.dp),
+            ) {}
+        },
     ) {
+        EdgeToEdgeDialogWindow()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -5605,9 +5982,22 @@ private fun YouTubeLibraryVisibilitySheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        modifier = Modifier.liquidGlassChrome(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), true),
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor = Color.Transparent,
+        scrimColor = Color.Black.copy(alpha = 0.32f),
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+        dragHandle = {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .size(width = 36.dp, height = 4.dp),
+            ) {}
+        },
     ) {
+        EdgeToEdgeDialogWindow()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -5726,8 +6116,11 @@ private fun SyncPlaylistsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        modifier = Modifier.liquidGlassChrome(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), true),
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor = Color.Transparent,
+        scrimColor = Color.Black.copy(alpha = 0.32f),
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         dragHandle = {
             Surface(
                 shape = RoundedCornerShape(50),
@@ -5738,6 +6131,7 @@ private fun SyncPlaylistsSheet(
             ) {}
         },
     ) {
+        EdgeToEdgeDialogWindow()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -6066,9 +6460,22 @@ private fun LyricsAnimationSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.liquidGlassChrome(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), true),
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = Color.Transparent,
+        scrimColor = Color.Black.copy(alpha = 0.32f),
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+        dragHandle = {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .size(width = 36.dp, height = 4.dp),
+            ) {}
+        },
     ) {
+        EdgeToEdgeDialogWindow()
         Column(
             modifier = Modifier
                 .fillMaxWidth()

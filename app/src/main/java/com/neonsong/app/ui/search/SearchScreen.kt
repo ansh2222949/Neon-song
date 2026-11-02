@@ -86,6 +86,8 @@ import com.neonsong.app.data.search.SearchTab
 import com.neonsong.app.ui.common.ArtworkImage
 import com.neonsong.app.ui.common.ExpressiveMotion
 import com.neonsong.app.ui.common.HeaderActionIcon
+import com.neonsong.app.ui.theme.LiquidGlassChip
+import com.neonsong.app.ui.theme.liquidGlassSurface
 import com.neonsong.app.ui.common.TrackContextMenuSheet
 import com.neonsong.app.ui.common.TrackMenuCapabilities
 import com.neonsong.app.ui.common.TrackMenuTarget
@@ -146,11 +148,13 @@ fun SearchScreen(
                 .fillMaxSize()
                 .adaptiveContentWidth(maxWidth = 860.dp),
         ) {
-        Surface(
-            shape = SearchHeaderShape,
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            tonalElevation = 2.dp,
-            modifier = Modifier.fillMaxWidth(),
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .liquidGlassSurface(
+                    shape = SearchHeaderShape,
+                    borderWidth = 1.dp,
+                ),
         ) {
             Column(
                 modifier = Modifier
@@ -194,8 +198,10 @@ fun SearchScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .clip(CircleShape)
-                                    .background(pillBg)
+                                    .liquidGlassSurface(
+                                        shape = CircleShape,
+                                        borderWidth = 1.dp,
+                                    )
                                     .padding(horizontal = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {

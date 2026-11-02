@@ -49,6 +49,7 @@ enum class PendingRestoreKind { FULL_BACKUP, PLAYLIST_MIRROR }
 
 private val SettingsSharing = SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000)
 private const val SETTINGS_TAG = "SettingsViewModel"
+private val backupJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
 /** Settings aggregates several independent stores. A broken legacy value or
  * one unreadable Room table must only disable that section, never crash the
@@ -512,6 +513,10 @@ class SettingsViewModel @Inject constructor(
         settingsPreferences.setMusicVideoEnabled(enabled)
     }
 
+    fun setButtonNowPlayingEnabled(enabled: Boolean) = launchSettingsAction("update button now playing setting") {
+        settingsPreferences.setButtonNowPlayingEnabled(enabled)
+    }
+
     // ── USB exclusive output (direct DAC, default OFF) ──
 
     val usbExclusiveEnabled: StateFlow<Boolean> =
@@ -743,9 +748,9 @@ class SettingsViewModel @Inject constructor(
     fun stagePendingRestore(content: String, uri: android.net.Uri) {
         launchSettingsAction("stage the restore") {
             val backup = try {
-                kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                backupJson
                     .decodeFromString(com.neonsong.app.data.backup.BackupFile.serializer(), content)
-                    .takeIf { it.type == "neonsong-backup" || it.type == "neonsong-backup" }
+                    .takeIf { it.type == "neonsong-backup" }
             } catch (e: Exception) { null }
             val mirrorCount = playlistRepository.publicMirrorPlaylistCount(content)
             if (backup == null && mirrorCount == null) {

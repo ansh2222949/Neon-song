@@ -53,7 +53,7 @@ fun NeonSongTheme(
         !themeState.isNowPlayingThemed &&
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val systemDark = if (useSystemDynamic) {
-        val base = dynamicDarkColorScheme(context)
+        val base = Md3SchemeBuilder.enrichDynamicColors(dynamicDarkColorScheme(context))
         if (themeState.amoled || themeState.themeMode == ThemeMode.AMOLED) {
             base.copy(
                 background = Color.Black,
@@ -68,7 +68,9 @@ fun NeonSongTheme(
             )
         } else base
     } else null
-    val systemLight = if (useSystemDynamic) dynamicLightColorScheme(context) else null
+    val systemLight = if (useSystemDynamic) {
+        Md3SchemeBuilder.enrichDynamicColors(dynamicLightColorScheme(context))
+    } else null
     val activeColorScheme = when {
         systemDark != null && isDark -> systemDark
         systemLight != null && !isDark -> systemLight

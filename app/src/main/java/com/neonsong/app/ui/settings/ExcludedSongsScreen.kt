@@ -42,10 +42,12 @@ import androidx.lifecycle.viewModelScope
 import com.neonsong.app.data.generate.GenerateRepository
 import com.neonsong.app.data.local.db.RecommendationExclusionEntity
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.rememberExpressiveHeaderBackdrop
 import com.neonsong.app.ui.common.adaptiveContentWidth
 import com.neonsong.app.ui.common.LiquidGlassCard
 import com.neonsong.app.ui.common.safeDrawingBottomPadding
 import com.neonsong.app.ui.player.LocalMiniPlayerScrollClearance
+import com.neonsong.app.ui.theme.liquidGlassSource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -75,6 +77,7 @@ fun ExcludedSongsScreen(
     viewModel: ExcludedSongsViewModel = hiltViewModel(),
 ) {
     val exclusions by viewModel.exclusions.collectAsStateWithLifecycle()
+    val headerBackdrop = rememberExpressiveHeaderBackdrop()
 
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -90,11 +93,12 @@ fun ExcludedSongsScreen(
             title = "Excluded Songs",
             subtitle = "${exclusions.size} song${if (exclusions.size == 1) "" else "s"} hidden from recommendations",
             onBack = onBack,
+            backdrop = headerBackdrop,
         )
 
         if (exclusions.isEmpty()) {
             Box(
-                modifier = Modifier.fillMaxSize().padding(32.dp),
+                modifier = Modifier.fillMaxSize().padding(32.dp).liquidGlassSource(headerBackdrop),
                 contentAlignment = Alignment.Center,
             ) {
                 Column(
@@ -130,7 +134,7 @@ fun ExcludedSongsScreen(
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().liquidGlassSource(headerBackdrop),
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     end = 16.dp,

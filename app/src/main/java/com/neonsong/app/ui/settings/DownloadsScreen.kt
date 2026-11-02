@@ -106,6 +106,7 @@ import com.neonsong.app.data.download.DownloadProgress
 import com.neonsong.app.data.local.db.DownloadedTrackEntity
 import com.neonsong.app.ui.common.ArtworkImage
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.rememberExpressiveHeaderBackdrop
 import com.neonsong.app.ui.common.GroupPosition
 import com.neonsong.app.ui.common.adaptiveContentWidth
 import com.neonsong.app.ui.common.groupPositionFor
@@ -116,6 +117,7 @@ import com.neonsong.app.ui.player.LocalMusicPlayer
 import com.neonsong.app.ui.player.PlayingWaveBars
 import com.neonsong.app.ui.shell.FloatingNavDefaults
 import com.neonsong.app.ui.theme.ArtworkShape
+import com.neonsong.app.ui.theme.liquidGlassSource
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -189,6 +191,7 @@ fun DownloadsScreen(
     viewModel: DownloadsViewModel = hiltViewModel(),
 ) {
     val tracks by viewModel.downloadedTracks.collectAsStateWithLifecycle()
+    val headerBackdrop = rememberExpressiveHeaderBackdrop()
     val artists by viewModel.downloadedArtists.collectAsStateWithLifecycle()
     val albums by viewModel.downloadedAlbums.collectAsStateWithLifecycle()
     val totalBytes by viewModel.totalBytes.collectAsStateWithLifecycle()
@@ -308,6 +311,7 @@ fun DownloadsScreen(
                 title = headerTitle,
                 subtitle = headerSubtitle,
                 onBack = headerBack,
+                backdrop = headerBackdrop,
                 actions = {
                     if (activeDownloads.isNotEmpty()) {
                         FilledTonalButton(
@@ -475,6 +479,12 @@ fun DownloadsScreen(
                 },
             )
 
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .liquidGlassSource(headerBackdrop),
+            ) {
             // Offline Mode Banner
             if (!isOnline) {
                 Surface(
@@ -699,6 +709,7 @@ fun DownloadsScreen(
                 }
             }
         }
+    }
     }
 
     // Delete single track dialog

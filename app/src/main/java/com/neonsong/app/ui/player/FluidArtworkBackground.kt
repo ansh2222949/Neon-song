@@ -1,15 +1,21 @@
 package com.neonsong.app.ui.player
 
 import android.app.ActivityManager
+import android.app.Application
+import android.content.ComponentCallbacks2
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
 import android.graphics.Shader
 import android.graphics.drawable.BitmapDrawable
 import android.os.Build
+import android.os.PowerManager
+import android.util.LruCache
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -18,11 +24,13 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
@@ -51,12 +59,18 @@ import coil.request.SuccessResult
 import com.neonsong.app.data.artwork.ArtworkNormalizer
 import com.neonsong.app.playback.PlayableTrack
 import com.neonsong.app.ui.common.ArtworkViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import org.intellij.lang.annotations.Language
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -89,8 +103,9 @@ internal val FLUID_AGSL = """
     float2 twist(float2 coord, float2 offset, float radius, float angle) {
         float2 d = coord - offset;
         float dist = length(d);
-        if (dist < radius) {
-            float ratio = (radius - dist) / radius;
+        float safeRadius = max(radius, 0.001);
+        if (dist < safeRadius) {
+            float ratio = (safeRadius - dist) / safeRadius;
             float a = ratio * ratio * angle;
             float s = sin(a);
             float c = cos(a);
@@ -103,7 +118,8 @@ internal val FLUID_AGSL = """
         float2 d = p - centre;
         float c = cos(-angle);
         float s = sin(-angle);
-        return float2(d.x * c - d.y * s, d.x * s + d.y * c) / side + 0.5;
+        float safeSide = max(side, 0.001);
+        return float2(d.x * c - d.y * s, d.x * s + d.y * c) / safeSide + 0.5;
     }
 
     float feather(float2 uv) {
@@ -167,54 +183,65 @@ internal fun computeFluidCopies(
     seconds: Float,
     target: Array<MutableFluidCopy>,
 ) {
-    val longest = maxOf(width, height)
-    val t = seconds * FLOW_SPEED
-    val cx = width / 2f
-    val cy = height / 2f
-
-    // Smooth organic breathing for blob sizes
-    val breathe0 = 1f + 0.08f * sin(t * 0.22f)
-    val breathe1 = 1f + 0.12f * sin(t * 0.31f + 1.2f)
-    val breathe2 = 1f + 0.14f * sin(t * 0.27f + 2.4f)
-    val breathe3 = 1f + 0.15f * sin(t * 0.35f + 3.6f)
-
-    val a3 = ORBIT_RATE_MID * t
-    val x3 = cx + width * ORBIT_RADIUS_MID * cos(a3)
-    val y3 = cy + width * ORBIT_RADIUS_MID * sin(a3)
-
-    val a4 = ORBIT_RATE_SMALL * t
-    val x4 = cx + width * ORBIT_RADIUS_SMALL * cos(a4)
-    val y4 = cy + width * ORBIT_RADIUS_SMALL * sin(a4)
-
-    target[0].centreX = cx
-    target[0].centreY = cy
-    target[0].side = longest * SQRT_2 * breathe0
-    target[0].angle = ROTATION[0] * t
-
-    target[1].centreX = width / 2.5f
-    target[1].centreY = height / 2.5f
-    target[1].side = longest * 0.8f * breathe1
-    target[1].angle = ROTATION[1] * t
-
-    target[2].centreX = x3
-    target[2].centreY = y3
-    target[2].side = longest * 0.5f * breathe2
-    target[2].angle = ROTATION[2] * t
-
-    target[3].centreX = x4
-    target[3].centreY = y4
-    target[3].side = longest * 0.25f * breathe3
-    target[3].angle = ROTATION[3] * t
+    computeFluidCopies(width, height, seconds, seed = 0, target = target)
 }
 
 internal fun computeFluidCopies(
     width: Float,
     height: Float,
     seconds: Float,
-    @Suppress("UNUSED_PARAMETER") seed: Int,
+    seed: Int,
     target: Array<MutableFluidCopy>,
 ) {
-    computeFluidCopies(width, height, seconds, target)
+    require(target.size >= 4) { "target array must have at least 4 elements" }
+    val longest = maxOf(width, height)
+    val t = seconds * FLOW_SPEED
+    val cx = width / 2f
+    val cy = height / 2f
+
+    val phase0 = if (seed != 0) startPhase(seed, 0) else 0f
+    val phase1 = if (seed != 0) startPhase(seed, 1) else 0f
+    val phase2 = if (seed != 0) startPhase(seed, 2) else 0f
+    val phase3 = if (seed != 0) startPhase(seed, 3) else 0f
+
+    // Smooth organic breathing for blob sizes with deterministic seed-based phase offsets
+    val breathe0 = 1f + 0.08f * sin(t * 0.22f + phase0)
+    val breathe1 = 1f + 0.12f * sin(t * 0.31f + 1.2f + phase1)
+    val breathe2 = 1f + 0.14f * sin(t * 0.27f + 2.4f + phase2)
+    val breathe3 = 1f + 0.15f * sin(t * 0.35f + 3.6f + phase3)
+
+    // Aspect-ratio independent orbits: use respective dimensions for X and Y to prevent compression
+    val a3 = ORBIT_RATE_MID * t + phase2
+    val rx3 = width * ORBIT_RADIUS_MID
+    val ry3 = height * ORBIT_RADIUS_MID
+    val x3 = cx + rx3 * cos(a3)
+    val y3 = cy + ry3 * sin(a3)
+
+    val a4 = ORBIT_RATE_SMALL * t + phase3
+    val rx4 = width * ORBIT_RADIUS_SMALL
+    val ry4 = height * ORBIT_RADIUS_SMALL
+    val x4 = cx + rx4 * cos(a4)
+    val y4 = cy + ry4 * sin(a4)
+
+    target[0].centreX = cx
+    target[0].centreY = cy
+    target[0].side = longest * SQRT_2 * breathe0
+    target[0].angle = ROTATION[0] * t + phase0
+
+    target[1].centreX = width / 2.5f
+    target[1].centreY = height / 2.5f
+    target[1].side = longest * 0.8f * breathe1
+    target[1].angle = ROTATION[1] * t + phase1
+
+    target[2].centreX = x3
+    target[2].centreY = y3
+    target[2].side = longest * 0.5f * breathe2
+    target[2].angle = ROTATION[2] * t + phase2
+
+    target[3].centreX = x4
+    target[3].centreY = y4
+    target[3].side = longest * 0.25f * breathe3
+    target[3].angle = ROTATION[3] * t + phase3
 }
 
 private fun startPhase(seed: Int, index: Int): Float =
@@ -223,9 +250,15 @@ private fun startPhase(seed: Int, index: Int): Float =
 private const val TWO_PI = 6.2831855f
 private val SQRT_2 = sqrt(2f)
 
-// Period in seconds where all rotational and orbital phases complete exact integer 2π cycles:
-// LCM of rotation & orbit frequencies ensures smooth seamless wrap with zero Float precision loss.
-private const val FLUID_PERIOD_S = 160f * Math.PI.toFloat()
+// Exact period in seconds: 160 * PI ≈ 502.6548246f.
+// All rotational, orbital, breathing, and swirl Lissajous frequencies are chosen as integer multiples of (2 / 160):
+// - Breathing: 0.55 (44 cycles), 0.775 (62 cycles), 0.675 (54 cycles), 0.875 (70 cycles)
+// - Orbits: 0.1125 (9 cycles), 0.225 (18 cycles)
+// - Rotations: 0.15 (12 cycles), -0.30 (24 cycles), 0.15 (12 cycles), -0.20 (16 cycles)
+// - Swirl twists: 0.15 (12 cycles), 0.1125 (9 cycles), 0.125 (10 cycles), 0.175 (14 cycles)
+// Since every frequency completes an exact integer number of cycles in FLUID_PERIOD_S, wrapping produces
+// zero visual discontinuity while keeping floating-point time bounded.
+private const val FLUID_PERIOD_S = 502.6548246f
 
 private val ROTATION = floatArrayOf(0.06f, -0.12f, 0.06f, -0.08f)
 
@@ -242,54 +275,159 @@ private const val CONTRAST = 0.3f
 private const val TWIST_ANGLE = 1.6f
 private const val TWIST_REACH = 1.0f
 
-private const val BLUR_FRACTION = 0.18f
-private const val BLUR_SIGMA_MIN = 80f
-private const val BLUR_SIGMA_MAX = 360f
+private const val BLUR_FRACTION = 0.025f
+private const val BLUR_SIGMA_MIN = 12f
+private const val BLUR_SIGMA_MAX = 22f
 
 private const val TEXTURE_PX = 256
-private const val TEXTURE_CACHE = 3
+private const val TEXTURE_CACHE = 4
 private const val CROSSFADE_MS = 420
 private const val APPEAR_MS = 280
-private const val FRAME_SECONDS = 1f / 30f
+private const val FRAME_SECONDS = 1f / 22f
 
-private class BlurEffectCache {
+private class BlurEffectCache(private val maxEntries: Int = 16) {
+    private val cache = LruCache<Int, androidx.compose.ui.graphics.RenderEffect>(maxEntries)
     var sigma = Float.NaN
     var effect: androidx.compose.ui.graphics.RenderEffect? = null
+    var failed = false
+    private var lastKey = -1
+
+    fun getOrCreate(requestedSigma: Float): androidx.compose.ui.graphics.RenderEffect? {
+        if (failed || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+        val key = (kotlin.math.round(requestedSigma / 2.0f) * 2.0f).toInt()
+        if (key <= 0) {
+            lastKey = key
+            sigma = 0f
+            effect = null
+            return null
+        }
+        if (key == lastKey && effect != null) return effect
+
+        var cached = synchronized(cache) { cache.get(key) }
+        if (cached == null) {
+            val created = runCatching {
+                RenderEffect
+                    .createBlurEffect(key.toFloat(), key.toFloat(), Shader.TileMode.CLAMP)
+                    .asComposeRenderEffect()
+            }
+            if (created.isSuccess) {
+                cached = created.getOrNull()
+                if (cached != null) {
+                    synchronized(cache) { cache.put(key, cached) }
+                }
+            } else {
+                failed = true
+                effect = null
+                return null
+            }
+        }
+        lastKey = key
+        sigma = key.toFloat()
+        effect = cached
+        return cached
+    }
+
+    fun clear() {
+        synchronized(cache) { cache.evictAll() }
+        lastKey = -1
+        sigma = Float.NaN
+        effect = null
+    }
 }
 
-private val textureCache = LinkedHashMap<String, Bitmap>()
+private object FluidTextureCache {
+    private val cache = LruCache<String, Bitmap>(TEXTURE_CACHE)
+    private var isCallbacksRegistered = false
+
+    fun get(key: String): Bitmap? = synchronized(cache) { cache.get(key) }
+
+    fun put(key: String, bitmap: Bitmap) {
+        synchronized(cache) { cache.put(key, bitmap) }
+    }
+
+    fun clear() {
+        synchronized(cache) { cache.evictAll() }
+    }
+
+    fun initMemoryCallbacks(context: Context) {
+        if (isCallbacksRegistered) return
+        val app = context.applicationContext as? Application ?: return
+        @Suppress("DEPRECATION")
+        app.registerComponentCallbacks(object : ComponentCallbacks2 {
+            override fun onConfigurationChanged(newConfig: Configuration) {}
+            @Deprecated("Deprecated in Java", ReplaceWith("onTrimMemory(level)"))
+            override fun onLowMemory() {
+                clear()
+            }
+            override fun onTrimMemory(level: Int) {
+                if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+                    clear()
+                }
+            }
+        })
+        isCallbacksRegistered = true
+    }
+}
+
+private val inFlightRequests = ConcurrentHashMap<String, Deferred<Bitmap?>>()
 
 private suspend fun loadTexture(context: Context, url: String, preBlur: Boolean = false): Bitmap? = withContext(Dispatchers.IO) {
+    FluidTextureCache.initMemoryCallbacks(context)
     val cacheKey = if (preBlur) "$url-preblurred" else url
-    synchronized(textureCache) {
-        textureCache.remove(cacheKey)?.also { textureCache[cacheKey] = it }
-    }?.let { return@withContext it }
+    FluidTextureCache.get(cacheKey)?.let { return@withContext it }
 
+    coroutineScope {
+        val deferred = inFlightRequests.computeIfAbsent(cacheKey) {
+            async(Dispatchers.IO) {
+                try {
+                    loadTextureInternal(context, url, preBlur, cacheKey)
+                } finally {
+                    inFlightRequests.remove(cacheKey)
+                }
+            }
+        }
+        deferred.await()
+    }
+}
+
+private suspend fun loadTextureInternal(context: Context, url: String, preBlur: Boolean, cacheKey: String): Bitmap? {
     val request = ImageRequest.Builder(context)
         .data(url)
         .size(TEXTURE_PX)
         .allowHardware(false)
         .build()
-    val result = runCatching { context.imageLoader.execute(request) }.getOrNull()
-    var bitmap = ((result as? SuccessResult)?.drawable as? BitmapDrawable)?.bitmap ?: return@withContext null
+
+    val result = try {
+        context.imageLoader.execute(request)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        null
+    }
+
+    val drawable = (result as? SuccessResult)?.drawable ?: return null
+    var bitmap = if (drawable is BitmapDrawable && drawable.bitmap != null) {
+        drawable.bitmap
+    } else {
+        val bmp = Bitmap.createBitmap(TEXTURE_PX, TEXTURE_PX, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bmp)
+        drawable.setBounds(0, 0, TEXTURE_PX, TEXTURE_PX)
+        drawable.draw(canvas)
+        bmp
+    }
 
     if (preBlur) {
         bitmap = FastBlur.blurArtwork(bitmap, radius = 18, maxDimension = 64)
     }
 
-    synchronized(textureCache) {
-        textureCache[cacheKey] = bitmap
-        while (textureCache.size > TEXTURE_CACHE) {
-            textureCache.remove(textureCache.keys.first())
-        }
-    }
-    bitmap
+    FluidTextureCache.put(cacheKey, bitmap)
+    return bitmap
 }
 
 internal fun fluidBlurSigma(width: Float, height: Float, extraBlurProgress: Float = 0f): Float {
     val shortest = minOf(width, height)
     val base = (shortest * BLUR_FRACTION).coerceIn(BLUR_SIGMA_MIN, BLUR_SIGMA_MAX)
-    val expanded = (shortest * 0.50f).coerceIn(280f, 720f)
+    val expanded = (shortest * 0.05f).coerceIn(24f, 36f)
     return androidx.compose.ui.util.lerp(base, expanded, extraBlurProgress)
 }
 
@@ -306,6 +444,14 @@ private class AgslFluidRenderer {
     private var lastPrevBitmap: Bitmap? = null
     private var lastPrevShader: BitmapShader? = null
 
+    fun reset() {
+        lastCurrentBitmap = null
+        lastCurrentShader = null
+        lastPrevBitmap = null
+        lastPrevShader = null
+        paint.shader = null
+    }
+
     fun render(
         canvas: android.graphics.Canvas,
         width: Float,
@@ -317,6 +463,7 @@ private class AgslFluidRenderer {
         seconds: Float = 0f,
         extraBlurProgress: Float = 0f,
     ) {
+        if (width <= 0f || height <= 0f) return
         if (lastCurrentBitmap !== current || lastCurrentShader == null) {
             lastCurrentBitmap = current
             lastCurrentShader = BitmapShader(current, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
@@ -339,11 +486,12 @@ private class AgslFluidRenderer {
         shader.setFloatUniform("centre2", copies[2].centreX, copies[2].centreY)
         shader.setFloatUniform("centre3", copies[3].centreX, copies[3].centreY)
 
-        // Dynamic Lissajous convection currents for moving swirl vortices
+        // Dynamic Lissajous convection currents with frequencies completing exact integer cycles over FLUID_PERIOD_S
+        // 0.15 = 12 cycles, 0.1125 = 9 cycles, 0.125 = 10 cycles, 0.175 = 14 cycles in 160*PI seconds
         val twistAx = width * (0.25f + 0.10f * sin(seconds * 0.15f))
-        val twistAy = height * (0.90f + 0.08f * cos(seconds * 0.11f))
-        val twistBx = width * (0.75f - 0.10f * cos(seconds * 0.13f))
-        val twistBy = height * (0.10f + 0.08f * sin(seconds * 0.17f))
+        val twistAy = height * (0.90f + 0.08f * cos(seconds * 0.1125f))
+        val twistBx = width * (0.75f - 0.10f * cos(seconds * 0.125f))
+        val twistBy = height * (0.10f + 0.08f * sin(seconds * 0.175f))
 
         shader.setFloatUniform("twistA", twistAx, twistAy)
         shader.setFloatUniform("twistB", twistBx, twistBy)
@@ -425,6 +573,7 @@ fun FluidArtworkBackground(
 
     var current by remember { mutableStateOf<Bitmap?>(null) }
     var previous by remember { mutableStateOf<Bitmap?>(null) }
+    var transitionBuffer by remember { mutableStateOf<Bitmap?>(null) }
     val crossfade = remember { Animatable(1f) }
     val appear = remember { Animatable(0f) }
 
@@ -433,6 +582,12 @@ fun FluidArtworkBackground(
             runCatching { AgslFluidRenderer() }.getOrNull()
         } else {
             null
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            agslRenderer?.reset()
         }
     }
 
@@ -446,26 +601,40 @@ fun FluidArtworkBackground(
             return@LaunchedEffect
         }
 
-        val bitmap = loadTexture(context, artworkUrl, preBlur = (agslRenderer == null))
+        val bitmap = loadTexture(context, artworkUrl, preBlur = true)
         if (bitmap == null) {
-            if (current != null) {
-                appear.animateTo(0f, tween(APPEAR_MS, easing = FastOutSlowInEasing))
-                current = null
-                previous = null
-            }
+            // Keep the existing artwork rather than blanking out on temporary network/decoding glitch (Bug 23).
             return@LaunchedEffect
         }
 
         val showing = current
         if (showing != null && showing !== bitmap) {
-            // If previous crossfade was in progress and less than halfway through, keep the older previous
-            // to avoid visual snapping during rapid track skipping
             val oldPrevious = previous
-            previous = if (oldPrevious != null && crossfade.value < 0.5f) oldPrevious else showing
+            val currentCrossfade = crossfade.value
+
+            // If a previous crossfade was in-flight, flatten the visible composite into transitionBuffer
+            // to eliminate visual snapping and maintain smooth continuity across rapid track changes (Bug 12).
+            val startPrevious = if (oldPrevious != null && currentCrossfade < 0.99f) {
+                val buffer = transitionBuffer?.takeIf { !it.isRecycled && it.width == TEXTURE_PX && it.height == TEXTURE_PX }
+                    ?: Bitmap.createBitmap(TEXTURE_PX, TEXTURE_PX, Bitmap.Config.ARGB_8888).also { transitionBuffer = it }
+                val canvas = android.graphics.Canvas(buffer)
+                val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+                canvas.drawBitmap(oldPrevious, null, Rect(0, 0, TEXTURE_PX, TEXTURE_PX), paint)
+                paint.alpha = (currentCrossfade.coerceIn(0f, 1f) * 255).toInt()
+                canvas.drawBitmap(showing, null, Rect(0, 0, TEXTURE_PX, TEXTURE_PX), paint)
+                buffer
+            } else {
+                showing
+            }
+
+            previous = startPrevious
             current = bitmap
             crossfade.snapTo(0f)
-            crossfade.animateTo(1f, tween(CROSSFADE_MS, easing = FastOutSlowInEasing))
-            previous = null
+            try {
+                crossfade.animateTo(1f, tween(CROSSFADE_MS, easing = FastOutSlowInEasing))
+            } finally {
+                previous = null
+            }
         } else {
             current = bitmap
         }
@@ -495,26 +664,44 @@ fun FluidArtworkBackground(
         label = "fluidFlowVelocity",
     )
 
-    // Gate animation loop on isPlaying, deceleration velocity, and lifecycle state
-    LaunchedEffect(isPlaying, flowVelocity > 0.01f, crossfade.isRunning, lifecycleState) {
-        if ((!isPlaying && flowVelocity <= 0.01f && !crossfade.isRunning) || !lifecycleState.isAtLeast(Lifecycle.State.STARTED)) {
+    val currentFlowVelocity by rememberUpdatedState(flowVelocity)
+    val isCrossfadeRunning by rememberUpdatedState(crossfade.isRunning)
+    val currentIsPlaying by rememberUpdatedState(isPlaying)
+    val hasArtwork = current != null
+    val powerManager = remember(context) {
+        context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+    }
+    val isScreenInteractive = powerManager?.isInteractive ?: true
+    val isExtraBlurPaused = extraBlur && blurTransition >= 0.99f && !crossfade.isRunning
+
+    // Gate animation loop on isPlaying, deceleration velocity, lifecycle state, screen interactivity, extraBlur, and artwork presence
+    LaunchedEffect(isPlaying, flowVelocity > 0.01f, crossfade.isRunning, lifecycleState, hasArtwork, isScreenInteractive, isExtraBlurPaused) {
+        if (!hasArtwork || (!isPlaying && flowVelocity <= 0.01f && !crossfade.isRunning) ||
+            !lifecycleState.isAtLeast(Lifecycle.State.RESUMED) || !isScreenInteractive || isExtraBlurPaused
+        ) {
             return@LaunchedEffect
         }
         var last = 0L
-        var pending = 0f
+        val frameDelayMs = (FRAME_SECONDS * 1000f).toLong().coerceAtLeast(16L)
         while (isActive) {
+            val playing = currentIsPlaying
+            val vel = currentFlowVelocity
+            val xfRunning = isCrossfadeRunning
+            if (!playing && vel <= 0.005f && !xfRunning) {
+                break
+            }
             withFrameNanos { now ->
-                if (last != 0L) pending += ((now - last) / 1_000_000_000f).coerceIn(0f, 0.1f)
+                if (last != 0L) {
+                    val dt = ((now - last) / 1_000_000_000f).coerceIn(0f, 0.1f)
+                    val surge = if (xfRunning) {
+                        1f + 2.5f * kotlin.math.sin(crossfade.value * Math.PI.toFloat())
+                    } else 1f
+                    val effectiveVelocity = (vel * surge).coerceIn(0f, 4f)
+                    seconds = (seconds + dt * effectiveVelocity) % FLUID_PERIOD_S
+                }
                 last = now
             }
-            if (pending >= FRAME_SECONDS) {
-                val surge = if (crossfade.isRunning) {
-                    1f + 2.5f * kotlin.math.sin(crossfade.value * Math.PI.toFloat())
-                } else 1f
-                val effectiveVelocity = (flowVelocity * surge).coerceIn(0f, 4f)
-                seconds = (seconds + pending * effectiveVelocity) % FLUID_PERIOD_S
-                pending = 0f
-            }
+            delay(frameDelayMs - 6L)
         }
     }
 
@@ -525,10 +712,16 @@ fun FluidArtworkBackground(
         Array(4) { MutableFluidCopy() }
     }
 
-    // Color grading filter for non-AGSL fallback matching AGSL saturation and brightness
+    val trackSeed = remember(track.title, track.artist) {
+        (track.title.hashCode() * 31) xor track.artist.hashCode()
+    }
+
+    // Color grading filter for non-AGSL fallback matching AGSL saturation, brightness, and contrast (Bug 10, 30)
     val fallbackColorFilter = remember(blurTransition) {
         val b = androidx.compose.ui.util.lerp(BRIGHTNESS, 0.32f, blurTransition)
         val s = SATURATION
+        val cm = 1f + CONTRAST
+        val co = -0.5f * CONTRAST * 255f
         val lr = 0.2126f
         val lg = 0.7152f
         val lb = 0.0722f
@@ -539,9 +732,9 @@ fun FluidArtworkBackground(
         ColorFilter.colorMatrix(
             ColorMatrix(
                 floatArrayOf(
-                    (a + s) * b, bg * b, c * b, 0f, 0f,
-                    a * b, (bg + s) * b, c * b, 0f, 0f,
-                    a * b, bg * b, (c + s) * b, 0f, 0f,
+                    (a + s) * b * cm, bg * b * cm, c * b * cm, 0f, co,
+                    a * b * cm, (bg + s) * b * cm, c * b * cm, 0f, co,
+                    a * b * cm, bg * b * cm, (c + s) * b * cm, 0f, co,
                     0f, 0f, 0f, 1f, 0f,
                 )
             )
@@ -567,18 +760,11 @@ fun FluidArtworkBackground(
                         alpha = appear.value
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             val sigma = fluidBlurSigma(size.width, size.height, blurTransition)
-                            if (sigma != blurEffectCache.sigma || blurEffectCache.effect == null) {
-                                blurEffectCache.sigma = sigma
-                                blurEffectCache.effect = runCatching {
-                                    RenderEffect
-                                        .createBlurEffect(sigma, sigma, Shader.TileMode.CLAMP)
-                                        .asComposeRenderEffect()
-                                }.getOrNull()
-                            }
-                            renderEffect = blurEffectCache.effect
+                            renderEffect = blurEffectCache.getOrCreate(sigma)
                         }
                     }
                     .drawBehind {
+                        if (size.width <= 0f || size.height <= 0f || appear.value <= 0.001f) return@drawBehind
                         val cur = current ?: return@drawBehind
                         val prv = previous ?: cur
 
@@ -588,25 +774,29 @@ fun FluidArtworkBackground(
                                 val invScale = 4f
                                 val scaledWidth = size.width * scale
                                 val scaledHeight = size.height * scale
-                                computeFluidCopies(scaledWidth, scaledHeight, seconds, target = fluidCopiesHolder)
+                                computeFluidCopies(scaledWidth, scaledHeight, seconds, seed = trackSeed, target = fluidCopiesHolder)
 
-                                canvas.nativeCanvas.save()
-                                canvas.nativeCanvas.scale(invScale, invScale)
-                                agslRenderer.render(
-                                    canvas = canvas.nativeCanvas,
-                                    width = scaledWidth,
-                                    height = scaledHeight,
-                                    copies = fluidCopiesHolder,
-                                    current = cur,
-                                    previous = prv,
-                                    fade = crossfade.value,
-                                    seconds = seconds,
-                                    extraBlurProgress = blurTransition,
-                                )
-                                canvas.nativeCanvas.restore()
+                                val nativeCanvas = canvas.nativeCanvas
+                                val saveCount = nativeCanvas.save()
+                                try {
+                                    nativeCanvas.scale(invScale, invScale)
+                                    agslRenderer.render(
+                                        canvas = nativeCanvas,
+                                        width = scaledWidth,
+                                        height = scaledHeight,
+                                        copies = fluidCopiesHolder,
+                                        current = cur,
+                                        previous = prv,
+                                        fade = crossfade.value,
+                                        seconds = seconds,
+                                        extraBlurProgress = blurTransition,
+                                    )
+                                } finally {
+                                    nativeCanvas.restoreToCount(saveCount)
+                                }
                             }
                         } else {
-                            computeFluidCopies(size.width, size.height, seconds, target = fluidCopiesHolder)
+                            computeFluidCopies(size.width, size.height, seconds, seed = trackSeed, target = fluidCopiesHolder)
                             if (cur !== cachedCurBitmap) {
                                 cachedCurBitmap = cur
                                 cachedCurImageBitmap = cur.asImageBitmap()
@@ -617,13 +807,15 @@ fun FluidArtworkBackground(
                             }
 
                             val fade = crossfade.value
-                            val drawPrev = prv !== cur && fade < 1f && cachedPrevImageBitmap != null
+                            val drawPrev = prv !== cur && fade < 0.999f && cachedPrevImageBitmap != null
 
                             if (drawPrev) {
                                 val prevImg = cachedPrevImageBitmap!!
+                                val prevAlpha = (1f - fade).coerceIn(0f, 1f)
                                 for (copy in fluidCopiesHolder) {
+                                    if (copy.side <= 0f) continue
                                     val deg = Math.toDegrees(copy.angle.toDouble()).toFloat()
-                                    val sideInt = copy.side.toInt()
+                                    val sideInt = copy.side.toInt().coerceAtLeast(1)
                                     val halfSide = copy.side / 2f
                                     val left = (copy.centreX - halfSide).toInt()
                                     val top = (copy.centreY - halfSide).toInt()
@@ -635,6 +827,7 @@ fun FluidArtworkBackground(
                                             image = prevImg,
                                             dstOffset = IntOffset(left, top),
                                             dstSize = IntSize(sideInt, sideInt),
+                                            alpha = prevAlpha,
                                             colorFilter = fallbackColorFilter,
                                         )
                                     }
@@ -642,10 +835,11 @@ fun FluidArtworkBackground(
                             }
 
                             val curImg = cachedCurImageBitmap ?: return@drawBehind
-                            val curAlpha = if (drawPrev) fade else 1f
+                            val curAlpha = if (drawPrev) fade.coerceIn(0f, 1f) else 1f
                             for (copy in fluidCopiesHolder) {
+                                if (copy.side <= 0f) continue
                                 val deg = Math.toDegrees(copy.angle.toDouble()).toFloat()
-                                val sideInt = copy.side.toInt()
+                                val sideInt = copy.side.toInt().coerceAtLeast(1)
                                 val halfSide = copy.side / 2f
                                 val left = (copy.centreX - halfSide).toInt()
                                 val top = (copy.centreY - halfSide).toInt()

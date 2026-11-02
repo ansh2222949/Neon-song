@@ -51,6 +51,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.neonsong.app.data.generate.GeneratedTrack
 import com.neonsong.app.ui.common.ArtworkImage
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.rememberExpressiveHeaderBackdrop
 import com.neonsong.app.ui.common.TrackContextMenuSheet
 import com.neonsong.app.ui.common.TrackMenuCapabilities
 import com.neonsong.app.ui.common.TrackMenuTarget
@@ -58,6 +59,7 @@ import com.neonsong.app.ui.common.safeDrawingBottomPadding
 import com.neonsong.app.ui.common.safeHorizontalContentPadding
 import com.neonsong.app.ui.common.adaptiveContentWidth
 import com.neonsong.app.ui.player.LocalMiniPlayerScrollClearance
+import com.neonsong.app.ui.theme.liquidGlassSource
 
 /**
  * Faithful port of genres.js (§5): bar-chart genre list with a period
@@ -73,6 +75,7 @@ fun GenresScreen(
     viewModel: GenresViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val headerBackdrop = rememberExpressiveHeaderBackdrop()
 
     LaunchedEffect(state.navigateToPlaylist) {
         if (state.navigateToPlaylist) {
@@ -94,16 +97,17 @@ fun GenresScreen(
                 title = "Your Genres",
                 subtitle = "Based on your listening history",
                 onBack = onBack,
+                backdrop = headerBackdrop,
                 actions = { PeriodDropdown(state.period, viewModel::setPeriod) },
             )
 
             when {
                 state.isLoading -> Box(
-                    Modifier.fillMaxSize().safeHorizontalContentPadding(),
+                    Modifier.fillMaxSize().safeHorizontalContentPadding().liquidGlassSource(headerBackdrop),
                     contentAlignment = Alignment.Center,
                 ) { com.neonsong.app.ui.common.ExpressiveLoadingIndicator() }
                 state.stats.isEmpty() -> Box(
-                    Modifier.fillMaxSize().safeHorizontalContentPadding(),
+                    Modifier.fillMaxSize().safeHorizontalContentPadding().liquidGlassSource(headerBackdrop),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text("No genre data yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -116,7 +120,7 @@ fun GenresScreen(
                         bottom = 24.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),
                     ),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
-                    modifier = Modifier.fillMaxSize().safeHorizontalContentPadding(),
+                    modifier = Modifier.fillMaxSize().safeHorizontalContentPadding().liquidGlassSource(headerBackdrop),
                 ) {
                     items(state.stats, key = { it.name }) { stat ->
                         GenreBarRow(

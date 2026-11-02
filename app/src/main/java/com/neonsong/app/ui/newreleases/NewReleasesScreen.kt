@@ -64,6 +64,7 @@ import com.neonsong.app.playback.PlayableTrack
 import com.neonsong.app.ui.common.ArtworkImage
 import com.neonsong.app.ui.common.ExpressiveGroupTrackRow
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.rememberExpressiveHeaderBackdrop
 import com.neonsong.app.ui.common.ExpressiveInlineLoadingIndicator
 import com.neonsong.app.ui.common.GroupGap
 import com.neonsong.app.ui.common.GroupPosition
@@ -79,6 +80,7 @@ import com.neonsong.app.ui.common.safeHorizontalContentPadding
 import com.neonsong.app.ui.player.LocalMiniPlayerScrollClearance
 import com.neonsong.app.ui.player.LocalMusicPlayer
 import com.neonsong.app.ui.player.PlayingWaveBars
+import com.neonsong.app.ui.theme.liquidGlassSource
 
 @Composable
 fun NewReleasesScreen(
@@ -89,6 +91,7 @@ fun NewReleasesScreen(
     val musicPlayer = LocalMusicPlayer.current
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+    val headerBackdrop = rememberExpressiveHeaderBackdrop()
     var menuTrack by remember { mutableStateOf<YouTubeMusicTrack?>(null) }
 
     // System back / predictive-back gesture is owned by the wrapping
@@ -122,13 +125,14 @@ fun NewReleasesScreen(
                 title = "New releases",
                 subtitle = "Find fresh drops",
                 onBack = onBack,
+                backdrop = headerBackdrop,
                 actions = {
                     HeaderActionIcon(Icons.Filled.Refresh, "Refresh", viewModel::refresh)
                     HeaderActionIcon(Icons.Filled.Shuffle, "Shuffle all", viewModel::shuffle)
                 },
             )
 
-            Box(Modifier.fillMaxSize().safeHorizontalContentPadding()) {
+            Box(Modifier.fillMaxSize().safeHorizontalContentPadding().liquidGlassSource(headerBackdrop)) {
                 Crossfade(
                     targetState = state.isLoading && state.tracks.isEmpty(),
                     animationSpec = tween(300, easing = FastOutSlowInEasing),

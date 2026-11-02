@@ -53,7 +53,14 @@ import androidx.compose.ui.unit.sp
 import com.neonsong.app.playback.MusicPlayerState
 import com.neonsong.app.ui.common.ExpressiveMotion
 import com.neonsong.app.util.LocalHapticManager
+import android.content.Context
+import android.os.PowerManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -152,7 +159,7 @@ fun WavySeekBar(
     }
 
     // Retain pending seek target until ExoPlayer catches up within 1500ms to eliminate thumb snap-back
-    LaunchedEffect(pendingSeekTargetMs, positionMs) {
+    LaunchedEffect(pendingSeekTargetMs, if (pendingSeekTargetMs != null) positionMs else 0L) {
         val target = pendingSeekTargetMs ?: return@LaunchedEffect
         if (kotlin.math.abs(positionMs - target) < 1500L) {
             pendingSeekTargetMs = null
@@ -198,7 +205,7 @@ fun WavySeekBar(
         0f
     }
 
-    LaunchedEffect(shownMs, dragging) {
+    LaunchedEffect(if (dragging) shownMs else -1L, dragging) {
         if (dragging && boundedDurationMs > 0L) {
             val step = shownMs / 5000L
             if (step != lastHapticStep) {
@@ -287,31 +294,35 @@ fun WavySeekBar(
     var phase2 by remember { mutableFloatStateOf(1.2f) }
     var phase3 by remember { mutableFloatStateOf(0f) }
 
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val powerManager = remember(context) {
+        context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+    }
+    val isScreenInteractive = powerManager?.isInteractive ?: true
+
     val wavesActive = isPlaying && !dragging
 
-    LaunchedEffect(wavesActive) {
-        if (!wavesActive) return@LaunchedEffect
+    LaunchedEffect(wavesActive, lifecycleState, isScreenInteractive) {
+        if (!wavesActive || !lifecycleState.isAtLeast(Lifecycle.State.RESUMED) || !isScreenInteractive) return@LaunchedEffect
         var lastNanos = 0L
         val twoPi = (2 * PI).toFloat()
         val speed1 = twoPi / 2.4f
         val speed2 = twoPi / 1.8f
         val speed3 = twoPi / 1.3f
-        val frameIntervalNanos = 16_666_666L // Throttle to ~60 FPS
-        while (true) {
+        val frameDelayMs = 41L // 24 FPS cap for power efficiency and thermal stability
+        while (isActive) {
             withFrameNanos { now ->
                 if (lastNanos != 0L) {
-                    val elapsed = now - lastNanos
-                    if (elapsed >= frameIntervalNanos) {
-                        val dt = (elapsed / 1_000_000_000f).coerceIn(0f, 0.1f)
-                        phase1 = (phase1 + dt * speed1) % twoPi
-                        phase2 = (phase2 + dt * speed2) % twoPi
-                        phase3 = (phase3 + dt * speed3) % twoPi
-                        lastNanos = now
-                    }
-                } else {
-                    lastNanos = now
+                    val dt = ((now - lastNanos) / 1_000_000_000f).coerceIn(0f, 0.08f)
+                    phase1 = (phase1 + dt * speed1) % twoPi
+                    phase2 = (phase2 + dt * speed2) % twoPi
+                    phase3 = (phase3 + dt * speed3) % twoPi
                 }
+                lastNanos = now
             }
+            delay(frameDelayMs - 6L)
         }
     }
 
@@ -352,7 +363,7 @@ fun WavySeekBar(
     val baseTrackThicknessPx = with(density) { 3.0.dp.toPx() }
     val thumbRadiusPx = with(density) { 5.2.dp.toPx() }
     val transitionLengthPx = with(density) { 40.dp.toPx() }
-    val waveSampleStepPx = with(density) { 3.0.dp.toPx() }
+    val waveSampleStepPx = with(density) { 4.0.dp.toPx() }
     val horizontalPaddingPx = with(density) { 10.dp.toPx() }
 
     // Pre-calculate vertical gradient brushes to eliminate allocations inside drawPath

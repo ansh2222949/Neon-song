@@ -4,7 +4,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import com.neonsong.app.ui.theme.liquidGlassChrome
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -137,16 +141,31 @@ fun YouTubeImportSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        modifier = Modifier.liquidGlassChrome(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), true),
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor = Color.Transparent,
+        scrimColor = Color.Black.copy(alpha = 0.32f),
         dragHandle = {
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+            Box(
                 modifier = Modifier
-                    .padding(top = 12.dp, bottom = 8.dp)
-                    .size(width = 36.dp, height = 4.dp),
-            ) {}
+                    .padding(vertical = 12.dp)
+                    .width(38.dp)
+                    .height(4.5.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.20f),
+                            )
+                        )
+                    )
+                    .border(
+                        0.5.dp,
+                        Color.White.copy(alpha = 0.35f),
+                        CircleShape
+                    )
+            )
         },
     ) {
         Column(

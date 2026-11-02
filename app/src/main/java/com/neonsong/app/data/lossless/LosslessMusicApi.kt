@@ -612,6 +612,27 @@ class LosslessMusicApi @Inject constructor(
             return@withContext BackendCredentials(baseUrl = normalized, apiKey = "addon", isAddon = true)
         }
 
+        val handles = moduleManager.enabledHandles()
+        for (handle in handles) {
+            val config = moduleManager.readDecryptedConfig(handle) ?: continue
+            val url = config.optString("baseUrl").ifBlank {
+                config.optJSONObject("tidal")?.optString("baseUrl").orEmpty()
+            }
+            if (url.startsWith("http://") || url.startsWith("https://")) {
+                val normalized = AddonClient.normalizeBase(url)
+                val secret = config.optString("secret").ifBlank {
+                    config.optString("clientSecret").ifBlank {
+                        config.optString("apiKey")
+                    }
+                }
+                return@withContext BackendCredentials(
+                    baseUrl = normalized,
+                    apiKey = secret.ifBlank { "addon" },
+                    isAddon = true,
+                )
+            }
+        }
+
         null
     }
 
@@ -641,6 +662,7 @@ class LosslessMusicApi @Inject constructor(
             expectedAlbum = expectedAlbum,
             preferredQuality = preferredQuality,
             addonBaseUrl = creds.baseUrl,
+            clientSecret = creds.apiKey.takeIf { it != "addon" },
             excludedUrls = excludedUrls,
             isDownload = isDownload,
         )
@@ -667,10 +689,11 @@ class LosslessMusicApi @Inject constructor(
         expectedAlbum: String?,
         preferredQuality: Int,
         addonBaseUrl: String,
+        clientSecret: String? = null,
         excludedUrls: Set<String>,
         isDownload: Boolean = false,
     ): LosslessAudioStream? {
-        val addonClient = AddonClient(addonBaseUrl, client, nativeSecrets = nativeSecrets)
+        val addonClient = AddonClient(addonBaseUrl, client, clientSecret = clientSecret, nativeSecrets = nativeSecrets)
         val cleanArtist = cleanForSearch(artist).ifBlank { artist }
         val cleanTitle = cleanForSearch(title).ifBlank { title }
         val parsedTarget = parseTitle(title, cleanArtist, expectedAlbum)
@@ -811,7 +834,8 @@ class LosslessMusicApi @Inject constructor(
                         val b64 = android.util.Base64.encodeToString(xml.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
                         "data:application/dash+xml;base64,$b64"
                     }
-                    ?: stream?.url?.takeIf { it.isNotBlank() }
+                    ?: stream?.extractManifestPayload()
+                    ?: stream?.effectiveStreamUrl
                     ?: candidate.directStreamUrl?.takeIf { it.isNotBlank() }
                     ?: continue
 
@@ -894,16 +918,16 @@ class LosslessMusicApi @Inject constructor(
                 consecutiveFailures = 0
                 failureCooldownUntilMs = 0L
 
-                val lowerUrlPath = rawUrl.substringBefore('?').lowercase()
-                val streamMimeType = when {
-                    rawUrl.startsWith("data:application/dash+xml") -> "application/dash+xml"
-                    lowerUrlPath.endsWith(".mpd") -> "application/dash+xml"
-                    lowerUrlPath.endsWith(".m3u8") -> "application/x-mpegURL"
-                    // Atmos arrives as a direct progressive E-AC-3 MP4.
-                    isStreamAtmos -> "audio/mp4"
-                    lowerUrlPath.endsWith(".flac") -> "audio/flac"
-                    lowerUrlPath.endsWith(".mp4") || lowerUrlPath.endsWith(".m4a") -> "audio/mp4"
-                    else -> "application/dash+xml"
+                val streamMimeType = resolveStreamMimeType(
+                    rawUrl = rawUrl,
+                    codec = stream?.codec ?: streamCodec,
+                    format = stream?.format,
+                    isStreamAtmos = isStreamAtmos,
+                )
+
+                if (!isValidManifest(rawUrl, streamMimeType)) {
+                    Log.w(TAG, "resolveFromAddon: candidate $trackId returned invalid manifest ($streamMimeType); skipping")
+                    continue
                 }
 
                 return LosslessAudioStream(
@@ -924,6 +948,87 @@ class LosslessMusicApi @Inject constructor(
             }
         }
         return null
+    }
+
+    internal fun resolveStreamMimeType(
+        rawUrl: String,
+        codec: String?,
+        format: String?,
+        isStreamAtmos: Boolean,
+    ): String {
+        val lowerUrlPath = rawUrl.substringBefore('?').lowercase()
+        val lowerCodec = codec?.trim()?.lowercase().orEmpty()
+        val lowerFormat = format?.trim()?.lowercase().orEmpty()
+
+        if (rawUrl.startsWith("data:application/dash+xml") ||
+            lowerUrlPath.endsWith(".mpd") ||
+            lowerFormat == "mpd" ||
+            rawUrl.trimStart().startsWith("<MPD")
+        ) {
+            return "application/dash+xml"
+        }
+
+        if (lowerUrlPath.endsWith(".m3u8") ||
+            lowerFormat == "hls" ||
+            lowerFormat == "m3u8" ||
+            rawUrl.trimStart().startsWith("#EXTM3U")
+        ) {
+            return "application/x-mpegURL"
+        }
+
+        if (isStreamAtmos) {
+            return "audio/mp4"
+        }
+
+        if (lowerUrlPath.endsWith(".flac") || lowerCodec == "flac" || lowerFormat == "flac") {
+            return "audio/flac"
+        }
+
+        if (lowerUrlPath.endsWith(".alac") || lowerCodec == "alac") {
+            return "audio/mp4"
+        }
+
+        if (lowerUrlPath.endsWith(".wav") || lowerCodec == "wav" || lowerCodec == "wave") {
+            return "audio/wav"
+        }
+
+        if (lowerUrlPath.endsWith(".mp3") || lowerCodec == "mp3") {
+            return "audio/mpeg"
+        }
+
+        if (lowerUrlPath.endsWith(".mp4") ||
+            lowerUrlPath.endsWith(".m4a") ||
+            lowerUrlPath.endsWith(".aac") ||
+            lowerCodec == "aac" ||
+            lowerCodec == "mp4a"
+        ) {
+            return "audio/mp4"
+        }
+
+        return "audio/flac"
+    }
+
+    internal fun isValidManifest(rawUrl: String, mimeType: String): Boolean {
+        if (mimeType == "application/dash+xml") {
+            if (rawUrl.startsWith("data:application/dash+xml;base64,")) {
+                val b64 = rawUrl.substringAfter("base64,").trim()
+                return runCatching {
+                    val decoded = String(android.util.Base64.decode(b64, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                    (decoded.contains("<MPD", ignoreCase = true) || decoded.contains("<Period", ignoreCase = true)) &&
+                        !decoded.contains("<html", ignoreCase = true)
+                }.getOrDefault(false)
+            }
+            if (rawUrl.startsWith("<")) {
+                return (rawUrl.contains("<MPD", ignoreCase = true) || rawUrl.contains("<Period", ignoreCase = true)) &&
+                    !rawUrl.contains("<html", ignoreCase = true)
+            }
+            return rawUrl.startsWith("http://") || rawUrl.startsWith("https://")
+        }
+        if (mimeType == "application/x-mpegURL") {
+            if (rawUrl.startsWith("#EXTM3U")) return true
+            return rawUrl.startsWith("http://") || rawUrl.startsWith("https://")
+        }
+        return true
     }
 
 

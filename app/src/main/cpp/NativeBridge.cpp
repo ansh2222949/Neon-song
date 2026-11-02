@@ -390,6 +390,271 @@ Java_com_neonsong_app_playback_NativeAudioEngine_nativeWritePcm(
 }
 
 extern "C" JNIEXPORT jint JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeWriteDeckPcm(
+    JNIEnv* env,
+    jobject,
+    jlong handle,
+    jint deckId,
+    jobject directBuffer,
+    jint byteOffset,
+    jint frameCount,
+    jint encoding,
+    jint inputSampleRate,
+    jint inputChannelCount) {
+    auto* engine = fromHandle(handle);
+    if (engine == nullptr) {
+        return -3; // Engine unavailable
+    }
+    if (deckId < 0 || deckId >= 2) {
+        return -4; // Invalid deck ID
+    }
+    if (directBuffer == nullptr) {
+        return -1; // Invalid buffer
+    }
+    auto* base = static_cast<std::uint8_t*>(env->GetDirectBufferAddress(directBuffer));
+    const jlong capacity = env->GetDirectBufferCapacity(directBuffer);
+    PcmFormat format{};
+    if (base == nullptr || capacity < 0 || byteOffset < 0) {
+        return -1; // Invalid buffer
+    }
+    if (frameCount <= 0 || inputSampleRate <= 0 ||
+        (inputChannelCount != 1 && inputChannelCount != 2) ||
+        !parseFormat(encoding, format)) {
+        return -2; // Invalid format
+    }
+
+    const std::size_t bytesPerSample = neonsong::audio::PcmConverter::bytesPerSample(format);
+    const std::size_t bytesPerFrame = bytesPerSample * static_cast<std::size_t>(inputChannelCount);
+    const std::size_t frames = static_cast<std::size_t>(frameCount);
+    if (bytesPerFrame == 0 || frames > std::numeric_limits<std::size_t>::max() / bytesPerFrame) {
+        return -2; // Invalid format
+    }
+    const std::size_t offset = static_cast<std::size_t>(byteOffset);
+    if (offset % bytesPerSample != 0U) {
+        return -1; // Unaligned buffer offset
+    }
+    const std::size_t requiredBytes = frames * bytesPerFrame;
+    if (offset > static_cast<std::size_t>(capacity) ||
+        requiredBytes > static_cast<std::size_t>(capacity) - offset) {
+        return -1; // Buffer overflow
+    }
+
+    const std::int64_t consumed = engine->writeDeckPcm(
+        deckId,
+        base + offset,
+        frames,
+        format,
+        inputSampleRate,
+        inputChannelCount);
+    if (consumed < 0) {
+        return static_cast<jint>(consumed);
+    }
+    return static_cast<jint>(std::min<std::int64_t>(
+        consumed,
+        static_cast<std::int64_t>(std::numeric_limits<jint>::max())));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeFlushDeck(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint deckId) {
+    if (auto* engine = fromHandle(handle); engine != nullptr) {
+        engine->flushDeck(deckId);
+    }
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeGetDeckBufferedFrames(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint deckId) {
+    if (const auto* engine = fromHandle(handle); engine != nullptr) {
+        return static_cast<jlong>(engine->deckBufferedFrames(deckId));
+    }
+    return 0L;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeSetDeckVolume(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint deckId,
+    jfloat volume) {
+    if (auto* engine = fromHandle(handle); engine != nullptr) {
+        engine->setDeckVolume(deckId, volume);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeSetCrossfade(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jfloat progress) {
+    if (auto* engine = fromHandle(handle); engine != nullptr) {
+        engine->setCrossfadeProgress(progress);
+    }
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeGetCrossfade(
+    JNIEnv*,
+    jobject,
+    jlong handle) {
+    if (const auto* engine = fromHandle(handle); engine != nullptr) {
+        return engine->crossfadeProgress();
+    }
+    return 0.0F;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeSetDeckPlaybackParameters(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint deckId,
+    jfloat speed,
+    jfloat pitch) {
+    if (auto* engine = fromHandle(handle); engine != nullptr) {
+        engine->setDeckPlaybackParameters(deckId, speed, pitch);
+    }
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeGetDeckSpeed(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint deckId) {
+    if (const auto* engine = fromHandle(handle); engine != nullptr) {
+        return engine->deckSpeed(deckId);
+    }
+    return 1.0F;
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeGetDeckPitch(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint deckId) {
+    if (const auto* engine = fromHandle(handle); engine != nullptr) {
+        return engine->deckPitch(deckId);
+    }
+    return 1.0F;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeSetDeckTimeRatio(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint deckId,
+    jfloat ratio) {
+    if (auto* engine = fromHandle(handle); engine != nullptr) {
+        engine->setDeckTimeRatio(deckId, ratio);
+    }
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeGetDeckTimeRatio(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint deckId) {
+    if (const auto* engine = fromHandle(handle); engine != nullptr) {
+        return engine->deckTimeRatio(deckId);
+    }
+    return 1.0F;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeSetDeckPlaying(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint deckId,
+    jboolean playing) {
+    if (auto* engine = fromHandle(handle); engine != nullptr) {
+        engine->setDeckPlaying(deckId, playing == JNI_TRUE);
+    }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeIsDeckPlaying(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint deckId) {
+    if (const auto* engine = fromHandle(handle); engine != nullptr) {
+        return engine->isDeckPlaying(deckId) ? JNI_TRUE : JNI_FALSE;
+    }
+    return JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeDrainDeckResampler(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint deckId) {
+    if (auto* engine = fromHandle(handle); engine != nullptr) {
+        engine->drainDeckResampler(deckId);
+    }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeIsDeckResamplerDrained(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint deckId) {
+    if (const auto* engine = fromHandle(handle); engine != nullptr) {
+        return engine->isDeckResamplerDrained(deckId) ? JNI_TRUE : JNI_FALSE;
+    }
+    return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeGetDeckFramesRendered(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint deckId) {
+    if (const auto* engine = fromHandle(handle); engine != nullptr) {
+        return static_cast<jlong>(engine->deckFramesRendered(deckId));
+    }
+    return 0L;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeIsDeckWsolaDrained(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint deckId) {
+    if (const auto* engine = fromHandle(handle); engine != nullptr) {
+        return engine->isDeckWsolaDrained(deckId) ? JNI_TRUE : JNI_FALSE;
+    }
+    return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeGetPresentationLatencyUs(
+    JNIEnv*,
+    jobject,
+    jlong handle) {
+    if (const auto* engine = fromHandle(handle); engine != nullptr) {
+        return static_cast<jlong>(engine->presentationLatencyUs());
+    }
+    return 0L;
+}
+
+extern "C" JNIEXPORT jint JNICALL
 Java_com_neonsong_app_playback_NativeAudioEngine_nativeWriteProcessedPcm(
     JNIEnv* env,
     jobject,

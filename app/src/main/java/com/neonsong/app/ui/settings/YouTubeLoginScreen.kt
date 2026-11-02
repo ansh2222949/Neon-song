@@ -46,7 +46,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.rememberExpressiveHeaderBackdrop
 import com.neonsong.app.ui.common.adaptiveContentWidth
+import com.neonsong.app.ui.theme.liquidGlassSource
 
 /**
  * Native-feeling YouTube Music sign-in: a WebView loads Google's own sign-in
@@ -62,6 +64,7 @@ fun YouTubeLoginScreen(
     viewModel: YouTubeLoginViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val headerBackdrop = rememberExpressiveHeaderBackdrop()
     var loadProgressVisible by remember { mutableStateOf(true) }
     var webViewError by remember { mutableStateOf<String?>(null) }
 
@@ -88,9 +91,10 @@ fun YouTubeLoginScreen(
             title = "Connect YouTube Music",
             subtitle = "Sign in with your Google account",
             onBack = onBack,
+            backdrop = headerBackdrop,
         )
 
-        Box(Modifier.weight(1f)) {
+        Box(Modifier.weight(1f).liquidGlassSource(headerBackdrop)) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->

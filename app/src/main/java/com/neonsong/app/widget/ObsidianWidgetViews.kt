@@ -43,14 +43,27 @@ internal object ObsidianWidgetViews {
         options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
     }.getOrDefault(0)
 
+    @Volatile
+    private var cachedSourceGenerationId: Int = -1
+
+    @Volatile
+    private var cachedRoundedBitmap: Bitmap? = null
+
+    @Volatile
+    private var cachedArtPath: String? = null
+
+    @Volatile
+    private var cachedPathBitmap: Bitmap? = null
+
     fun build(
         context: Context,
         appWidgetId: Int,
         eqFrame: Int? = null,
         progressOverride: Float? = null,
+        memoryArt: Bitmap? = null,
     ): RemoteViews {
         val resolved = WidgetViews.resolve(context)
-        val artBitmap = resolveArtBitmap(resolved.snapshot.artPath)
+        val artBitmap = resolveArt(memoryArt, resolved.snapshot.artPath)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val sizeMap = mapOf(
@@ -201,6 +214,31 @@ internal object ObsidianWidgetViews {
             R.id.widget_next,
             WidgetActions.nextPending(context, ObsidianGlassWidgetReceiver::class.java),
         )
+    }
+
+    private fun resolveArt(memoryArt: Bitmap?, artPath: String?): Bitmap? {
+        if (memoryArt != null && !memoryArt.isRecycled) {
+            val genId = memoryArt.generationId
+            val existing = cachedRoundedBitmap
+            if (genId == cachedSourceGenerationId && existing != null && !existing.isRecycled) {
+                return existing
+            }
+            val rounded = roundedCorners(memoryArt, 0.22f)
+            cachedSourceGenerationId = genId
+            cachedRoundedBitmap = rounded
+            return rounded
+        }
+        if (!artPath.isNullOrBlank()) {
+            val existing = cachedPathBitmap
+            if (artPath == cachedArtPath && existing != null && !existing.isRecycled) {
+                return existing
+            }
+            val decoded = resolveArtBitmap(artPath)
+            cachedArtPath = artPath
+            cachedPathBitmap = decoded
+            return decoded
+        }
+        return null
     }
 
     private fun resolveArtBitmap(path: String?): Bitmap? = runCatching {

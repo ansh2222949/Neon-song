@@ -53,6 +53,11 @@ jobs:
             keytool -genkeypair -alias androiddebugkey -keypass android -keystore ~/.android/debug.keystore -storepass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
           fi
 
+      - name: Set up Rust & cargo-ndk
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          cargo install cargo-ndk --locked
+
       - name: Build Android 10 Release APKs (compressed + raw)
         env:
           ADDON_CLIENT_SECRET: ${{ secrets.ADDON_CLIENT_SECRET }}
@@ -65,6 +70,7 @@ jobs:
         run: ./gradlew assembleRelease assembleRawRelease --stacktrace
 
       - name: Sign Release APK with Custom Key (Optional)
+
         if: env.SIGNING_KEY != ''
         uses: r0adkll/sign-android-release@v1
         id: sign_app
@@ -142,22 +148,22 @@ jobs:
           fi
           ls -lh final_apk/
 
-      - name: Verify APK signatures + publish checksums
+      - name: Verify APK signatures & Vault integrity + publish checksums
         run: |
-          # Never publish a package the installer will reject as invalid.
+          # Never publish a package the installer will reject as invalid or with compromised vault.
           SDKROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           APKSIGNER=$(find "$SDKROOT/build-tools" -maxdepth 2 -name apksigner 2>/dev/null | head -n1)
-          if [ -z "$APKSIGNER" ]; then
-            echo "::warning::apksigner not found under $SDKROOT, skipping signature verification"
-          else
-            for apk in final_apk/*.apk; do
-              echo "Verifying $apk ..."
+          for apk in final_apk/*.apk; do
+            echo "Verifying signature and vault integrity for $apk ..."
+            if [ -n "$APKSIGNER" ]; then
               "$APKSIGNER" verify --print-certs "$apk" > /dev/null || { echo "::error::APK failed signature verification: $apk"; exit 1; }
-            done
-            echo "All APK signatures valid."
-          fi
+            fi
+            python tools/verify_vault_binary.py --apk "$apk" --strict || { echo "::error::Vault verification failed for $apk"; exit 1; }
+          done
+          echo "All APK signatures and native vaults verified successfully."
           (cd final_apk && sha256sum *.apk > SHA256SUMS.txt)
           cat final_apk/SHA256SUMS.txt
+
 
       - name: Prepare Release Notes & Compatibility Notice
         env:

@@ -41,7 +41,7 @@ class NativeProcessingAudioSink(
     private val usbOutput: UsbBitPerfectOutput? = null,
     private val exclusiveUsb: ExclusiveUsbOutput? = null,
     private val autoMixEngine: NativeAutoMixEngine? = null,
-    standbyAutoMixRole: Boolean = false,
+    private val standbyAutoMixRole: Boolean = false,
 ) : AudioSink {
     private var activeDelegate: DefaultAudioSink = fallbackDelegate
     // Read on the main thread for the signal-path verdict, written on the
@@ -454,7 +454,7 @@ class NativeProcessingAudioSink(
         return consumed
     }
 
-    private fun isDirectEqRoute(): Boolean = when {
+    private fun isDirectEqRoute(): Boolean = !bitPerfectRequested && when {
         usbExclusive -> !isExclusiveConverting()
         else -> !processingActive
     }
@@ -651,7 +651,12 @@ class NativeProcessingAudioSink(
             pendingAccessUnitCount = encodedAccessUnitCount
             pendingOutputFrameCount = output.remaining() /
                 (Float.SIZE_BYTES * outputChannelCount)
-            routeAutoMixOutput(output)
+            if (autoMixEnabled && autoMixActive && outputChannelCount == 2 && output.isDirect) {
+                val frames = output.remaining() / (Float.SIZE_BYTES * outputChannelCount)
+                if (frames > 0) {
+                    autoMixEngine?.process(output, frames)
+                }
+            }
         }
 
         val output = pendingOutput ?: return true
@@ -659,10 +664,7 @@ class NativeProcessingAudioSink(
             if (!suppressStandbyAutoMixOutput()) {
                 activeDelegate.handleBuffer(output, pendingPresentationTimeUs, pendingAccessUnitCount)
             } else {
-                // Deck B is a decoded producer for the native master. It must
-                // advance Media3's renderer without also reaching AudioTrack,
-                // otherwise the same incoming PCM is audible twice.
-                output.position(output.limit())
+                routeStandbyDeckBPcm(output)
             }
         }
         if (output.hasRemaining()) return false
@@ -676,20 +678,81 @@ class NativeProcessingAudioSink(
         return true
     }
 
-    private fun routeAutoMixOutput(output: ByteBuffer) {
-        if (!autoMixEnabled || outputChannelCount != 2 || !output.isDirect) return
-        val frames = output.remaining() / (Float.SIZE_BYTES * outputChannelCount)
-        if (frames <= 0) return
-        val engine = autoMixEngine ?: return
-        if (autoMixActive) {
-            engine.process(output, frames)
-        } else {
-            engine.writeDeckBPcm(output, frames)
+    private var standbyScratchDirectBuffer: ByteBuffer? = null
+
+    private fun getOrAllocateScratchDirectBuffer(requiredBytes: Int): ByteBuffer {
+        val current = standbyScratchDirectBuffer
+        if (current == null || current.capacity() < requiredBytes) {
+            val allocated = ByteBuffer.allocateDirect(requiredBytes.coerceAtLeast(4096 * Float.SIZE_BYTES * 2))
+                .order(ByteOrder.LITTLE_ENDIAN)
+            standbyScratchDirectBuffer = allocated
+            return allocated
         }
+        return current
+    }
+
+    private fun routeStandbyDeckBPcm(output: ByteBuffer): Int {
+        if (!autoMixEnabled || !output.hasRemaining()) return 0
+        val engine = autoMixEngine ?: return 0
+
+        val inChannelCount = outputChannelCount
+        val directBuffer: ByteBuffer
+        val frames: Int
+
+        if (inChannelCount == 1) {
+            val monoBytesPerFrame = Float.SIZE_BYTES
+            frames = output.remaining() / monoBytesPerFrame
+            if (frames <= 0) return 0
+
+            val requiredBytes = frames * Float.SIZE_BYTES * 2
+            val scratch = getOrAllocateScratchDirectBuffer(requiredBytes)
+            scratch.clear()
+
+            val origPos = output.position()
+            val origOrder = output.order()
+            output.order(ByteOrder.LITTLE_ENDIAN)
+            for (f in 0 until frames) {
+                val sample = output.getFloat(origPos + f * monoBytesPerFrame)
+                scratch.putFloat(sample)
+                scratch.putFloat(sample)
+            }
+            output.order(origOrder)
+            scratch.flip()
+            directBuffer = scratch
+        } else if (inChannelCount == 2 && !output.isDirect) {
+            val bytesPerFrame = Float.SIZE_BYTES * 2
+            frames = output.remaining() / bytesPerFrame
+            if (frames <= 0) return 0
+
+            val requiredBytes = frames * bytesPerFrame
+            val scratch = getOrAllocateScratchDirectBuffer(requiredBytes)
+            scratch.clear()
+            val slice = output.duplicate()
+            scratch.put(slice)
+            scratch.flip()
+            directBuffer = scratch
+        } else if (inChannelCount == 2 && output.isDirect) {
+            val bytesPerFrame = Float.SIZE_BYTES * 2
+            frames = output.remaining() / bytesPerFrame
+            if (frames <= 0) return 0
+            directBuffer = output
+        } else {
+            Log.w(TAG, "Standby Deck B received unsupported channel count: $inChannelCount")
+            return 0
+        }
+
+        val written = engine.writeDeckBPcm(directBuffer, frames)
+        val validFrames = written.coerceIn(0, frames)
+
+        if (validFrames > 0) {
+            val inputBytesPerFrame = Float.SIZE_BYTES * inChannelCount
+            output.position(output.position() + validFrames * inputBytesPerFrame)
+        }
+        return validFrames
     }
 
     private fun suppressStandbyAutoMixOutput(): Boolean =
-        autoMixEnabled && !autoMixActive && outputChannelCount == 2
+        autoMixEnabled && !autoMixActive && (standbyAutoMixRole || outputChannelCount in 1..2)
 
     override fun playToEndOfStream() {
         if (usbExclusive) {
@@ -709,8 +772,13 @@ class NativeProcessingAudioSink(
             }
             val tail = endOfStreamOutput
             if (tail?.hasRemaining() == true) {
-                activeDelegate.handleBuffer(tail, nextOutputPresentationTimeUs, 1)
-                if (tail.hasRemaining()) return
+                if (!suppressStandbyAutoMixOutput()) {
+                    activeDelegate.handleBuffer(tail, nextOutputPresentationTimeUs, 1)
+                    if (tail.hasRemaining()) return
+                } else {
+                    routeStandbyDeckBPcm(tail)
+                    if (tail.hasRemaining()) return
+                }
             }
             activeDelegate.playToEndOfStream()
         } catch (error: Exception) {
@@ -1249,6 +1317,9 @@ class NativeProcessingAudioSink(
         clearPending()
         clearEndOfStream()
         exclusiveEnded = false
+        if (standbyAutoMixRole || (autoMixEnabled && !autoMixActive)) {
+            runCatching { autoMixEngine?.reset() }
+        }
         if (usbExclusive) {
             exclusiveUsb?.flush()
             // Drop converter state on seek: stale soxr delay would smear
@@ -1277,6 +1348,10 @@ class NativeProcessingAudioSink(
     override fun reset() {
         directEq.reset()
         directEqBuffer = null
+        if (standbyAutoMixRole || (autoMixEnabled && !autoMixActive)) {
+            runCatching { autoMixEngine?.reset() }
+        }
+        standbyScratchDirectBuffer = null
         usbOutput?.setFormat(null)
         if (usbExclusive && exclusiveWanted) {
             exclusiveUsb?.prepareForNextItem()

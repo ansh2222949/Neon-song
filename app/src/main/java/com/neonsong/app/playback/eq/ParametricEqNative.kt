@@ -118,6 +118,7 @@ class DirectPcmEq {
 
     /** Applies the EQ to buffer[position, limit). Returns true when samples changed. */
     fun process(buffer: ByteBuffer): Boolean {
+        if (buffer.isReadOnly) return false
         val enc = encoding ?: return false
         if (handle == 0L || frameBytes <= 0 || !buffer.hasRemaining()) return false
         val start = buffer.position()

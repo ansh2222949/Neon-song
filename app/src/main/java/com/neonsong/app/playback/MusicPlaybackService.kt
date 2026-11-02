@@ -153,6 +153,44 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
     private var playbackWakeLock: PowerManager.WakeLock? = null
     private var playbackWifiLock: WifiManager.WifiLock? = null
 
+    @androidx.annotation.VisibleForTesting
+    internal val sessionCallback = object : MediaSessionCompat.Callback() {
+        override fun onPlay() = musicPlayer.resume()
+        override fun onPause() = musicPlayer.pause()
+        override fun onSkipToNext() = musicPlayer.next()
+        override fun onSkipToPrevious() = musicPlayer.previous()
+        override fun onSeekTo(pos: Long) = musicPlayer.seekTo(pos)
+        override fun onFastForward() {
+            val state = musicPlayer.state.value
+            musicPlayer.seekTo(state.positionMs + 10_000L)
+        }
+        override fun onRewind() {
+            val state = musicPlayer.state.value
+            musicPlayer.seekTo((state.positionMs - 10_000L).coerceAtLeast(0L))
+        }
+        override fun onStop() = musicPlayer.stopAndClear()
+        override fun onSkipToQueueItem(id: Long) = musicPlayer.seekToQueueItem(id.toInt())
+        override fun onSetShuffleMode(shuffleMode: Int) {
+            musicPlayer.setShuffleEnabled(shuffleMode != PlaybackStateCompat.SHUFFLE_MODE_NONE)
+        }
+        override fun onSetRepeatMode(repeatMode: Int) {
+            musicPlayer.setRepeatMode(
+                when (repeatMode) {
+                    PlaybackStateCompat.REPEAT_MODE_ONE -> androidx.media3.common.Player.REPEAT_MODE_ONE
+                    PlaybackStateCompat.REPEAT_MODE_ALL,
+                    PlaybackStateCompat.REPEAT_MODE_GROUP -> androidx.media3.common.Player.REPEAT_MODE_ALL
+                    else -> androidx.media3.common.Player.REPEAT_MODE_OFF
+                },
+            )
+        }
+        override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
+            mediaId?.let(::playCarMediaId)
+        }
+        override fun onPlayFromSearch(query: String?, extras: Bundle?) {
+            playCarSearch(resolveCarSearchQuery(query, extras))
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
@@ -174,34 +212,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                     MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
                         MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS,
                 )
-                setCallback(object : MediaSessionCompat.Callback() {
-                    override fun onPlay() = musicPlayer.resume()
-                    override fun onPause() = musicPlayer.pause()
-                    override fun onSkipToNext() = musicPlayer.next()
-                    override fun onSkipToPrevious() = musicPlayer.previous()
-                    override fun onSeekTo(pos: Long) = musicPlayer.seekTo(pos)
-                    override fun onStop() = musicPlayer.stopAndClear()
-                    override fun onSkipToQueueItem(id: Long) = musicPlayer.seekToQueueItem(id.toInt())
-                    override fun onSetShuffleMode(shuffleMode: Int) {
-                        musicPlayer.setShuffleEnabled(shuffleMode != PlaybackStateCompat.SHUFFLE_MODE_NONE)
-                    }
-                    override fun onSetRepeatMode(repeatMode: Int) {
-                        musicPlayer.setRepeatMode(
-                            when (repeatMode) {
-                                PlaybackStateCompat.REPEAT_MODE_ONE -> androidx.media3.common.Player.REPEAT_MODE_ONE
-                                PlaybackStateCompat.REPEAT_MODE_ALL,
-                                PlaybackStateCompat.REPEAT_MODE_GROUP -> androidx.media3.common.Player.REPEAT_MODE_ALL
-                                else -> androidx.media3.common.Player.REPEAT_MODE_OFF
-                            },
-                        )
-                    }
-                    override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
-                        mediaId?.let(::playCarMediaId)
-                    }
-                    override fun onPlayFromSearch(query: String?, extras: Bundle?) {
-                        playCarSearch(resolveCarSearchQuery(query, extras))
-                    }
-                })
+                setCallback(sessionCallback)
                 setSessionActivity(openAppPendingIntent())
                 // KWGT / Bluetooth / headset discovery happens while idle too:
                 // publish an initial state so media buttons (and widget play
@@ -476,7 +487,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         if (shouldHold) {
             runCatching {
                 if (playbackWakeLock?.isHeld == false) {
-                    playbackWakeLock?.acquire(60 * 60 * 1000L)
+                    playbackWakeLock?.acquire()
                 }
                 if (playbackWifiLock?.isHeld == false) {
                     playbackWifiLock?.acquire()
@@ -508,7 +519,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         }.onFailure { firstError ->
             android.util.Log.w("MusicPlaybackService", "Rich startup notification rejected; retrying minimal", firstError)
         }.recoverCatching {
-            val minimal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val minimalBuilder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 Notification.Builder(this, CHANNEL_ID)
             } else {
                 @Suppress("DEPRECATION") Notification.Builder(this)
@@ -516,7 +527,10 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
              .setContentTitle(musicPlayer.state.value.current?.title ?: "Neon Song")
              .setContentText(musicPlayer.state.value.current?.artist ?: "Music player")
              .setOnlyAlertOnce(true)
-             .build()
+            platformSessionToken?.let { token ->
+                minimalBuilder.setStyle(Notification.MediaStyle().setMediaSession(token))
+            }
+            val minimal = minimalBuilder.build()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
                     NOTIFICATION_ID,
@@ -536,8 +550,18 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
 
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent == null) {
+            // Service was recreated by system after process death without an explicit intent.
+            // Under Android 14+ (API 34+), calling startForeground() from the background
+            // with a null intent triggers ForegroundServiceStartNotAllowedException.
+            // Playback state remains safely persisted on disk via PersistedPlaybackSession.
+            // Stop this orphaned background instance until the user initiates playback via
+            // UI, widget, or Bluetooth/media-button intent.
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (!promoteForPlayback()) return START_NOT_STICKY
-        when (intent?.action) {
+        when (intent.action) {
             Intent.ACTION_MEDIA_BUTTON -> androidx.media.session.MediaButtonReceiver.handleIntent(mediaSession, intent)
             MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH -> playCarSearch(
                 resolveCarSearchQuery(intent.getStringExtra(android.app.SearchManager.QUERY), intent.extras),
@@ -549,7 +573,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             ACTION_REPEAT -> musicPlayer.cycleRepeatMode()
             ACTION_STOP -> musicPlayer.stopAndClear()
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -849,6 +873,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                     .setActions(
                         PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or
                             PlaybackStateCompat.ACTION_PLAY_PAUSE or PlaybackStateCompat.ACTION_SEEK_TO or
+                            PlaybackStateCompat.ACTION_FAST_FORWARD or PlaybackStateCompat.ACTION_REWIND or
                             PlaybackStateCompat.ACTION_SKIP_TO_NEXT or PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
                             PlaybackStateCompat.ACTION_SKIP_TO_QUEUE_ITEM or PlaybackStateCompat.ACTION_STOP or
                             PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH or

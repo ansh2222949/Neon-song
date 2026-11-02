@@ -147,6 +147,11 @@ import com.neonsong.app.ui.theme.HeroInnerShape
 import com.neonsong.app.ui.theme.NowPlayingCardShape
 import com.neonsong.app.ui.theme.StatPillShape
 import com.neonsong.app.ui.theme.TrackRowShape
+import com.neonsong.app.ui.theme.LiquidGlassIconButton
+import com.neonsong.app.ui.theme.liquidGlassSurface
+import com.neonsong.app.ui.theme.liquidTouchEffect
+import com.neonsong.app.ui.theme.rememberLiquidTouchInteraction
+import com.neonsong.app.ui.common.liquidHeaderEntrance
 import com.neonsong.app.util.ArtistHelper
 import com.neonsong.app.util.LocalHapticManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -183,7 +188,7 @@ fun HomeScreen(
     }
 
     var menuTrack by remember { mutableStateOf<HomeTrack?>(null) }
-    var showProfileSheet by remember { mutableStateOf(false) }
+    var showProfileSheet by rememberSaveable { mutableStateOf(false) }
     var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
     val context = LocalContext.current
     val hapticManager = LocalHapticManager.current
@@ -315,6 +320,10 @@ fun HomeScreen(
                             avatarUrl = uiState.stats?.avatarUrl,
                             customPhotoUri = if (uiState.isViewingFriend) null else uiState.customPhotoUri,
                             viewModel = viewModel,
+                            onSearchClick = {
+                                hapticManager.click()
+                                onOpenSearch()
+                            },
                             onAvatarClick = {
                                 hapticManager.click()
                                 if (uiState.isViewingFriend) {
@@ -366,7 +375,6 @@ fun HomeScreen(
                     item(key = "quick_actions", contentType = "actions") {
                         QuickActionsRow(
                             onOpenDiscover = onOpenDiscover,
-                            onOpenSearch = onOpenSearch,
                             onOpenFriends = onOpenFriends,
                             onOpenDownloads = onOpenDownloads,
                             isViewingFriend = uiState.isViewingFriend,
@@ -436,11 +444,25 @@ fun HomeScreen(
                             is HomeRow.Track -> {
                                 val onTrackClick = remember(row.track.key) {
                                     {
-                                        val targetIdx = latestPlaybackIndexByRow.getOrElse(currentRowIndex) { -1 }
+                                        val targetIdx = latestPlaybackQueue.indexOfFirst {
+                                            (row.track.videoId != null && it.videoId == row.track.videoId) ||
+                                            (it.title == row.track.name && it.artist == row.track.artist)
+                                        }.takeIf { it >= 0 } ?: latestPlaybackIndexByRow.getOrElse(currentRowIndex) { -1 }
+
                                         if (targetIdx >= 0 && latestPlaybackQueue.isNotEmpty()) {
                                             musicPlayer.playQueue(
                                                 tracks = latestPlaybackQueue,
                                                 startIndex = targetIdx,
+                                                sourceLabel = "Home",
+                                            )
+                                        } else {
+                                            musicPlayer.play(
+                                                PlayableTrack(
+                                                    title = row.track.name,
+                                                    artist = row.track.artist,
+                                                    artworkUrl = row.track.artworkUrl,
+                                                    videoId = row.track.videoId,
+                                                ),
                                                 sourceLabel = "Home",
                                             )
                                         }
@@ -748,6 +770,7 @@ private fun RedesignedTopBar(
     avatarUrl: String?,
     customPhotoUri: String?,
     viewModel: HomeViewModel,
+    onSearchClick: () -> Unit,
     onAvatarClick: () -> Unit,
     onSwitchProfileClick: () -> Unit,
 ) {
@@ -768,15 +791,21 @@ private fun RedesignedTopBar(
     val avatarInteraction = remember { MutableInteractionSource() }
     val isAvatarPressed by avatarInteraction.collectIsPressedAsState()
     val avatarScale by animateFloatAsState(
-        targetValue = if (isAvatarPressed) 0.90f else 1f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = 1600f),
+        targetValue = if (isAvatarPressed) 0.94f else 1f,
+        animationSpec = spring(dampingRatio = 0.62f, stiffness = 700f),
         label = "avatarScale",
     )
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .liquidGlassSurface(
+                shape = RoundedCornerShape(24.dp),
+                borderWidth = 1.dp,
+                accentTint = MaterialTheme.colorScheme.primary,
+            )
+            .liquidHeaderEntrance()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -861,6 +890,21 @@ private fun RedesignedTopBar(
             }
         }
 
+        Spacer(Modifier.width(8.dp))
+        LiquidGlassIconButton(
+            onClick = onSearchClick,
+            modifier = Modifier.size(40.dp),
+            accentTint = MaterialTheme.colorScheme.primary,
+            contentDescription = "Search",
+        ) {
+            Icon(
+                Icons.Filled.Search,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+
         if (isViewingFriend) {
             Spacer(Modifier.width(8.dp))
             Surface(
@@ -904,20 +948,11 @@ private fun LiveListenTimer(viewModel: HomeViewModel) {
     val totalSeconds = (uiState.stats?.timerBaseSeconds ?: 0L) + listenElapsedSeconds.toLong()
     val isPlaying = uiState.nowPlaying != null
 
-    Surface(
-        shape = BadgePillShape,
-        color = if (isPlaying) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        },
-        border = BorderStroke(
-            width = 1.dp,
-            color = if (isPlaying) {
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-            } else {
-                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-            },
+    Box(
+        modifier = Modifier.liquidGlassSurface(
+            shape = BadgePillShape,
+            borderWidth = 1.dp,
+            accentTint = if (isPlaying) MaterialTheme.colorScheme.primary else Color.Unspecified,
         ),
     ) {
         Row(
@@ -1070,7 +1105,6 @@ private fun LocalStatsBanner(
 @Composable
 private fun QuickActionsRow(
     onOpenDiscover: () -> Unit,
-    onOpenSearch: () -> Unit,
     onOpenFriends: () -> Unit,
     onOpenDownloads: () -> Unit,
     isViewingFriend: Boolean = false,
@@ -1089,17 +1123,6 @@ private fun QuickActionsRow(
             onClick = {
                 hapticManager.click()
                 onOpenDiscover()
-            },
-            modifier = Modifier.weight(1f),
-        )
-        QuickActionChip(
-            icon = Icons.Filled.Search,
-            label = "Search",
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            onClick = {
-                hapticManager.click()
-                onOpenSearch()
             },
             modifier = Modifier.weight(1f),
         )
@@ -1140,8 +1163,8 @@ private fun QuickActionChip(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val chipScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.92f else 1f,
-        animationSpec = spring(dampingRatio = 0.6f, stiffness = 1600f),
+        targetValue = if (isPressed) 0.96f else 1f,
+        animationSpec = spring(dampingRatio = 0.62f, stiffness = 700f),
         label = "chipScale",
     )
     Surface(

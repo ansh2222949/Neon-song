@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,7 +21,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
@@ -54,6 +52,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -77,6 +76,14 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.neonsong.app.R
+import com.neonsong.app.ui.common.LiquidGlassCard
+import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.theme.liquidGlassSurface
+import androidx.compose.foundation.layout.WindowInsets
+import com.neonsong.app.ui.common.EdgeToEdgeDialogWindow
+import com.neonsong.app.ui.theme.LocalLiquidGlassBackdrop
+import com.neonsong.app.ui.theme.liquidGlassSource
+import com.neonsong.app.ui.theme.rememberLayerBackdrop
 import com.neonsong.app.data.autoeq.AutoEqMeasurement
 import com.neonsong.app.data.autoeq.AutoEqState
 import com.neonsong.app.data.autoeq.AutoEqTargets
@@ -127,6 +134,11 @@ fun AutoEqScreen(onBack: () -> Unit, viewModel: AutoEqViewModel = hiltViewModel(
     val deviceProfiles by viewModel.deviceProfiles.collectAsStateWithLifecycle()
     val deviceLabels by viewModel.deviceLabels.collectAsStateWithLifecycle()
     val autoPerDevice by viewModel.autoPerDevice.collectAsStateWithLifecycle()
+    val autoEqBackground = MaterialTheme.colorScheme.background
+    val autoEqBackdrop = rememberLayerBackdrop {
+        drawRect(autoEqBackground)
+        drawContent()
+    }
     var searchOpen by remember { mutableStateOf(false) }
     var expandedFilter by remember { mutableStateOf(-1) }
 
@@ -134,32 +146,25 @@ fun AutoEqScreen(onBack: () -> Unit, viewModel: AutoEqViewModel = hiltViewModel(
         viewModel.messages.collect { res -> Toast.makeText(context, context.getString(res), Toast.LENGTH_SHORT).show() }
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_close))
-                }
-                Text(
-                    stringResource(R.string.autoeq_title),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
-                )
-                Switch(checked = enabled, onCheckedChange = viewModel::setEnabled)
-            }
+    CompositionLocalProvider(LocalLiquidGlassBackdrop provides autoEqBackdrop) {
+        Column(Modifier.fillMaxSize()) {
+            ExpressiveHeader(
+                title = stringResource(R.string.autoeq_title),
+                onBack = onBack,
+                actions = {
+                    Switch(checked = enabled, onCheckedChange = viewModel::setEnabled)
+                },
+            )
             if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
-        }
 
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .weight(1f)
+                    .navigationBarsPadding()
+                    .liquidGlassSource(autoEqBackdrop),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         item { ProfileCard(state, onSearch = { searchOpen = true }, viewModel = viewModel) }
 
         item {
@@ -270,6 +275,8 @@ fun AutoEqScreen(onBack: () -> Unit, viewModel: AutoEqViewModel = hiltViewModel(
             Spacer(Modifier.height(24.dp))
         }
     }
+        }
+    }
 
     if (searchOpen) {
         SearchSheet(viewModel = viewModel, onDismiss = { searchOpen = false })
@@ -284,12 +291,11 @@ private fun profileLabel(state: AutoEqState): String {
 
 @Composable
 private fun SectionCard(content: @Composable () -> Unit) {
-    Card(
+    LiquidGlassCard(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
     ) {
-        Column(Modifier.padding(16.dp)) { content() }
+        content()
     }
 }
 
@@ -682,7 +688,25 @@ private fun SearchSheet(viewModel: AutoEqViewModel, onDismiss: () -> Unit) {
     val indexState by viewModel.indexState.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { viewModel.loadIndex() }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+        tonalElevation = 0.dp,
+        scrimColor = Color.Black.copy(alpha = 0.32f),
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+        dragHandle = {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .size(width = 36.dp, height = 4.dp),
+            ) {}
+        },
+    ) {
+        EdgeToEdgeDialogWindow()
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             Text(stringResource(R.string.autoeq_search_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))

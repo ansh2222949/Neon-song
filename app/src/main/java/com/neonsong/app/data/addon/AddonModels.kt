@@ -1,15 +1,107 @@
 package com.neonsong.app.data.addon
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
+
+object LenientStringSerializer : KSerializer<String> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("LenientString", PrimitiveKind.STRING)
+    override fun deserialize(decoder: Decoder): String {
+        return if (decoder is JsonDecoder) {
+            val element = decoder.decodeJsonElement()
+            if (element is JsonPrimitive) {
+                element.content
+            } else {
+                element.toString()
+            }
+        } else {
+            decoder.decodeString()
+        }
+    }
+    override fun serialize(encoder: Encoder, value: String) {
+        encoder.encodeString(value)
+    }
+}
+
+object LenientDoubleSerializer : KSerializer<Double> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("LenientDouble", PrimitiveKind.DOUBLE)
+    override fun deserialize(decoder: Decoder): Double {
+        return if (decoder is JsonDecoder) {
+            val element = decoder.decodeJsonElement()
+            if (element is JsonPrimitive) {
+                element.doubleOrNull
+                    ?: element.content.toDoubleOrNull()
+                    ?: element.intOrNull?.toDouble()
+                    ?: 0.0
+            } else 0.0
+        } else {
+            runCatching { decoder.decodeDouble() }.getOrDefault(0.0)
+        }
+    }
+    override fun serialize(encoder: Encoder, value: Double) {
+        encoder.encodeDouble(value)
+    }
+}
+
+object LenientBooleanSerializer : KSerializer<Boolean> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("LenientBoolean", PrimitiveKind.BOOLEAN)
+    override fun deserialize(decoder: Decoder): Boolean {
+        return if (decoder is JsonDecoder) {
+            val element = decoder.decodeJsonElement()
+            if (element is JsonPrimitive) {
+                element.booleanOrNull
+                    ?: when (element.content.lowercase().trim()) {
+                        "true", "1", "yes", "auto" -> true
+                        else -> false
+                    }
+            } else false
+        } else {
+            runCatching { decoder.decodeBoolean() }.getOrDefault(false)
+        }
+    }
+    override fun serialize(encoder: Encoder, value: Boolean) {
+        encoder.encodeBoolean(value)
+    }
+}
+
+object LenientStringListSerializer : KSerializer<List<String>> {
+    override val descriptor: SerialDescriptor = ListSerializer(String.serializer()).descriptor
+    override fun deserialize(decoder: Decoder): List<String> {
+        if (decoder is JsonDecoder) {
+            val element = decoder.decodeJsonElement()
+            return when (element) {
+                is JsonArray -> element.mapNotNull { item ->
+                    if (item is JsonPrimitive) item.content
+                    else if (item is JsonObject) item["name"]?.let { if (it is JsonPrimitive) it.content else null }
+                    else null
+                }
+                is JsonPrimitive -> element.content.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                else -> emptyList()
+            }
+        }
+        return emptyList()
+    }
+    override fun serialize(encoder: Encoder, value: List<String>) {
+        ListSerializer(String.serializer()).serialize(encoder, value)
+    }
+}
 
 /**
  * Wire models for the Addon HTTP protocol.
@@ -25,6 +117,7 @@ data class AddonManifest(
     @SerialName("id") val id: String = "",
     @SerialName("name") val name: String = "",
     @SerialName("version") val version: String = "",
+    @Serializable(with = LenientStringListSerializer::class)
     @SerialName("resources") val resources: List<String> = emptyList(),
     @SerialName("root") val root: String = "",
 ) {
@@ -89,15 +182,18 @@ private val ATMOS_HINT = Regex("""atmos|dolby|eac3[_-]?joc|ec-?3""", RegexOption
 
 @Serializable
 data class AddonTrack(
+    @Serializable(with = LenientStringSerializer::class)
     @SerialName("id") val id: String = "",
     @SerialName("title") val title: String = "",
     @SerialName("artist") val artist: String = "",
     @SerialName("album") val album: String = "",
+    @Serializable(with = LenientDoubleSerializer::class)
     @SerialName("duration") val duration: Double = 0.0,
     @SerialName("format") val format: String = "",
     @SerialName("audioQuality") val audioQuality: String = "",
     @SerialName("quality") val quality: String = "",
     @SerialName("audio_quality") val audioQualitySnake: String = "",
+    @Serializable(with = LenientBooleanSerializer::class)
     @SerialName("atmos") val atmos: Boolean = false,
     @SerialName("audioMode") val audioMode: String? = null,
     @SerialName("audioModes") val audioModes: List<String> = emptyList(),
@@ -227,8 +323,30 @@ data class AddonStream(
     @SerialName("stream_info") val rawStreamInfoSnake: JsonElement? = null,
     @SerialName("streamMetadata") val rawStreamMetadata: JsonElement? = null,
     @SerialName("stream_metadata") val rawStreamMetadataSnake: JsonElement? = null,
+    @SerialName("streamUrl") val streamUrlCamel: String? = null,
+    @SerialName("streamURL") val streamUrlUpper: String? = null,
+    @SerialName("playbackUrl") val playbackUrl: String? = null,
+    @SerialName("uri") val uri: String? = null,
     @SerialName("info") val rawInfo: JsonElement? = null,
 ) {
+    val effectiveStreamUrl: String?
+        get() = url.takeIf { it.isNotBlank() }
+            ?: streamUrlCamel?.takeIf { it.isNotBlank() }
+            ?: streamUrlUpper?.takeIf { it.isNotBlank() }
+            ?: playbackUrl?.takeIf { it.isNotBlank() }
+            ?: uri?.takeIf { it.isNotBlank() }
+
+    fun extractManifestPayload(): String? {
+        val m = manifest.trim()
+        if (m.startsWith("<") && (m.contains("MPD", ignoreCase = true) || m.contains("Period", ignoreCase = true))) {
+            val b64 = android.util.Base64.encodeToString(m.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            return "data:application/dash+xml;base64,$b64"
+        }
+        if (m.startsWith("data:application/dash+xml")) return m
+        if (m.startsWith("http://") || m.startsWith("https://")) return m
+        return null
+    }
+
     val bitDepth: Int?
         get() = extractBitDepthFromElement(rawMetadata)
             ?: extractBitDepthFromElement(rawMeta)

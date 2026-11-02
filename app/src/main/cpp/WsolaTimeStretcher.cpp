@@ -47,14 +47,14 @@ void WsolaTimeStretcher::reset() noexcept {
 }
 
 void WsolaTimeStretcher::setTimeRatio(float ratio) noexcept {
-    targetRatio_ = std::clamp(ratio, 0.85F, 1.15F);
+    targetRatio_ = std::clamp(ratio, 0.25F, 3.0F);
     if (!rampActive_) {
         currentRatio_ = targetRatio_;
     }
 }
 
 void WsolaTimeStretcher::startRecoveryRamp(float targetRatio, float durationSeconds) noexcept {
-    rampTarget_ = std::clamp(targetRatio, 0.85F, 1.15F);
+    rampTarget_ = std::clamp(targetRatio, 0.25F, 3.0F);
     durationSeconds = std::max(0.05F, durationSeconds);
     const double totalHops = (durationSeconds * sampleRate_) / static_cast<double>(kSynthesisHop);
     rampStepPerHop_ = static_cast<float>((rampTarget_ - currentRatio_) / std::max(1.0, totalHops));
@@ -163,14 +163,14 @@ std::size_t WsolaTimeStretcher::process(
 
     appendInput(inputStereo, inputFrames);
 
-    const std::size_t minInputNeeded = (kWindowSize + kSearchWindow * 2) * channels_;
+    const std::size_t minInputNeeded = kWindowSize + kSearchWindow * 2;
 
     // Generate synthesis hops
     std::size_t framesWritten = 0;
     while (inputFramesAvailable_ >= minInputNeeded) {
         updateRamp();
 
-        const double analysisHop = static_cast<double>(kSynthesisHop) / static_cast<double>(currentRatio_);
+        const double analysisHop = static_cast<double>(kSynthesisHop) * static_cast<double>(currentRatio_);
         const std::size_t nominalPos = static_cast<std::size_t>(std::max(0.0, nominalAnalysisPos_));
         const std::size_t bestPos = findBestOffset(nominalPos);
 
@@ -222,7 +222,7 @@ std::size_t WsolaTimeStretcher::process(
         nominalAnalysisPos_ = 0.0;
     }
 
-    drainOutput(outputStereo, framesWritten, outputCapacityFrames);
+    drainOutput(outputStereo, framesWritten, outputCapacityFrames, kWindowSize - kSynthesisHop);
 
     return framesWritten;
 }

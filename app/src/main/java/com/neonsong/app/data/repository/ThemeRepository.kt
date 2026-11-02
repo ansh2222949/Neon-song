@@ -49,7 +49,7 @@ data class ThemeUiState(
     /** Experimental liquid-glass materials (Settings → Experimental). When
      *  true, container roles in [colorScheme] are semi-translucent and the
      *  chrome surfaces get specular glass dressing. */
-    val liquidGlass: Boolean = false,
+    val liquidGlass: Boolean = true,
     val md3NavBar: Boolean = false,
     val hideNavTabs: Boolean = false,
     /** True when the "Dynamic Now Playing" artwork override is currently
@@ -216,8 +216,12 @@ class ThemeRepository @Inject constructor(
         val nowPlayingActive = misc.dynamicNowPlayingEnabled && nowPlaying != null
         val (darkScheme, lightScheme) = when {
             nowPlayingActive -> {
-                val dark = Md3SchemeBuilder.buildDarkScheme(nowPlaying!!, isAmoled, isGlass)
-                val light = Md3SchemeBuilder.buildLightScheme(nowPlaying, isGlass)
+                val dark = Md3SchemeBuilder.enrichDynamicColors(
+                    Md3SchemeBuilder.buildDarkScheme(nowPlaying!!, isAmoled, isGlass),
+                )
+                val light = Md3SchemeBuilder.enrichDynamicColors(
+                    Md3SchemeBuilder.buildLightScheme(nowPlaying, isGlass),
+                )
                 dark to light
             }
             prefs.accentMode == AccentMode.MONOCHROME -> {
@@ -232,8 +236,12 @@ class ThemeRepository @Inject constructor(
                 // and cold-start frames already show the wallpaper accent
                 // instead of the default red or monochrome.
                 val seed = dynamic ?: getSystemWallpaperColorHex() ?: prefs.accentColor
-                val dark = Md3SchemeBuilder.buildDarkScheme(seed, isAmoled, isGlass)
-                val light = Md3SchemeBuilder.buildLightScheme(seed, isGlass)
+                val dark = Md3SchemeBuilder.enrichDynamicColors(
+                    Md3SchemeBuilder.buildDarkScheme(seed, isAmoled, isGlass),
+                )
+                val light = Md3SchemeBuilder.enrichDynamicColors(
+                    Md3SchemeBuilder.buildLightScheme(seed, isGlass),
+                )
                 dark to light
             }
             else -> {
@@ -268,7 +276,7 @@ class ThemeRepository @Inject constructor(
             mode = AccentMode.MANUAL,
             accentColorHex = "#00E5FF",
             useCustomFont = true,
-            liquidGlass = false,
+            liquidGlass = true,
             md3NavBar = false,
             hideNavTabs = false,
         ),

@@ -67,6 +67,8 @@ class AutoDJController @Inject constructor(
     private var scope: CoroutineScope? = null
     private var streamResolver: StreamResolveCoordinator? = null
 
+    private var settingsCollectorJob: Job? = null
+
     private val trackStages = ConcurrentHashMap<String, TrackLifecycleStage>()
     private val retryCounts = ConcurrentHashMap<String, Int>()
     private val inFlightJobs = ConcurrentHashMap<String, Job>()
@@ -96,7 +98,8 @@ class AutoDJController @Inject constructor(
         this.host = host
         this.scope = scope
         this.streamResolver = streamResolver
-        scope.launch {
+        settingsCollectorJob?.cancel()
+        settingsCollectorJob = scope.launch(Dispatchers.Main.immediate) {
             settingsPreferences.settings.collect { settings ->
                 isEnabled = settings.autoDJEnabled
                 if (!isEnabled) {
@@ -111,8 +114,11 @@ class AutoDJController @Inject constructor(
 
     fun detachHost() {
         cancelAllPrefetches("host-detached")
+        settingsCollectorJob?.cancel()
+        settingsCollectorJob = null
         this.host = null
         this.scope = null
+        this.streamResolver = null
     }
 
     fun getTrackStage(trackId: String): TrackLifecycleStage {

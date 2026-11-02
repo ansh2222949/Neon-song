@@ -154,6 +154,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -189,6 +190,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.Dispatchers
@@ -279,6 +281,7 @@ import com.neonsong.app.ui.common.TrackMenuTarget
 import com.neonsong.app.ui.theme.LocalLiquidGlass
 import com.neonsong.app.ui.theme.LocalIsDarkTheme
 import com.neonsong.app.ui.theme.LiquidGlassSurface
+import com.neonsong.app.ui.theme.LiquidGlassIconButton
 import com.neonsong.app.ui.theme.liquidGlass
 import com.neonsong.app.ui.theme.liquidGlassChrome
 import com.neonsong.app.ui.theme.liquidGlassContainerColor
@@ -776,6 +779,7 @@ fun PlayerHost(
 ) {
     val state by viewModel.chromeState.collectAsStateWithLifecycle()
     val activeDownloads by viewModel.activeDownloads.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
     var expanded by rememberSaveable { mutableStateOf(false) }
     var currentTab by rememberSaveable { mutableStateOf(FullPlayerTab.NOW_PLAYING) }
     var playlistTrack by remember { mutableStateOf<PlayableTrack?>(null) }
@@ -818,7 +822,7 @@ fun PlayerHost(
             }
         }
     }
-    val miniPlayerVisible = state.current != null && !expanded
+    val miniPlayerVisible = state.current != null && !expanded && !settings.buttonNowPlayingEnabled
 
     // Sibling pattern: ONE backdrop capturing feed content,
     // consumed by the sibling MiniPlayer. Unconditional remember keeps composition stable.
@@ -838,7 +842,7 @@ fun PlayerHost(
     CompositionLocalProvider(
         LocalMusicPlayer provides viewModel.player,
         LocalAddToPlaylist provides requestAddToPlaylist,
-        LocalMiniPlayerScrollClearance provides if (state.current != null) 88.dp else 0.dp,
+        LocalMiniPlayerScrollClearance provides if (state.current != null && !settings.buttonNowPlayingEnabled) 88.dp else 0.dp,
         LocalBottomNavSlot provides bottomNavSlot,
     ) {
         Box(Modifier.fillMaxSize()) {
@@ -870,6 +874,15 @@ fun PlayerHost(
                         onCloseTimer = { viewModel.player.setSleepTimerMinutes(0) },
                     )
                 }
+            }
+            val currentTrack = state.current
+            if (currentTrack != null && !expanded && settings.buttonNowPlayingEnabled) {
+                DraggableNowPlayingButton(
+                    track = currentTrack,
+                    progressState = viewModel.progressState,
+                    isPlaying = state.isPlaying,
+                    onExpand = { expanded = true },
+                )
             }
             if (activeDownloads.isNotEmpty() && !expanded) {
                 val latestProgress = activeDownloads.firstOrNull()?.progressPercent ?: 0
@@ -1486,12 +1499,12 @@ private fun MiniPlayer(
 
 @Composable
 private fun MiniPlayerProgress(progressState: StateFlow<PlaybackProgressState>) {
-    val state by progressState.collectAsStateWithLifecycle()
-    val progress = if (state.durationMs > 0) {
-        (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
-    } else 0f
+    val progressFlowState = progressState.collectAsStateWithLifecycle()
     val primary = MaterialTheme.colorScheme.primary
     val tertiary = MaterialTheme.colorScheme.tertiary
+    val brush = remember(primary, tertiary) {
+        Brush.horizontalGradient(listOf(primary, tertiary))
+    }
 
     Box(
         Modifier
@@ -1506,14 +1519,13 @@ private fun MiniPlayerProgress(progressState: StateFlow<PlaybackProgressState>) 
             Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    scaleX = progress
+                    val s = progressFlowState.value
+                    scaleX = if (s.durationMs > 0) {
+                        (s.positionMs.toFloat() / s.durationMs).coerceIn(0f, 1f)
+                    } else 0f
                     transformOrigin = TransformOrigin(0f, 0.5f)
                 }
-                .background(
-                    Brush.horizontalGradient(
-                        listOf(primary, tertiary)
-                    )
-                ),
+                .background(brush),
         )
     }
 }
@@ -1843,7 +1855,7 @@ private fun AddToPlaylistDialog(
             ) {}
         },
     ) {
-        var showCreateDialog by remember { mutableStateOf(false) }
+        var showCreateDialog by rememberSaveable { mutableStateOf(false) }
         
         if (showCreateDialog) {
             AlertDialog(
@@ -2238,7 +2250,7 @@ private fun FullPlayer(
     val hasVideo = !effectiveVideoId.isNullOrBlank()
     val trackIdentity = remember(track.videoId, track.title, track.artist) { "${track.videoId}_${track.title}_${track.artist}" }
     var isVideoMode by rememberSaveable(trackIdentity) { mutableStateOf(false) }
-    var isVideoFullscreen by remember(trackIdentity) { mutableStateOf(false) }
+    var isVideoFullscreen by rememberSaveable(trackIdentity) { mutableStateOf(false) }
     var resumeAudioAfterVideo by rememberSaveable(trackIdentity) { mutableStateOf(false) }
     var videoPositionMs by rememberSaveable(trackIdentity) { mutableLongStateOf(0L) }
     var videoDurationMs by rememberSaveable(trackIdentity) { mutableLongStateOf(0L) }
@@ -2341,9 +2353,9 @@ private fun FullPlayer(
         )
     }
 
-    var showLyricsOffsetDialog by remember { mutableStateOf(false) }
-    var showSignalPath by remember { mutableStateOf(false) }
-    var showAudioControls by remember { mutableStateOf(false) }
+    var showLyricsOffsetDialog by rememberSaveable { mutableStateOf(false) }
+    var showSignalPath by rememberSaveable { mutableStateOf(false) }
+    var showAudioControls by rememberSaveable { mutableStateOf(false) }
     val signalPath by player.signalPath.collectAsStateWithLifecycle()
     val configuration = LocalConfiguration.current
     val isLandscapeScreen = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -2368,7 +2380,7 @@ private fun FullPlayer(
     }
     var canvasAspect by remember(activeCanvas?.url) { mutableFloatStateOf(0f) }
     var canvasRendered by remember(activeCanvas?.url) { mutableStateOf(false) }
-    var lyricsFullscreen by remember(currentTab) { mutableStateOf(false) }
+    var lyricsFullscreen by rememberSaveable(currentTab) { mutableStateOf(false) }
     var lastFullscreenTime by remember { mutableLongStateOf(0L) }
     LaunchedEffect(isVideoFullscreen) {
         if (isVideoFullscreen) {
@@ -2426,7 +2438,7 @@ private fun FullPlayer(
             }
         }
     }
-    var showTrackMenu by remember(track.videoId, track.title) { mutableStateOf(false) }
+    var showTrackMenu by rememberSaveable(track.videoId, track.title) { mutableStateOf(false) }
     var artworkDragX by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     var dismissDragY by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     var isDismissDragging by remember { mutableStateOf(false) }
@@ -2565,7 +2577,7 @@ private fun FullPlayer(
             val isLandscape = constraints.maxWidth > constraints.maxHeight
             var heroBottomPx by remember { mutableFloatStateOf(0f) }
 
-            Box(Modifier.matchParentSize().liquidGlassSource(if (fullGlass) playerBackdrop else null)) {
+            Box(Modifier.matchParentSize()) {
                 FluidArtworkBackground(
                     track = track,
                     modifier = Modifier.fillMaxSize(),
@@ -2614,25 +2626,9 @@ private fun FullPlayer(
                             transformations = staticBlurTransform,
                         )
                         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.38f)))
-                        val bgMeshTransition = rememberInfiniteTransition(label = "bgAtmosphereMesh")
-                        val bgPulse by bgMeshTransition.animateFloat(
-                            initialValue = 0.90f,
-                            targetValue = 1.08f,
-                            animationSpec = infiniteRepeatable(tween(7500, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-                            label = "bgPulse",
-                        )
-                        val bgShiftX by bgMeshTransition.animateFloat(
-                            initialValue = -0.05f,
-                            targetValue = 0.05f,
-                            animationSpec = infiniteRepeatable(tween(11000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-                            label = "bgShiftX",
-                        )
-                        val bgShiftY by bgMeshTransition.animateFloat(
-                            initialValue = -0.04f,
-                            targetValue = 0.04f,
-                            animationSpec = infiniteRepeatable(tween(9000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-                            label = "bgShiftY",
-                        )
+                        val bgPulse = 1f
+                        val bgShiftX = 0f
+                        val bgShiftY = 0f
                         Box(
                             Modifier
                                 .fillMaxSize()
@@ -2789,7 +2785,7 @@ private fun FullPlayer(
                     // FullPlayer sits on a dark blurred-artwork scrim in both light and
                     // dark mode, so foreground must use the white overlay palette —
                     // never MaterialTheme onSurface (near-black in light mode).
-                    IconButton(
+                    LiquidGlassIconButton(
                         onClick = {
                             if (isVideoMode) {
                                 closeVideoMode()
@@ -2801,16 +2797,13 @@ private fun FullPlayer(
                         },
                         modifier = Modifier
                             .align(Alignment.CenterStart)
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls)
-                            .background(
-                                liquidGlassContainerColor(Color.White.copy(alpha = 0.14f)),
-                            ),
+                            .size(44.dp),
+                        shape = CircleShape,
+                        contentDescription = if (currentTab != FullPlayerTab.NOW_PLAYING) "Back to player" else "Minimize player",
                     ) {
                         Icon(
                             if (currentTab != FullPlayerTab.NOW_PLAYING) Icons.AutoMirrored.Filled.ArrowBack else Icons.Filled.ExpandMore,
-                            if (currentTab != FullPlayerTab.NOW_PLAYING) "Back to player" else "Minimize player",
+                            contentDescription = null,
                             modifier = Modifier.size(26.dp),
                             tint = Color.White.copy(alpha = 0.94f),
                         )
@@ -2848,48 +2841,36 @@ private fun FullPlayer(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         if (currentTab == FullPlayerTab.LYRICS && onSetLyricsOffsetMs != null) {
-                            IconButton(
+                            LiquidGlassIconButton(
                                 onClick = { showLyricsOffsetDialog = true },
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls)
-                                    .background(
-                                        if (lyricsOffsetMs != 0L) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
-                                        else liquidGlassContainerColor(Color.White.copy(alpha = 0.14f)),
-                                    ),
+                                modifier = Modifier.size(44.dp),
+                                shape = CircleShape,
+                                accentTint = if (lyricsOffsetMs != 0L) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                                contentDescription = "Lyrics sync offset",
                             ) {
                                 Icon(
                                     Icons.Filled.Timer,
-                                    contentDescription = "Lyrics sync offset",
+                                    contentDescription = null,
                                     modifier = Modifier.size(22.dp),
                                     tint = if (lyricsOffsetMs != 0L) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.94f),
                                 )
                             }
                         }
                         val isCustomAudio = state.speed != 1f || state.pitch != 1f || state.autoMixState != AutoMixState.IDLE || state.isAutoMixEnabled
-                        IconButton(
+                        LiquidGlassIconButton(
                             onClick = {
                                 hapticManager.click()
                                 showAudioControls = true
                             },
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls)
-                                .then(
-                                    if (isCustomAudio) Modifier.border(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.55f), CircleShape)
-                                    else Modifier
-                                )
-                                .background(
-                                    if (isCustomAudio) Color(0xFF8B5CF6).copy(alpha = 0.26f)
-                                    else liquidGlassContainerColor(Color.White.copy(alpha = 0.14f)),
-                                ),
+                            modifier = Modifier.size(44.dp),
+                            shape = CircleShape,
+                            accentTint = if (isCustomAudio) Color(0xFF8B5CF6) else Color.Unspecified,
+                            contentDescription = "Auto DJ & Audio Studio",
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Filled.AutoAwesome,
-                                    contentDescription = "Auto DJ & Audio Studio",
+                                    contentDescription = null,
                                     modifier = Modifier.size(20.dp),
                                     tint = if (isCustomAudio) Color(0xFFDDD6FE) else Color.White.copy(alpha = 0.94f),
                                 )
@@ -2904,19 +2885,15 @@ private fun FullPlayer(
                                 }
                             }
                         }
-                        IconButton(
+                        LiquidGlassIconButton(
                             onClick = { showTrackMenu = true },
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls)
-                                .background(
-                                    liquidGlassContainerColor(Color.White.copy(alpha = 0.14f)),
-                                ),
+                            modifier = Modifier.size(44.dp),
+                            shape = CircleShape,
+                            contentDescription = "Song options",
                         ) {
                             Icon(
                                 Icons.Filled.MoreVert,
-                                "Song options",
+                                contentDescription = null,
                                 modifier = Modifier.size(22.dp),
                                 tint = Color.White.copy(alpha = 0.94f),
                             )
@@ -3030,14 +3007,22 @@ private fun FullPlayer(
                                 // ── Standard layout (lifted and balanced) ──────
                                 var isScrubbing by remember { mutableStateOf(false) }
                                 val rawSpatialTilt by rememberSpatialTilt(enabled = currentTab == FullPlayerTab.NOW_PLAYING)
-                                val spatialTiltX by animateFloatAsState(
+                                val spatialTiltX = animateFloatAsState(
                                     targetValue = rawSpatialTilt.x * 5.5f,
-                                    animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioMediumBouncy),
+                                    animationSpec = spring(
+                                        stiffness = Spring.StiffnessMediumLow,
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        visibilityThreshold = 0.08f,
+                                    ),
                                     label = "spatialTiltX",
                                 )
-                                val spatialTiltY by animateFloatAsState(
+                                val spatialTiltY = animateFloatAsState(
                                     targetValue = rawSpatialTilt.y * 4.5f,
-                                    animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioMediumBouncy),
+                                    animationSpec = spring(
+                                        stiffness = Spring.StiffnessMediumLow,
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        visibilityThreshold = 0.08f,
+                                    ),
                                     label = "spatialTiltY",
                                 )
                                 val artworkContent = @Composable { artworkMod: Modifier ->
@@ -3294,40 +3279,41 @@ private fun FullPlayer(
                                                 .coerceAtMost(if (isLandscape) 275.dp else 370.dp)
 
                                         if (sleeveAlpha > 0.001f) {
+                                            val ambientHaloBrush = remember(ambientColor, ambientCompanion, ambientDeep) {
+                                                Brush.radialGradient(
+                                                    0.0f to ambientColor.copy(alpha = 0.62f),
+                                                    0.48f to ambientCompanion.copy(alpha = 0.28f),
+                                                    0.82f to ambientDeep.copy(alpha = 0.14f),
+                                                    1.0f to Color.Transparent,
+                                                )
+                                            }
+                                            val shadowOcclusionBrush = remember {
+                                                Brush.radialGradient(
+                                                    listOf(
+                                                        Color.Black.copy(alpha = 0.80f),
+                                                        Color.Black.copy(alpha = 0.40f),
+                                                        Color.Transparent,
+                                                    )
+                                                )
+                                            }
                                             val glowAlpha by animateFloatAsState(
                                                 targetValue = if (state.isPlaying) 0.70f else 0.35f,
                                                 animationSpec = tween(600),
                                                 label = "artworkGlowAlpha",
                                             )
-                                            val infiniteTransition = rememberInfiniteTransition(label = "artworkBreathing")
-                                            val breathingScale by infiniteTransition.animateFloat(
-                                                initialValue = 0.98f,
-                                                targetValue = 1.05f,
-                                                animationSpec = infiniteRepeatable(
-                                                    animation = tween(2800, easing = FastOutSlowInEasing),
-                                                    repeatMode = RepeatMode.Reverse,
-                                                ),
-                                                label = "breathingScale",
-                                            )
                                             Box(
                                                 modifier = Modifier
                                                     .size(artworkSize + 56.dp)
                                                     .graphicsLayer {
-                                                        val pulse = if (state.isPlaying) breathingScale else 1.0f
-                                                        scaleX = pulse
-                                                        scaleY = pulse
+                                                        scaleX = 1f
+                                                        scaleY = 1f
                                                         // Inverse parallax: halo moves in the opposite direction from the floating card
-                                                        translationX = shownArtworkX * 0.7f - (spatialTiltX * 0.9f)
-                                                        translationY = -(spatialTiltY * 0.7f)
+                                                        translationX = shownArtworkX * 0.7f - (spatialTiltX.value * 0.9f)
+                                                        translationY = -(spatialTiltY.value * 0.7f)
                                                         alpha = glowAlpha * sleeveAlpha
                                                     }
                                                     .background(
-                                                        Brush.radialGradient(
-                                                            0.0f to ambientColor.copy(alpha = 0.62f),
-                                                            0.48f to ambientCompanion.copy(alpha = 0.28f),
-                                                            0.82f to ambientDeep.copy(alpha = 0.14f),
-                                                            1.0f to Color.Transparent,
-                                                        ),
+                                                        ambientHaloBrush,
                                                         shape = CircleShape,
                                                     ),
                                             )
@@ -3348,36 +3334,16 @@ private fun FullPlayer(
                                                 modifier = Modifier
                                                     .size(artworkSize - 10.dp)
                                                     .graphicsLayer {
-                                                        val pulse = if (state.isPlaying) breathingScale else 1.0f
-                                                        scaleX = artworkPlayingScale * pulse
-                                                        scaleY = artworkPlayingScale * pulse
-                                                        translationX = shownArtworkX + (spatialTiltX * 0.4f)
-                                                        translationY = 16f + (spatialTiltY * 0.5f)
+                                                        scaleX = artworkPlayingScale
+                                                        scaleY = artworkPlayingScale
+                                                        translationX = shownArtworkX + (spatialTiltX.value * 0.4f)
+                                                        translationY = 16f + (spatialTiltY.value * 0.5f)
                                                         alpha = (if (state.isPlaying) 0.65f else 0.40f) * sleeveAlpha
                                                     }
                                                     .background(
-                                                        Brush.radialGradient(
-                                                            listOf(
-                                                                Color.Black.copy(alpha = 0.80f),
-                                                                Color.Black.copy(alpha = 0.40f),
-                                                                Color.Transparent,
-                                                            )
-                                                        ),
+                                                        shadowOcclusionBrush,
                                                         shape = RoundedCornerShape(36.dp),
                                                     )
-                                            )
-
-                                            // 3D Liquid Glass Beveled Prism Border reacting dynamically to device tilt
-                                            val prismBorder = Brush.linearGradient(
-                                                listOf(
-                                                    Color.White.copy(alpha = (0.65f + (spatialTiltX * 0.02f)).coerceIn(0.25f, 0.90f)),
-                                                    Color.White.copy(alpha = 0.20f),
-                                                    ambientCompanion.copy(alpha = (0.35f + (spatialTiltY * 0.02f)).coerceIn(0.15f, 0.65f)),
-                                                    Color.Black.copy(alpha = 0.25f),
-                                                    ambientColor.copy(alpha = (0.45f - (spatialTiltY * 0.02f)).coerceIn(0.15f, 0.70f)),
-                                                ),
-                                                start = Offset(spatialTiltX * 16f, spatialTiltY * 16f),
-                                                end = Offset(700f + spatialTiltX * 16f, 700f + spatialTiltY * 16f),
                                             )
 
                                             Surface(
@@ -3385,21 +3351,46 @@ private fun FullPlayer(
                                                 color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.92f * sleeveAlpha),
                                                 tonalElevation = 10.dp * sleeveAlpha,
                                                 shadowElevation = if (state.isPlaying) 42.dp * sleeveAlpha else 18.dp * sleeveAlpha,
-                                                border = BorderStroke(1.4.dp, prismBorder),
                                                 modifier = Modifier
                                                     .size(artworkSize)
                                                     .graphicsLayer {
                                                         scaleX = artworkPlayingScale
                                                         scaleY = artworkPlayingScale
                                                         // Parallax translation forward - minimalist & subtle
-                                                        translationX = shownArtworkX + (spatialTiltX * 0.75f)
-                                                        translationY = spatialTiltY * 0.55f
+                                                        translationX = shownArtworkX + (spatialTiltX.value * 0.75f)
+                                                        translationY = spatialTiltY.value * 0.55f
                                                         // 3D perspective rotation (pitch and roll) - minimalist clamp
-                                                        rotationZ = (shownArtworkX / 75f) + (spatialTiltX * 0.10f)
-                                                        rotationY = (spatialTiltX - (shownArtworkX / 45f)).coerceIn(-6f, 6f)
-                                                        rotationX = (-spatialTiltY).coerceIn(-5f, 5f)
+                                                        rotationZ = (shownArtworkX / 75f) + (spatialTiltX.value * 0.10f)
+                                                        rotationY = (spatialTiltX.value - (shownArtworkX / 45f)).coerceIn(-6f, 6f)
+                                                        rotationX = (-spatialTiltY.value).coerceIn(-5f, 5f)
                                                         cameraDistance = 18f * density
                                                         alpha = sleeveAlpha
+                                                    }
+                                                    .drawWithContent {
+                                                        drawContent()
+                                                        val tiltX = spatialTiltX.value
+                                                        val tiltY = spatialTiltY.value
+                                                        // 3D Liquid Glass Beveled Prism Border reacting dynamically to device tilt
+                                                        val prismBorder = Brush.linearGradient(
+                                                            listOf(
+                                                                Color.White.copy(alpha = (0.65f + (tiltX * 0.02f)).coerceIn(0.25f, 0.90f)),
+                                                                Color.White.copy(alpha = 0.20f),
+                                                                ambientCompanion.copy(alpha = (0.35f + (tiltY * 0.02f)).coerceIn(0.15f, 0.65f)),
+                                                                Color.Black.copy(alpha = 0.25f),
+                                                                ambientColor.copy(alpha = (0.45f - (tiltY * 0.02f)).coerceIn(0.15f, 0.70f)),
+                                                            ),
+                                                            start = Offset(tiltX * 16f, tiltY * 16f),
+                                                            end = Offset(700f + tiltX * 16f, 700f + tiltY * 16f),
+                                                        )
+                                                        val strokePx = 1.4.dp.toPx()
+                                                        val halfStroke = strokePx / 2f
+                                                        drawRoundRect(
+                                                            brush = prismBorder,
+                                                            topLeft = Offset(halfStroke, halfStroke),
+                                                            size = Size(size.width - strokePx, size.height - strokePx),
+                                                            cornerRadius = CornerRadius(32.dp.toPx()),
+                                                            style = Stroke(width = strokePx),
+                                                        )
                                                     },
                                             ) {
                                                 Box(Modifier.fillMaxSize()) {
@@ -3418,8 +3409,10 @@ private fun FullPlayer(
                                                         modifier = Modifier
                                                             .fillMaxSize()
                                                             .clip(RoundedCornerShape(32.dp))
-                                                            .background(
-                                                                Brush.linearGradient(
+                                                            .drawBehind {
+                                                                val tiltX = spatialTiltX.value
+                                                                val tiltY = spatialTiltY.value
+                                                                val sheenBrush = Brush.linearGradient(
                                                                     0.0f to Color.Transparent,
                                                                     0.32f to Color.White.copy(alpha = 0.04f),
                                                                     0.46f to Color.White.copy(alpha = 0.28f),
@@ -3427,10 +3420,11 @@ private fun FullPlayer(
                                                                     0.54f to Color.White.copy(alpha = 0.25f),
                                                                     0.66f to Color.White.copy(alpha = 0.05f),
                                                                     1.0f to Color.Transparent,
-                                                                    start = Offset(spatialTiltX * 36f, spatialTiltY * 30f),
-                                                                    end = Offset(620f + spatialTiltX * 36f, 620f + spatialTiltY * 30f),
+                                                                    start = Offset(tiltX * 36f, tiltY * 30f),
+                                                                    end = Offset(620f + tiltX * 36f, 620f + tiltY * 30f),
                                                                 )
-                                                            )
+                                                                drawRect(sheenBrush)
+                                                            }
                                                     )
 
                                                     // Razor-thin 3D Specular Top Rim Light
@@ -3440,17 +3434,20 @@ private fun FullPlayer(
                                                             .height(1.5.dp)
                                                             .align(Alignment.TopCenter)
                                                             .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
-                                                            .background(
-                                                                Brush.horizontalGradient(
+                                                            .drawBehind {
+                                                                val tiltX = spatialTiltX.value
+                                                                val tiltY = spatialTiltY.value
+                                                                val rimBrush = Brush.horizontalGradient(
                                                                     listOf(
                                                                         Color.Transparent,
-                                                                        Color.White.copy(alpha = (0.65f + spatialTiltX * 0.02f).coerceIn(0.3f, 0.85f)),
-                                                                        Color.White.copy(alpha = (0.85f + spatialTiltY * 0.02f).coerceIn(0.4f, 0.95f)),
+                                                                        Color.White.copy(alpha = (0.65f + tiltX * 0.02f).coerceIn(0.3f, 0.85f)),
+                                                                        Color.White.copy(alpha = (0.85f + tiltY * 0.02f).coerceIn(0.4f, 0.95f)),
                                                                         Color.White.copy(alpha = 0.40f),
                                                                         Color.Transparent,
                                                                     )
                                                                 )
-                                                            )
+                                                                drawRect(rimBrush)
+                                                            }
                                                     )
                                                 }
                                             }
@@ -3553,20 +3550,11 @@ private fun FullPlayer(
                                     Column(
                                         modifier = controlsMod
                                             .graphicsLayer {
-                                                translationX = spatialTiltX * 0.35f
-                                                translationY = spatialTiltY * 0.20f
+                                                translationX = spatialTiltX.value * 0.35f
+                                                translationY = spatialTiltY.value * 0.20f
                                             },
                                     ) {
                                     val trackInfoShape = RoundedCornerShape(24.dp)
-                                    val trackInfoBorderBrush = Brush.linearGradient(
-                                        listOf(
-                                            Color.White.copy(alpha = (0.35f + spatialTiltX * 0.01f).coerceIn(0.18f, 0.55f)),
-                                            Color.White.copy(alpha = 0.08f),
-                                            Color.White.copy(alpha = (0.22f + spatialTiltY * 0.01f).coerceIn(0.10f, 0.40f)),
-                                        ),
-                                        start = Offset(spatialTiltX * 12f, spatialTiltY * 8f),
-                                        end = Offset(600f + spatialTiltX * 12f, 200f + spatialTiltY * 8f),
-                                    )
                                     Row(
                                         Modifier
                                             .fillMaxWidth()
@@ -3580,11 +3568,29 @@ private fun FullPlayer(
                                                     )
                                                 )
                                             )
-                                            .border(
-                                                width = 1.dp,
-                                                brush = trackInfoBorderBrush,
-                                                shape = trackInfoShape,
-                                            )
+                                            .drawWithContent {
+                                                drawContent()
+                                                val tiltX = spatialTiltX.value
+                                                val tiltY = spatialTiltY.value
+                                                val trackInfoBorderBrush = Brush.linearGradient(
+                                                    listOf(
+                                                        Color.White.copy(alpha = (0.35f + tiltX * 0.01f).coerceIn(0.18f, 0.55f)),
+                                                        Color.White.copy(alpha = 0.08f),
+                                                        Color.White.copy(alpha = (0.22f + tiltY * 0.01f).coerceIn(0.10f, 0.40f)),
+                                                    ),
+                                                    start = Offset(tiltX * 12f, tiltY * 8f),
+                                                    end = Offset(600f + tiltX * 12f, 200f + tiltY * 8f),
+                                                )
+                                                val strokePx = 1.dp.toPx()
+                                                val halfStroke = strokePx / 2f
+                                                drawRoundRect(
+                                                    brush = trackInfoBorderBrush,
+                                                    topLeft = Offset(halfStroke, halfStroke),
+                                                    size = Size(size.width - strokePx, size.height - strokePx),
+                                                    cornerRadius = CornerRadius(24.dp.toPx()),
+                                                    style = Stroke(width = strokePx),
+                                                )
+                                            }
                                             .padding(
                                                 horizontal = if (isLandscape) 14.dp else 18.dp,
                                                 vertical = if (isLandscape) 6.dp else 12.dp,
@@ -4417,36 +4423,24 @@ private fun MainControls(
             modifier = Modifier.size(playButtonSize),
             contentAlignment = Alignment.Center,
         ) {
-            // Enhanced dual-layer breathing ambient glow halo behind center play dial
-            val playGlowTransition = rememberInfiniteTransition(label = "playDialGlow")
-            val playGlowPulse by playGlowTransition.animateFloat(
-                initialValue = 0.88f,
-                targetValue = 1.14f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(2200, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse,
-                ),
-                label = "playGlowPulse",
-            )
-            val playGlowAlpha by playGlowTransition.animateFloat(
-                initialValue = 0.45f,
-                targetValue = 0.85f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(1800, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse,
-                ),
-                label = "playGlowAlpha",
-            )
             if (effectivePlaying) {
-                // Wide outer ambient bloom
+                val playGlowPulse = 1.01f
+                val playGlowAlpha = 0.65f
+                // Wide outer ambient bloom (layer-scaled, constant layout bounds)
+                val outerGlowSize = if (compact) 92.dp else 110.dp
                 Box(
                     modifier = Modifier
-                        .size((if (compact) 92.dp else 110.dp) * playGlowPulse)
+                        .size(outerGlowSize)
+                        .graphicsLayer {
+                            scaleX = playGlowPulse
+                            scaleY = playGlowPulse
+                            alpha = playGlowAlpha
+                        }
                         .background(
                             Brush.radialGradient(
                                 listOf(
-                                    ambientColor.copy(alpha = 0.35f * playGlowAlpha),
-                                    ambientCompanion.copy(alpha = 0.15f * playGlowAlpha),
+                                    ambientColor.copy(alpha = 0.35f),
+                                    ambientCompanion.copy(alpha = 0.15f),
                                     Color.Transparent,
                                 )
                             ),
@@ -4457,10 +4451,13 @@ private fun MainControls(
                 Box(
                     modifier = Modifier
                         .size(if (compact) 74.dp else 88.dp)
+                        .graphicsLayer {
+                            alpha = playGlowAlpha
+                        }
                         .background(
                             Brush.radialGradient(
                                 listOf(
-                                    ambientColor.copy(alpha = 0.65f * playGlowAlpha),
+                                    ambientColor.copy(alpha = 0.65f),
                                     ambientCompanion.copy(alpha = 0.30f),
                                     Color.Transparent,
                                 )
@@ -4658,7 +4655,10 @@ private fun AudiophileHeroBadge(
             isSpatial -> "Dolby Atmos"
             isHiRes -> "Hi-Res Lossless • ${state.bitDepth ?: 24}-bit / ${formatSampleRateKHz(state.samplingRateKHz ?: 96.0)}kHz"
             isLossless -> "Lossless • ${state.bitDepth ?: 16}-bit / ${formatSampleRateKHz(state.samplingRateKHz ?: 44.1)}kHz"
-            else -> "${state.audioCodec ?: "Audio"} • ${state.bitrateKbps ?: 256} kbps"
+            else -> buildString {
+                append(state.audioCodec?.takeIf(String::isNotBlank) ?: "Audio")
+                state.bitrateKbps?.let { append(" • $it kbps") }
+            }
         }
     }
 
@@ -4947,9 +4947,17 @@ private fun PlayerFloatingDock(
                         },
                         interactionSource = audioInteraction,
                         shape = RoundedCornerShape(100),
-                        color = Color.White.copy(alpha = 0.08f),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
-                        contentColor = Color.White.copy(alpha = 0.90f),
+                        color = activeBadge.second.copy(alpha = 0.12f),
+                        border = BorderStroke(
+                            1.dp,
+                            Brush.horizontalGradient(
+                                listOf(
+                                    activeBadge.second.copy(alpha = 0.50f),
+                                    Color.White.copy(alpha = 0.16f),
+                                ),
+                            ),
+                        ),
+                        contentColor = activeBadge.second,
                         modifier = Modifier
                             .height(dockItemHeight)
                             .graphicsLayer { scaleX = audioScale; scaleY = audioScale },
@@ -5469,7 +5477,8 @@ private fun AudioControlsSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val haptics = LocalHapticFeedback.current
-    var isLocked by remember { mutableStateOf(true) }
+    val signalPath by player.signalPath.collectAsStateWithLifecycle()
+    var isLocked by rememberSaveable { mutableStateOf(true) }
     var currentSpeed by remember(state.speed) { mutableFloatStateOf(state.speed) }
     var currentPitch by remember(state.pitch) { mutableFloatStateOf(state.pitch) }
 
@@ -5534,8 +5543,13 @@ private fun AudioControlsSheet(
                         )
                     }
                 }
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Filled.Close, contentDescription = "Close")
+                LiquidGlassIconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(36.dp),
+                    shape = CircleShape,
+                    contentDescription = "Close",
+                ) {
+                    Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(18.dp))
                 }
             }
 
@@ -5599,38 +5613,95 @@ private fun AudioControlsSheet(
                             )
                         }
 
-                        // Lock Button Toggle
-                        FilterChip(
-                            selected = isLocked,
-                            onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                isLocked = !isLocked
-                                if (isLocked) {
-                                    // Snap pitch to speed
-                                    currentPitch = currentSpeed
-                                    player.setPlaybackParameters(currentSpeed, currentSpeed)
-                                }
-                            },
-                            label = {
-                                Text(
-                                    if (isLocked) "Linked" else "Free",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                            },
-                            leadingIcon = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            // Lock Button Toggle
+                            FilterChip(
+                                selected = isLocked,
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    isLocked = !isLocked
+                                    if (isLocked) {
+                                        // Snap pitch to speed
+                                        currentPitch = currentSpeed
+                                        player.setPlaybackParameters(currentSpeed, currentSpeed)
+                                    }
+                                },
+                                label = {
+                                    Text(
+                                        if (isLocked) "Linked" else "Free",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (isLocked) Icons.Filled.Lock else Icons.Filled.LockOpen,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                },
+                                border = null,
+                                shape = RoundedCornerShape(16.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ),
+                            )
+
+                            // Reset Button placed right next to Lock button
+                            androidx.compose.material3.FilledTonalButton(
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    currentSpeed = 1.0f
+                                    currentPitch = 1.0f
+                                    player.resetPlaybackParameters()
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    contentColor = MaterialTheme.colorScheme.onSurface,
+                                ),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(32.dp),
+                            ) {
+                                Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Reset", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    if (signalPath.bitPerfect) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF00E676).copy(alpha = 0.12f),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
                                 Icon(
-                                    imageVector = if (isLocked) Icons.Filled.Lock else Icons.Filled.LockOpen,
+                                    imageVector = Icons.Filled.HighQuality,
                                     contentDescription = null,
-                                    modifier = Modifier.size(14.dp),
+                                    tint = Color(0xFF00E676),
+                                    modifier = Modifier.size(16.dp),
                                 )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            ),
-                        )
+                                Text(
+                                    text = "Bit-Perfect Mode: DSP time-stretch and pitch shifting are bypassed for bit-exact DAC output.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF00E676),
+                                )
+                            }
+                        }
                     }
 
                     // Speed Slider
@@ -5725,11 +5796,15 @@ private fun AudioControlsSheet(
                         )
                     }
 
-                    // Quick Presets
+                    // Quick Presets - Material You Expressive Design without outline/stroke
                     Text(
                         text = "Studio Presets",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    val presetColors = SuggestionChipDefaults.suggestionChipColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        labelColor = MaterialTheme.colorScheme.onSurface,
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -5743,6 +5818,9 @@ private fun AudioControlsSheet(
                                 player.setPlaybackParameters(0.85f, 0.85f)
                             },
                             label = { Text("Slowed", style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                            border = null,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = presetColors,
                             modifier = Modifier.weight(1f),
                         )
                         SuggestionChip(
@@ -5753,6 +5831,9 @@ private fun AudioControlsSheet(
                                 player.setPlaybackParameters(0.75f, 0.75f)
                             },
                             label = { Text("Deep Slow", style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                            border = null,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = presetColors,
                             modifier = Modifier.weight(1f),
                         )
                         SuggestionChip(
@@ -5763,6 +5844,9 @@ private fun AudioControlsSheet(
                                 player.resetPlaybackParameters()
                             },
                             label = { Text("Normal", style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                            border = null,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = presetColors,
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -5778,6 +5862,9 @@ private fun AudioControlsSheet(
                                 player.setPlaybackParameters(1.15f, 1.15f)
                             },
                             label = { Text("Nightcore", style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                            border = null,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = presetColors,
                             modifier = Modifier.weight(1f),
                         )
                         SuggestionChip(
@@ -5788,17 +5875,25 @@ private fun AudioControlsSheet(
                                 player.setPlaybackParameters(1.25f, 1.25f)
                             },
                             label = { Text("Sped Up", style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                            border = null,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = presetColors,
                             modifier = Modifier.weight(1f),
                         )
                         SuggestionChip(
                             onClick = {
                                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                currentSpeed = 1.0f
-                                currentPitch = 1.0f
-                                player.resetPlaybackParameters()
+                                currentSpeed = 0.80f
+                                currentPitch = 0.70f
+                                player.setPlaybackParameters(0.80f, 0.70f)
                             },
-                            label = { Text("Reset", style = MaterialTheme.typography.labelSmall, maxLines = 1) },
-                            icon = { Icon(Icons.Filled.RestartAlt, null, modifier = Modifier.size(14.dp)) },
+                            label = { Text("Vaporwave", style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                            border = null,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = SuggestionChipDefaults.suggestionChipColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.65f),
+                                labelColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                            ),
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -6304,10 +6399,14 @@ private fun PlayableTrack.toGeneratedTrack() = com.neonsong.app.data.generate.Ge
 private fun rememberSpatialTilt(enabled: Boolean = true): androidx.compose.runtime.State<Offset> {
     val context = androidx.compose.ui.platform.LocalContext.current
     val view = LocalView.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow
+        .collectAsStateWithLifecycle()
+    val isResumed = lifecycleState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
     val tiltState = remember { mutableStateOf(Offset.Zero) }
 
-    DisposableEffect(enabled, view) {
-        if (!enabled) return@DisposableEffect onDispose {}
+    DisposableEffect(enabled, view, isResumed) {
+        if (!enabled || !isResumed) return@DisposableEffect onDispose {}
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         val sensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
             ?: sensorManager?.getDefaultSensor(Sensor.TYPE_GRAVITY)
@@ -6320,12 +6419,15 @@ private fun rememberSpatialTilt(enabled: Boolean = true): androidx.compose.runti
             private val rotationMatrix = FloatArray(9)
             private val remappedMatrix = FloatArray(9)
             private val orientation = FloatArray(3)
+            private var smoothedX = 0f
+            private var smoothedY = 0f
+            private var initialized = false
 
             override fun onSensorChanged(event: SensorEvent?) {
                 if (event == null) return
                 val displayRotation = view.display?.rotation ?: android.view.Surface.ROTATION_0
 
-                val newOffset = if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                val (targetX, targetY) = if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
                     SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
                     val (axisX, axisY) = when (displayRotation) {
                         android.view.Surface.ROTATION_90 -> SensorManager.AXIS_Y to SensorManager.AXIS_MINUS_X
@@ -6337,7 +6439,7 @@ private fun rememberSpatialTilt(enabled: Boolean = true): androidx.compose.runti
                     SensorManager.getOrientation(remappedMatrix, orientation)
                     val pitch = Math.toDegrees(orientation[1].toDouble()).toFloat()
                     val roll = Math.toDegrees(orientation[2].toDouble()).toFloat()
-                    Offset((roll / 32f).coerceIn(-1f, 1f), (pitch / 32f).coerceIn(-1f, 1f))
+                    (roll / 32f).coerceIn(-1f, 1f) to (pitch / 32f).coerceIn(-1f, 1f)
                 } else if (event.sensor.type == Sensor.TYPE_GRAVITY) {
                     val rawX = event.values[0]
                     val rawY = event.values[1]
@@ -6347,19 +6449,29 @@ private fun rememberSpatialTilt(enabled: Boolean = true): androidx.compose.runti
                         android.view.Surface.ROTATION_270 -> rawY to -rawX
                         else -> rawX to rawY
                     }
-                    Offset((-gx / 9.8f).coerceIn(-1f, 1f), (gy / 9.8f).coerceIn(-1f, 1f))
+                    (-gx / 9.8f).coerceIn(-1f, 1f) to (gy / 9.8f).coerceIn(-1f, 1f)
                 } else return
 
+                if (!initialized) {
+                    smoothedX = targetX
+                    smoothedY = targetY
+                    initialized = true
+                } else {
+                    // Exponential low-pass filter rejects involuntary muscle micro-jitter
+                    smoothedX = smoothedX * 0.70f + targetX * 0.30f
+                    smoothedY = smoothedY * 0.70f + targetY * 0.30f
+                }
+
                 val prev = tiltState.value
-                if (abs(newOffset.x - prev.x) > 0.015f || abs(newOffset.y - prev.y) > 0.015f) {
-                    tiltState.value = newOffset
+                if (abs(smoothedX - prev.x) > 0.065f || abs(smoothedY - prev.y) > 0.065f) {
+                    tiltState.value = Offset(smoothedX, smoothedY)
                 }
             }
 
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
 
-        sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+        sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
         onDispose {
             sensorManager.unregisterListener(listener)
         }
@@ -6367,4 +6479,3 @@ private fun rememberSpatialTilt(enabled: Boolean = true): androidx.compose.runti
 
     return tiltState
 }
-

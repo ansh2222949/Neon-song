@@ -39,6 +39,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neonsong.app.R
+import com.neonsong.app.ui.theme.LiquidGlassIconButton
+import com.neonsong.app.ui.theme.LiquidGlassButton
+
 
 /**
  * Native shelf header, matching FeedSectionHeader's liquid-glass pill style but
@@ -114,37 +117,35 @@ fun ShelfHeaderV2(
         }
 
         if (onShuffle != null) {
-            Surface(
+            LiquidGlassIconButton(
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onShuffle()
                 },
+                modifier = Modifier.size(34.dp),
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
+                contentDescription = stringResource(R.string.feed_shuffle_title_cd, title),
             ) {
-                Box(modifier = Modifier.padding(8.dp), contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Filled.Shuffle,
-                        contentDescription = stringResource(R.string.feed_shuffle_title_cd, title),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
+                Icon(
+                    Icons.Filled.Shuffle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
             }
         }
 
         if (onPlayAll != null) {
-            Surface(
+            LiquidGlassButton(
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onPlayAll()
                 },
                 shape = CircleShape,
-                color = if (outlinedPlayAll) Color.Transparent else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                border = if (outlinedPlayAll) BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)) else null,
+                accentTint = MaterialTheme.colorScheme.primary,
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
@@ -165,22 +166,20 @@ fun ShelfHeaderV2(
         }
 
         if (showMore && onMoreClick != null) {
-            Surface(
+            LiquidGlassIconButton(
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onMoreClick()
                 },
+                modifier = Modifier.size(34.dp),
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
             ) {
-                Box(modifier = Modifier.padding(8.dp), contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowForwardIos,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(14.dp),
-                    )
-                }
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowForwardIos,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp),
+                )
             }
         }
     }

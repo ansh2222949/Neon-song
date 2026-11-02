@@ -8,8 +8,17 @@
 
 -keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod
 
-# JNI exports use the Kotlin class and method names verbatim.
+# JNI exports: preserve all native methods and classes containing them verbatim
+-keepclasseswithmembernames,includedescriptorclasses class * {
+    native <methods>;
+}
+
 -keep class com.neonsong.app.playback.NativeAudioEngine { *; }
+-keep class com.neonsong.app.playback.NativeAutoMixEngine { *; }
+-keep class com.neonsong.app.playback.NativeAutoDJEngine { *; }
+-keep class com.neonsong.app.playback.eq.ParametricEqNative { *; }
+-keep class com.neonsong.app.data.lossless.NativeSecrets { *; }
+-keep class com.decent.usbaudio.** { *; }
 
 # kotlinx.serialization: keep generated serializers and Serializable models
 -keepclassmembers class com.neonsong.app.** {

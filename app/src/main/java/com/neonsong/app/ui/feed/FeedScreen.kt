@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.ui.res.stringResource
 import com.neonsong.app.R
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -37,10 +38,36 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.highlight.Highlight
+import com.neonsong.app.ui.common.NeonAppLogo
+import com.neonsong.app.ui.common.NeonBrand
 import com.neonsong.app.ui.common.isTabletOrWideScreen
+import com.neonsong.app.ui.theme.LayerBackdrop
+import com.neonsong.app.ui.theme.LocalIsDarkTheme
+import com.neonsong.app.ui.theme.LocalLiquidGlass
+import com.neonsong.app.ui.theme.LiquidGlassPreset
+import com.neonsong.app.ui.theme.drawInteractiveGlass
+import com.neonsong.app.ui.theme.isLiquidGlassBackdropSupported
+import com.neonsong.app.ui.theme.liquidGlassContainerColor
+import com.neonsong.app.ui.theme.liquidGlassSource
+import com.neonsong.app.ui.theme.rememberLayerBackdrop
+import com.neonsong.app.util.LocalHapticManager
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -153,6 +180,7 @@ import com.neonsong.app.playback.PlayableTrack
 import com.neonsong.app.ui.common.ArtworkImage
 import com.neonsong.app.ui.common.ExpressiveHeader
 import com.neonsong.app.ui.common.HeaderActionIcon
+import com.neonsong.app.ui.common.liquidHeaderEntrance
 import com.neonsong.app.ui.common.TrackContextMenuSheet
 import com.neonsong.app.ui.common.TrackMiniTrayData
 import com.neonsong.app.ui.common.TrackMiniTraySheet
@@ -258,57 +286,53 @@ fun FeedScreen(
         }
     }
 
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val feedBackdrop = rememberLayerBackdrop {
+        drawRect(backgroundColor)
+        drawContent()
+    }
+    val isGlass = isLiquidGlassBackdropSupported()
+    var headerHeightPx by remember { mutableFloatStateOf(0f) }
+    val density = LocalDensity.current
+    val headerTopPadding = remember(headerHeightPx, density) {
+        if (headerHeightPx > 0f) with(density) { headerHeightPx.toDp() } else 145.dp
+    }
+
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.TopCenter,
     ) {
-        Column(
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = viewModel::refresh,
             modifier = Modifier
                 .fillMaxSize()
-                .adaptiveContentWidth(maxWidth = 920.dp),
+                .liquidGlassSource(if (isGlass) feedBackdrop else null),
         ) {
-            ExpressiveHeader(
-                title = "Neon Song",
-                actions = {
-                    HeaderActionIcon(Icons.Filled.Download, "Downloads", onOpenDownloads)
-                    HeaderActionIcon(Icons.Filled.Search, "Search", onOpenSearch)
-                    IconButton(onClick = onOpenSettings) {
-                        com.neonsong.app.ui.home.ProfileAvatar(
-                            avatarUrl = state.avatarUrl,
-                            customPhotoUri = state.customPhotoUri,
-                            modifier = Modifier.size(38.dp),
-                        )
-                    }
-                },
-            )
-
-            if (state.homeChips.isNotEmpty()) {
-                PinnedChipsBar(
-                    chips = state.homeChips,
-                    selectedChip = state.selectedChip,
-                    onChipClick = viewModel::onHomeChipSelected,
-                )
-            }
-
-            PullToRefreshBox(
-                isRefreshing = state.isRefreshing,
-                onRefresh = viewModel::refresh,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-            ) {
-                if (state.isLoading) {
-                FeedLoadingSkeleton()
+            if (state.isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = headerTopPadding),
+                ) {
+                    FeedLoadingSkeleton()
+                }
             } else if (!hasFeedContent) {
-                FeedEmptyState(
-                    message = if (state.error != null) {
-                        "We couldn't load your recommendations. Try again, or find something in search."
-                    } else {
-                        "Search for a favorite or explore something new. Your music starts here."
-                    },
-                    onRetry = viewModel::loadFeed,
-                    onOpenSearch = onOpenSearch,
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = headerTopPadding),
+                ) {
+                    FeedEmptyState(
+                        message = if (state.error != null) {
+                            "We couldn't load your recommendations. Try again, or find something in search."
+                        } else {
+                            "Search for a favorite or explore something new. Your music starts here."
+                        },
+                        onRetry = viewModel::loadFeed,
+                        onOpenSearch = onOpenSearch,
+                    )
+                }
             } else {
                 val individualTopArtists = remember(state.feedData.topArtists) {
                     state.feedData.topArtists.flatMap { artist ->
@@ -353,7 +377,7 @@ fun FeedScreen(
                             .safeHorizontalContentPadding(),
                     contentPadding = PaddingValues(
                         bottom = FloatingNavDefaults.contentBottomPadding(),
-                        top = 12.dp,
+                        top = headerTopPadding + 8.dp,
                     ),
                     verticalArrangement = Arrangement.spacedBy(24.dp),
                 ) {
@@ -1080,7 +1104,27 @@ fun FeedScreen(
                 }
             }
         }
-    }
+
+        LiquidGlassHomeHeader(
+            backdrop = if (isGlass) feedBackdrop else null,
+            title = NeonBrand.AppName,
+            avatarUrl = state.avatarUrl,
+            customPhotoUri = state.customPhotoUri,
+            chips = state.homeChips,
+            selectedChip = state.selectedChip,
+            onChipClick = viewModel::onHomeChipSelected,
+            onOpenDownloads = onOpenDownloads,
+            onOpenSearch = onOpenSearch,
+            onOpenSettings = onOpenSettings,
+            modifier = Modifier
+                .fillMaxWidth()
+                .adaptiveContentWidth(maxWidth = 920.dp)
+                .align(Alignment.TopCenter)
+                .zIndex(2f)
+                .onGloballyPositioned { coords ->
+                    headerHeightPx = coords.size.height.toFloat()
+                },
+        )
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -1147,34 +1191,7 @@ private fun InfiniteRadioHero(
     var touchY by remember { mutableStateOf(0f) }
     var isTouched by remember { mutableStateOf(false) }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "heroGlow")
-    val glowPulse by infiniteTransition.animateFloat(
-        initialValue = 0.85f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2800, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "heroGlowPulse",
-    )
-    val ambientTiltY by infiniteTransition.animateFloat(
-        initialValue = -2.2f,
-        targetValue = 2.2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(3800, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "heroAmbientTiltY",
-    )
-    val ambientTiltX by infiniteTransition.animateFloat(
-        initialValue = 1.4f,
-        targetValue = -1.4f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(4600, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "heroAmbientTiltX",
-    )
+
 
     val animatedTiltX by animateFloatAsState(
         targetValue = if (isTouched) touchX else 0f,
@@ -1224,8 +1241,8 @@ private fun InfiniteRadioHero(
                 }
             }
             .graphicsLayer {
-                rotationY = (animatedTiltX * 13f) + (if (isTouched) 0f else ambientTiltY)
-                rotationX = (-animatedTiltY * 11f) + (if (isTouched) 0f else ambientTiltX)
+                rotationY = animatedTiltX * 13f
+                rotationX = -animatedTiltY * 11f
                 cameraDistance = 18f * density
                 scaleX = cardScale
                 scaleY = cardScale
@@ -1236,8 +1253,8 @@ private fun InfiniteRadioHero(
             modifier = Modifier
                 .matchParentSize()
                 .graphicsLayer {
-                    scaleX = glowPulse * (if (isTouched) 1.06f else 1.0f)
-                    scaleY = glowPulse * (if (isTouched) 1.06f else 1.0f)
+                    scaleX = if (isTouched) 1.06f else 1.0f
+                    scaleY = if (isTouched) 1.06f else 1.0f
                     alpha = if (isTouched) 0.70f else 0.50f
                 }
                 .background(
@@ -1657,16 +1674,6 @@ private fun QuickTileCard(
     var touchTileY by remember { mutableStateOf(0f) }
     var isTileTouched by remember { mutableStateOf(false) }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "tileAmbient")
-    val ambientTileTilt by infiniteTransition.animateFloat(
-        initialValue = -1.6f,
-        targetValue = 1.6f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(3400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "tileAmbientTilt",
-    )
 
     val animatedTileX by animateFloatAsState(
         targetValue = if (isTileTouched) touchTileX else 0f,
@@ -1759,8 +1766,8 @@ private fun QuickTileCard(
                 }
             }
             .graphicsLayer {
-                rotationY = (animatedTileX * 12f) + (if (isTileTouched) 0f else ambientTileTilt)
-                rotationX = (-animatedTileY * 10f)
+                rotationY = animatedTileX * 12f
+                rotationX = -animatedTileY * 10f
                 cameraDistance = 16f * density
                 scaleX = scale
                 scaleY = scale
@@ -2937,28 +2944,407 @@ private fun FeedEmptyState(
 }
 
 @Composable
-private fun PinnedChipsBar(
+private fun LiquidGlassHomeHeader(
+    backdrop: Backdrop?,
+    title: String,
+    avatarUrl: String?,
+    customPhotoUri: String?,
     chips: List<HomeChip>,
     selectedChip: HomeChip?,
     onChipClick: (HomeChip) -> Unit,
+    onOpenDownloads: () -> Unit,
+    onOpenSearch: () -> Unit,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Box(
-        modifier = Modifier
+    val liquidGlass = LocalLiquidGlass.current
+    val isGlassActive = liquidGlass && backdrop != null && isLiquidGlassBackdropSupported()
+    val isDark = LocalIsDarkTheme.current
+    val primaryColor = MaterialTheme.colorScheme.primary
+
+    val headerShape = RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)
+
+    Surface(
+        shape = headerShape,
+        color = if (isGlassActive) {
+            Color.Transparent
+        } else {
+            MaterialTheme.colorScheme.surface.copy(alpha = if (isDark) 0.85f else 0.92f)
+        },
+        tonalElevation = if (isGlassActive) 0.dp else 4.dp,
+        shadowElevation = if (isGlassActive) 0.dp else 8.dp,
+        border = BorderStroke(
+            width = 1.dp,
+            brush = Brush.verticalGradient(
+                0.0f to Color.White.copy(alpha = if (isDark) 0.32f else 0.50f),
+                0.45f to Color.White.copy(alpha = if (isDark) 0.08f else 0.15f),
+                1.0f to Color.White.copy(alpha = if (isDark) 0.20f else 0.35f),
+            ),
+        ),
+        modifier = modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    0f to MaterialTheme.colorScheme.background.copy(alpha = 0.96f),
-                    0.7f to MaterialTheme.colorScheme.background.copy(alpha = 0.82f),
-                    1f to MaterialTheme.colorScheme.background.copy(alpha = 0f),
-                )
+            .liquidHeaderEntrance()
+            .then(
+                if (isGlassActive && backdrop != null) {
+                    Modifier.drawInteractiveGlass(
+                        isDark = isDark,
+                        backdrop = backdrop,
+                        luminanceAnimation = 0.5f,
+                        shape = headerShape,
+                        interaction = null,
+                        highlight = Highlight(width = 1.dp),
+                        blurScale = 1.15f,
+                        minScrim = if (isDark) 0.22f else 0.15f,
+                        maxScrim = if (isDark) 0.55f else 0.40f,
+                    )
+                } else {
+                    Modifier
+                }
             ),
     ) {
-        HomeChipsRow(
-            chips = chips,
-            selectedChip = selectedChip,
-            onChipClick = onChipClick,
-            modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .drawBehind {
+                    // Delicate top-edge ambient incident light reflection
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            0.0f to Color.White.copy(alpha = if (isDark) 0.12f else 0.18f),
+                            0.35f to Color.White.copy(alpha = 0.02f),
+                            1.0f to Color.Transparent,
+                        ),
+                    )
+
+                    // Subtle cyan/primary ambient gradient glow near top
+                    val glowRadius = (size.width * 0.85f).coerceAtLeast(1f)
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                primaryColor.copy(alpha = if (isDark) 0.08f else 0.05f),
+                                primaryColor.copy(alpha = if (isDark) 0.02f else 0.01f),
+                                Color.Transparent,
+                            ),
+                            center = Offset(size.width * 0.75f, 0f),
+                            radius = glowRadius,
+                        ),
+                        radius = glowRadius,
+                    )
+
+                    // Static specular reflection keeps the glass finish without idle redraws.
+                    val shimmerWidth = size.width * 0.35f
+                    val shimmerCenter = size.width * 0.6f
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.White.copy(alpha = if (isDark) 0.07f else 0.12f),
+                                Color.Transparent,
+                            ),
+                            startX = shimmerCenter - shimmerWidth / 2f,
+                            endX = shimmerCenter + shimmerWidth / 2f,
+                        ),
+                        size = Size(size.width, 2.dp.toPx()),
+                    )
+                }
+                .windowInsetsPadding(
+                    WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+                )
+                .padding(bottom = if (chips.isNotEmpty()) 10.dp else 14.dp),
+        ) {
+            // Row 1: Logo + Title + Glass Action Buttons
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NeonAppLogo(size = 36.dp)
+
+                Spacer(Modifier.width(12.dp))
+
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.25).sp,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    LiquidGlassActionIcon(
+                        icon = Icons.Filled.Download,
+                        contentDescription = "Downloads",
+                        onClick = onOpenDownloads,
+                    )
+                    LiquidGlassActionIcon(
+                        icon = Icons.Filled.Search,
+                        contentDescription = "Search",
+                        onClick = onOpenSearch,
+                    )
+                    LiquidGlassProfileButton(
+                        avatarUrl = avatarUrl,
+                        customPhotoUri = customPhotoUri,
+                        onClick = onOpenSettings,
+                    )
+                }
+            }
+
+            // Row 2: Category Chips (if present)
+            if (chips.isNotEmpty()) {
+                LiquidGlassChipsRow(
+                    chips = chips,
+                    selectedChip = selectedChip,
+                    onChipClick = onChipClick,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiquidGlassActionIcon(
+    icon: ImageVector,
+    contentDescription: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val hapticManager = LocalHapticManager.current
+    val isDark = LocalIsDarkTheme.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.93f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.56f, stiffness = 520f),
+        label = "glassActionScale",
+    )
+
+    Surface(
+        shape = CircleShape,
+        color = if (isDark) {
+            Color.White.copy(alpha = 0.08f)
+        } else {
+            Color.Black.copy(alpha = 0.05f)
+        },
+        border = BorderStroke(
+            1.dp,
+            Brush.verticalGradient(
+                0.0f to Color.White.copy(alpha = if (isDark) 0.28f else 0.40f),
+                1.0f to Color.White.copy(alpha = if (isDark) 0.08f else 0.15f),
+            ),
+        ),
+        modifier = modifier
+            .size(40.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = {
+                    hapticManager.click()
+                    onClick()
+                },
+            ),
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawBehind {
+                        drawCircle(
+                            brush = Brush.verticalGradient(
+                                0.0f to Color.White.copy(alpha = 0.15f),
+                                0.5f to Color.Transparent,
+                            ),
+                            radius = size.minDimension / 2f,
+                        )
+                    }
+            )
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LiquidGlassProfileButton(
+    avatarUrl: String?,
+    customPhotoUri: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val hapticManager = LocalHapticManager.current
+    val isDark = LocalIsDarkTheme.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.93f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.56f, stiffness = 520f),
+        label = "glassProfileScale",
+    )
+
+    Surface(
+        shape = CircleShape,
+        color = if (isDark) {
+            Color.White.copy(alpha = 0.08f)
+        } else {
+            Color.Black.copy(alpha = 0.05f)
+        },
+        border = BorderStroke(
+            1.5.dp,
+            Brush.verticalGradient(
+                0.0f to Color.White.copy(alpha = if (isDark) 0.35f else 0.50f),
+                1.0f to Color.White.copy(alpha = if (isDark) 0.12f else 0.20f),
+            ),
+        ),
+        modifier = modifier
+            .size(40.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = {
+                    hapticManager.click()
+                    onClick()
+                },
+            ),
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            com.neonsong.app.ui.home.ProfileAvatar(
+                avatarUrl = avatarUrl,
+                customPhotoUri = customPhotoUri,
+                modifier = Modifier.size(34.dp),
+            )
+        }
+    }
+}
+
+@Composable
+fun LiquidGlassChipsRow(
+    chips: List<HomeChip>,
+    selectedChip: HomeChip?,
+    onChipClick: (HomeChip) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (chips.isEmpty()) return
+    val hapticManager = LocalHapticManager.current
+    val isDark = LocalIsDarkTheme.current
+    val accentColors = listOf(
+        MaterialTheme.colorScheme.primary,
+        MaterialTheme.colorScheme.secondary,
+        MaterialTheme.colorScheme.tertiary,
+    )
+
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 20.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        itemsIndexed(chips, key = { _, chip -> chip.title }) { index, chip ->
+            val isSelected = chip == selectedChip
+            val chipAccent = accentColors[index % accentColors.size]
+            val chipContentColor = when (index % accentColors.size) {
+                0 -> MaterialTheme.colorScheme.onPrimary
+                1 -> MaterialTheme.colorScheme.onSecondary
+                else -> MaterialTheme.colorScheme.onTertiary
+            }
+            val interactionSource = remember { MutableInteractionSource() }
+            val isPressed by interactionSource.collectIsPressedAsState()
+            val indication = LocalIndication.current
+
+            val scale by animateFloatAsState(
+                targetValue = if (isPressed) 0.90f else (if (isSelected) 1.04f else 1.0f),
+                animationSpec = spring(dampingRatio = 0.42f, stiffness = 420f),
+                label = "chipScale",
+            )
+
+            val fillAlpha by animateFloatAsState(
+                targetValue = if (isSelected) 0.92f else (if (isDark) 0.13f else 0.10f),
+                animationSpec = spring(dampingRatio = 0.85f, stiffness = 340f),
+                label = "chipFillAlpha",
+            )
+
+            val chipBorderAlpha by animateFloatAsState(
+                targetValue = if (isSelected) 0.88f else (if (isDark) 0.34f else 0.28f),
+                animationSpec = spring(dampingRatio = 0.85f, stiffness = 340f),
+                label = "chipBorderAlpha",
+            )
+
+            Surface(
+                shape = CircleShape,
+                color = chipAccent.copy(alpha = fillAlpha),
+                border = BorderStroke(
+                    width = if (isSelected) 1.5.dp else 1.dp,
+                    brush = if (isSelected) {
+                        Brush.verticalGradient(
+                            0.0f to Color.White.copy(alpha = 0.75f),
+                            1.0f to chipAccent.copy(alpha = chipBorderAlpha),
+                        )
+                    } else {
+                        Brush.verticalGradient(
+                            0.0f to chipAccent.copy(alpha = chipBorderAlpha),
+                            1.0f to chipAccent.copy(alpha = chipBorderAlpha * 0.45f),
+                        )
+                    },
+                ),
+                modifier = Modifier
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                    }
+                    .clip(CircleShape)
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = indication,
+                        onClick = {
+                            hapticManager.click()
+                            onChipClick(chip)
+                        },
+                    ),
+            ) {
+                Box {
+                        Text(
+                            text = chip.title,
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontSize = 13.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        ),
+                        color = if (isSelected) {
+                            chipContentColor
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -2969,56 +3355,7 @@ fun HomeChipsRow(
     onChipClick: (HomeChip) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (chips.isEmpty()) return
-    val haptics = LocalHapticFeedback.current
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = modifier.fillMaxWidth(),
-    ) {
-        items(chips, key = { it.title }) { chip ->
-            val isSelected = chip == selectedChip
-            Surface(
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onChipClick(chip)
-                },
-                shape = CircleShape,
-                color = if (isSelected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f)
-                },
-                border = BorderStroke(
-                    width = 1.dp,
-                    color = if (isSelected) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
-                    },
-                ),
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        text = chip.title,
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontSize = 13.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        ),
-                        color = if (isSelected) {
-                            MaterialTheme.colorScheme.onPrimary
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                    )
-                }
-            }
-        }
-    }
+    LiquidGlassChipsRow(chips = chips, selectedChip = selectedChip, onChipClick = onChipClick, modifier = modifier)
 }
 
 @Composable

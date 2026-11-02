@@ -91,6 +91,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import com.neonsong.app.ui.theme.LocalLiquidGlass
 import com.neonsong.app.ui.theme.LiquidGlassPreset
 import com.neonsong.app.ui.theme.LiquidGlassSurface
+import com.neonsong.app.ui.theme.LiquidGlassIconButton
 import com.neonsong.app.ui.theme.liquidGlassChrome
 import com.neonsong.app.ui.theme.liquidGlassContainerColor
 import androidx.compose.ui.Modifier
@@ -1152,35 +1153,17 @@ private fun ModernLyricsControls(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (onOpenLyricsOffset != null) {
-                val offsetInteraction = remember { MutableInteractionSource() }
-                val isOffsetPressed by offsetInteraction.collectIsPressedAsState()
-                val offsetScale by animateFloatAsState(
-                    targetValue = if (isOffsetPressed) 0.82f else 1.0f,
-                    animationSpec = ExpressiveMotion.spatialSpring(),
-                    label = "offsetBtnScale",
-                )
                 val isOffsetActive = lyricsOffsetMs != 0L
-                IconButton(
+                LiquidGlassIconButton(
                     onClick = onOpenLyricsOffset,
-                    interactionSource = offsetInteraction,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .graphicsLayer {
-                            scaleX = offsetScale
-                            scaleY = offsetScale
-                        }
-                        .clip(CircleShape)
-                        .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls, interactionSource = offsetInteraction)
-                        .background(
-                            liquidGlassContainerColor(
-                                if (isOffsetActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
-                                else Color.White.copy(alpha = 0.14f)
-                            ),
-                        ),
+                    modifier = Modifier.size(44.dp),
+                    shape = CircleShape,
+                    accentTint = if (isOffsetActive) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                    contentDescription = "Sync offset",
                 ) {
                     Icon(
                         Icons.Filled.Timer,
-                        contentDescription = "Sync offset",
+                        contentDescription = null,
                         modifier = Modifier.size(20.dp),
                         tint = if (isOffsetActive) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.90f),
                     )
@@ -1190,35 +1173,17 @@ private fun ModernLyricsControls(
             }
 
             // Lyrics Font Scale toggle button placed immediately to the LEFT of Full Screen
-            val fontInteraction = remember { MutableInteractionSource() }
-            val isFontPressed by fontInteraction.collectIsPressedAsState()
-            val fontScaleAnim by animateFloatAsState(
-                targetValue = if (isFontPressed) 0.82f else 1.0f,
-                animationSpec = ExpressiveMotion.spatialSpring(),
-                label = "fontScaleAnim",
-            )
             val isCustomFont = lyricsFontScale != 1.0f
-            IconButton(
+            LiquidGlassIconButton(
                 onClick = { showFontSlider = !showFontSlider },
-                interactionSource = fontInteraction,
-                modifier = Modifier
-                    .size(44.dp)
-                    .graphicsLayer {
-                        scaleX = fontScaleAnim
-                        scaleY = fontScaleAnim
-                    }
-                    .clip(CircleShape)
-                    .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls, interactionSource = fontInteraction)
-                    .background(
-                        liquidGlassContainerColor(
-                            if (showFontSlider || isCustomFont) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
-                            else Color.White.copy(alpha = 0.14f)
-                        ),
-                    ),
+                modifier = Modifier.size(44.dp),
+                shape = CircleShape,
+                accentTint = if (showFontSlider || isCustomFont) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                contentDescription = "Adjust lyrics text size",
             ) {
                 Icon(
                     Icons.Filled.FormatSize,
-                    contentDescription = "Adjust lyrics text size",
+                    contentDescription = null,
                     modifier = Modifier.size(22.dp),
                     tint = if (showFontSlider || isCustomFont) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.90f),
                 )
@@ -1227,31 +1192,15 @@ private fun ModernLyricsControls(
             Spacer(Modifier.width(10.dp))
 
             if (onToggleFullscreen != null) {
-                val playerInteraction = remember { MutableInteractionSource() }
-                val isPlayerPressed by playerInteraction.collectIsPressedAsState()
-                val playerScale by animateFloatAsState(
-                    targetValue = if (isPlayerPressed) 0.82f else 1.0f,
-                    animationSpec = ExpressiveMotion.spatialSpring(),
-                    label = "playerTabScale",
-                )
-                IconButton(
+                LiquidGlassIconButton(
                     onClick = onToggleFullscreen,
-                    interactionSource = playerInteraction,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .graphicsLayer {
-                            scaleX = playerScale
-                            scaleY = playerScale
-                        }
-                        .clip(CircleShape)
-                        .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls, interactionSource = playerInteraction)
-                        .background(
-                            liquidGlassContainerColor(Color.White.copy(alpha = 0.14f)),
-                        ),
+                    modifier = Modifier.size(44.dp),
+                    shape = CircleShape,
+                    contentDescription = if (isFullscreen) "Exit fullscreen lyrics" else "Fullscreen lyrics",
                 ) {
                     Icon(
                         if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
-                        contentDescription = if (isFullscreen) "Exit fullscreen lyrics" else "Fullscreen lyrics",
+                        contentDescription = null,
                         modifier = Modifier.size(24.dp),
                         tint = Color.White.copy(alpha = 0.90f),
                     )

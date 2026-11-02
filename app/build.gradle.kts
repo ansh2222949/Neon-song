@@ -343,18 +343,72 @@ tasks.withType<Test> {
     maxHeapSize = "2048m"
 }
 
-// Generate native secrets header before CMake configures.
-// CI provides ADDON_CLIENT_SECRET / RELEASE_CERT_SHA256 via env/secrets.
-val generateNativeSecrets by tasks.registering(Exec::class) {
+// ============================================================================
+// STAGE 7.1.3: RUST VAULT NATIVE RELEASE PIPELINE (Kotlin + Rust + Python)
+// ============================================================================
+
+val isReleaseTarget = gradle.startParameter.taskNames.any {
+    it.contains("Release", ignoreCase = true)
+}
+val isStrictSecrets = isReleaseTarget || project.hasProperty("strictSecrets") || (System.getenv("STRICT_SECRETS") == "true")
+
+val pyExec = org.gradle.internal.os.OperatingSystem.current().let {
+    if (it.isWindows) "python" else "python3"
+}
+
+// 1. Generate native secrets via Python (preBuild)
+val generateNativeSecrets = tasks.register<Exec>("generateNativeSecrets") {
     workingDir = rootProject.projectDir
-    val py = org.gradle.internal.os.OperatingSystem.current().let {
-        if (it.isWindows) "python" else "python3"
+    val scriptArgs = mutableListOf(pyExec, "tools/generate_native_secrets.py")
+    if (isStrictSecrets) {
+        scriptArgs.add("--strict")
     }
-    commandLine(py, "tools/generate_native_secrets.py")
-    // Never fail public builds when secrets absent; script emits empty header.
-    isIgnoreExitValue = true
+    commandLine(scriptArgs)
+    isIgnoreExitValue = false
 }
 tasks.matching { it.name.startsWith("preBuild") || it.name.startsWith("configureCMake") }.configureEach {
     dependsOn(generateNativeSecrets)
 }
 
+// Resolve NDK directory path outside task execution
+val resolvedNdkPath: String? = System.getenv("ANDROID_NDK_HOME")
+    ?: System.getenv("ANDROID_NDK_ROOT")
+    ?: run {
+        val sdkDir = File(System.getenv("ANDROID_HOME") ?: "C:/Users/anshs/AppData/Local/Android/Sdk")
+        val ndkParent = File(sdkDir, "ndk")
+        if (ndkParent.exists() && ndkParent.isDirectory) {
+            ndkParent.listFiles()?.filter { it.isDirectory }?.maxByOrNull { it.name }?.absolutePath
+        } else null
+    }
+
+// 2. Compile Rust native vault (security/neonsong-vault) using cargo-ndk
+val buildRustVault = tasks.register<Exec>("buildRustVault") {
+    dependsOn(generateNativeSecrets)
+    workingDir = File(rootProject.projectDir, "security/neonsong-vault")
+
+    inputs.dir(File(rootProject.projectDir, "security/neonsong-vault/src"))
+    inputs.file(File(rootProject.projectDir, "security/neonsong-vault/Cargo.toml"))
+    outputs.dir(File(project.projectDir, "src/main/jniLibs"))
+
+    if (resolvedNdkPath != null) {
+        environment("ANDROID_NDK_HOME", resolvedNdkPath)
+    }
+
+    commandLine(
+        "cargo", "ndk",
+        "-t", "arm64-v8a",
+        "-t", "armeabi-v7a",
+        "-t", "x86_64",
+        "-o", "${project.projectDir}/src/main/jniLibs",
+        "build", "--release"
+    )
+    isIgnoreExitValue = false
+}
+
+// Ensure Rust vault is built before AGP gathers/merges JNI folders and native libraries
+tasks.matching {
+    it.name.contains("JniLibFolders", ignoreCase = true) ||
+    it.name.contains("NativeLibs", ignoreCase = true)
+}.configureEach {
+    dependsOn(buildRustVault)
+}

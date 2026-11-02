@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <vector>
 #include <atomic>
+#include <mutex>
 
 namespace lastwave::audio {
 
@@ -86,8 +87,19 @@ private:
     std::vector<float> deckBScratch_;
     std::vector<float> deckBStretchedScratch_;
 
+    // Lock-free atomic command passing from UI / Binder threads to real-time audio thread
+    std::atomic<bool> resetRequested_{false};
+    std::atomic<int> pendingFadeBars_{0};
+    std::atomic<double> pendingFadeDurationSec_{-1.0};
+    std::atomic<bool> isConfiguring_{false};
+    std::atomic<std::size_t> processingCount_{0};
+
+    mutable std::mutex configureMutex_;
+    mutable std::mutex deckBMutex_;
+
+    void resetDspState() noexcept;
     void startTransition(AutoMixState mode, int bars, double durationOverrideSeconds = -1.0) noexcept;
-    void trimDeckBLeadingSilence() noexcept;
+    void trimDeckBLeadingSilenceLocked() noexcept;
     void processBlock(float* deckAStereo, std::size_t frames) noexcept;
 };
 

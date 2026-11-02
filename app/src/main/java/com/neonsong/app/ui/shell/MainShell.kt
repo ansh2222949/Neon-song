@@ -62,11 +62,13 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -220,7 +222,7 @@ fun MainShell(
     // competing size animations clip the dock (rectangular, limited) and let
     // the FAB draw over the pill. Updating immediately on tap and syncing from
     // settledPage on swipe keeps one clean transition.
-    var selectedTabIndex by remember { mutableIntStateOf(pagerState.currentPage) }
+    var selectedTabIndex by rememberSaveable { mutableIntStateOf(pagerState.currentPage) }
     LaunchedEffect(pagerState.settledPage) {
         if (selectedTabIndex != pagerState.settledPage) {
             selectedTabIndex = pagerState.settledPage
@@ -397,12 +399,10 @@ private fun FloatingNavBar(
     modifier: Modifier = Modifier,
 ) {
     val liquidGlass = LocalLiquidGlass.current
-    val glassHoverIndex = remember(liquidGlass) { mutableStateOf<Int?>(null) }
-    val glassNavBounds = remember { mutableStateMapOf<Int, Rect>() }
-    val dockInteraction = remember { MutableInteractionSource() }
     val fabInteraction = remember { MutableInteractionSource() }
-    
     val isDark = LocalIsDarkTheme.current
+    val isGlassActive = liquidGlass && backdrop != null && isLiquidGlassBackdropSupported()
+    val primaryColor = MaterialTheme.colorScheme.primary
 
     Box(
         modifier = modifier
@@ -414,86 +414,20 @@ private fun FloatingNavBar(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
+            horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
         ) {
-            Surface(
-                shape = DockShape,
-                color = if (liquidGlass) {
-                    liquidGlassContainerColor(
-                        MaterialTheme.colorScheme.surfaceContainerHigh,
-                        enabled = true,
-                        backdrop = backdrop,
-                    )
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.95f)
-                },
-                tonalElevation = if (liquidGlass) 0.dp else 4.dp,
-                shadowElevation = if (liquidGlass) 0.dp else 8.dp,
-                border = if (liquidGlass) {
-                    BorderStroke(
-                        1.dp,
-                        if (isDark) Color.White.copy(alpha = 0.15f)
-                        else Color.White.copy(alpha = 0.35f)
-                    )
-                } else {
-                    BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
-                },
-                modifier = if (liquidGlass) {
-                    Modifier.liquidGlassChrome(DockShape, liquidGlass, LiquidGlassPreset.BottomNavigation, backdrop, interactionSource = dockInteraction)
-                } else {
-                    Modifier
-                },
-            ) {
-                Row(
-                    modifier = Modifier
-                        .then(
-                            if (liquidGlass) {
-                                Modifier.pointerInput(Unit) {
-                                    val bridge = 6.dp.toPx()
-                                    val hitIndex: (Offset) -> Int? = { pos ->
-                                        glassNavBounds.entries
-                                            .firstOrNull { it.value.inflate(bridge).contains(pos) }
-                                            ?.key
-                                    }
-                                    awaitEachGesture {
-                                        val down = awaitFirstDown(requireUnconsumed = false)
-                                        glassHoverIndex.value = hitIndex(down.position)
-                                        while (true) {
-                                            val event = awaitPointerEvent()
-                                            val change = event.changes.firstOrNull { it.id == down.id }
-                                            if (change == null || !change.pressed) {
-                                                glassHoverIndex.value = null
-                                                break
-                                            }
-                                            glassHoverIndex.value = hitIndex(change.position)
-                                        }
-                                    }
-                                }
-                            } else {
-                                Modifier
-                            },
-                        )
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    tabs.forEachIndexed { index, tab ->
-                        val onClick = remember(index) { { onSelect(index) } }
-                        FloatingNavItem(
-                            label = androidx.compose.ui.res.stringResource(tab.labelRes),
-                            icon = tab.icon(),
-                            selected = selectedIndex == index,
-                            onClick = onClick,
-                        )
-                    }
-                }
+            tabs.forEachIndexed { index, tab ->
+                val onClick = remember(index) { { onSelect(index) } }
+                CircularNavItem(
+                    label = androidx.compose.ui.res.stringResource(tab.labelRes),
+                    icon = tab.icon(),
+                    selected = selectedIndex == index,
+                    onClick = onClick,
+                    backdrop = backdrop,
+                )
             }
 
             // Satellite Companion Generator Button (only visible on Playlists tab).
-            // Size-affecting enter/exit run with clip = false so the circular
-            // FAB is never sliced into a rectangle mid-transition, and the
-            // dock Row is never squeezed — the FAB grows beside the dock
-            // instead of drawing over the selected pill.
             AnimatedVisibility(
                 visible = selectedIndex == tabs.indexOf(MainTab.PLAYLISTS),
                 enter = fadeIn(animationSpec = tween(180)) +
@@ -511,34 +445,44 @@ private fun FloatingNavBar(
                         clip = false,
                     ),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Spacer(Modifier.width(10.dp))
-                    Surface(
-                        shape = CircleShape,
-                        color = if (liquidGlass) {
-                            liquidGlassContainerColor(MaterialTheme.colorScheme.primaryContainer, backdrop = backdrop)
-                        } else {
-                            MaterialTheme.colorScheme.primaryContainer
-                        },
-                        shadowElevation = if (liquidGlass) 0.dp else 8.dp,
-                        tonalElevation = if (liquidGlass) 0.dp else 4.dp,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
-                        modifier = Modifier
-                            .size(56.dp)
-                            .then(
-                                if (liquidGlass) Modifier.liquidGlassChrome(CircleShape, liquidGlass, LiquidGlassPreset.FloatingControls, backdrop, interactionSource = fabInteraction)
-                                else Modifier
-                            )
-                            .clickable(interactionSource = fabInteraction, indication = null, onClick = onOpenGenerator),
-                    ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Icon(
-                                imageVector = Icons.Filled.AutoAwesome,
-                                contentDescription = androidx.compose.ui.res.stringResource(com.neonsong.app.R.string.nav_create_playlist),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(24.dp),
-                            )
-                        }
+                Surface(
+                    shape = CircleShape,
+                    color = if (isGlassActive) {
+                        liquidGlassContainerColor(MaterialTheme.colorScheme.primaryContainer, backdrop = backdrop)
+                    } else {
+                        MaterialTheme.colorScheme.primaryContainer
+                    },
+                    shadowElevation = if (liquidGlass) 0.dp else 8.dp,
+                    tonalElevation = if (liquidGlass) 0.dp else 4.dp,
+                    border = BorderStroke(
+                        1.5.dp,
+                        Brush.verticalGradient(
+                            0.0f to Color.White.copy(alpha = if (isDark) 0.40f else 0.55f),
+                            1.0f to primaryColor.copy(alpha = 0.35f),
+                        ),
+                    ),
+                    modifier = Modifier
+                        .size(56.dp)
+                        .then(
+                            if (isGlassActive) {
+                                Modifier.liquidGlassChrome(
+                                    CircleShape,
+                                    liquidGlass,
+                                    LiquidGlassPreset.FloatingControls,
+                                    backdrop,
+                                    interactionSource = fabInteraction,
+                                )
+                            } else Modifier
+                        )
+                        .clickable(interactionSource = fabInteraction, indication = null, onClick = onOpenGenerator),
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Icon(
+                            imageVector = Icons.Filled.AutoAwesome,
+                            contentDescription = androidx.compose.ui.res.stringResource(com.neonsong.app.R.string.nav_create_playlist),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(24.dp),
+                        )
                     }
                 }
             }
@@ -547,99 +491,183 @@ private fun FloatingNavBar(
 }
 
 @Composable
-private fun FloatingNavItem(
+private fun CircularNavItem(
     label: String,
     icon: ImageVector,
     selected: Boolean,
     onClick: () -> Unit,
+    backdrop: LayerBackdrop?,
+    modifier: Modifier = Modifier,
 ) {
     val hapticManager = LocalHapticManager.current
-    val backgroundColor by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(
-            alpha = if (LocalLiquidGlass.current) 0.28f else 1f,
-        ) else Color.Transparent,
-        animationSpec = navSpring(),
-        label = "navItemBackground",
-    )
-    val contentColor by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-        animationSpec = navSpring(),
-        label = "navItemContent",
-    )
-    // Animate the pill padding instead of jumping it: combined with the label
-    // expand below this gives one smooth width change. (Previously this
-    // Surface also had animateContentSize on top of the label expand — the two
-    // competing width animations clipped the pill to a rectangle and cut the
-    // label mid-switch.)
-    val horizontalPadding by animateDpAsState(
-        targetValue = if (selected) 18.dp else 12.dp,
-        animationSpec = navSpring(),
-        label = "navItemPadding",
-    )
-    val borderStroke = if (selected) {
-        BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
-    } else null
+    val liquidGlass = LocalLiquidGlass.current
+    val isDark = LocalIsDarkTheme.current
+    val isGlassActive = liquidGlass && backdrop != null && isLiquidGlassBackdropSupported()
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val onPrimaryContainerColor = MaterialTheme.colorScheme.onPrimaryContainer
 
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+
+    // Smooth spring animations for scale and selection transition
     val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.92f else 1f,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 380f),
-        label = "navItemPressScale",
+        targetValue = if (isPressed) 0.90f else (if (selected) 1.06f else 1.0f),
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 420f),
+        label = "circularNavPressScale",
     )
 
-    Surface(
-        onClick = { hapticManager.click(); onClick() },
-        interactionSource = interactionSource,
-        shape = PillShape,
-        color = backgroundColor,
-        border = borderStroke,
-        modifier = Modifier
-            .height(48.dp)
+    val iconScale by animateFloatAsState(
+        targetValue = if (selected) 1.15f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.70f, stiffness = 380f),
+        label = "circularNavIconScale",
+    )
+
+    val fillAlpha by animateFloatAsState(
+        targetValue = if (selected) {
+            if (isGlassActive) 0.38f else 0.95f
+        } else {
+            if (isGlassActive) 0.12f else 0.40f
+        },
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 320f),
+        label = "circularNavFillAlpha",
+    )
+
+    val borderAlpha by animateFloatAsState(
+        targetValue = if (selected) {
+            if (isDark) 0.65f else 0.75f
+        } else {
+            if (isDark) 0.16f else 0.26f
+        },
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 320f),
+        label = "circularNavBorderAlpha",
+    )
+
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (selected) 0.45f else 0.0f,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 320f),
+        label = "circularNavGlowAlpha",
+    )
+
+    val iconTint by animateColorAsState(
+        targetValue = if (selected) {
+            if (isGlassActive) primaryColor else onPrimaryContainerColor
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+        },
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 320f),
+        label = "circularNavIconTint",
+    )
+
+    val baseFillColor = if (selected) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+
+    Box(
+        modifier = modifier
+            .size(56.dp)
             .graphicsLayer {
                 scaleX = pressScale
                 scaleY = pressScale
-            },
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-            modifier = Modifier
-                .padding(horizontal = horizontalPadding)
-                .height(48.dp),
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = contentColor,
-                modifier = Modifier.size(24.dp),
-            )
-            AnimatedVisibility(
-                visible = selected,
-                enter = fadeIn(animationSpec = navSpring()) + expandHorizontally(
-                    animationSpec = navSpring(),
-                    expandFrom = Alignment.Start,
-                    clip = false,
-                ),
-                exit = fadeOut(animationSpec = tween(90)) + shrinkHorizontally(
-                    animationSpec = navSpring(),
-                    shrinkTowards = Alignment.Start,
-                    clip = false,
-                ),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(start = 8.dp),
-                ) {
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = contentColor,
-                        maxLines = 1,
-                        softWrap = false,
+            }
+            // Elegant subtle glow for active circular base
+            .drawBehind {
+                if (glowAlpha > 0f) {
+                    val radius = size.minDimension * 0.75f
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                primaryColor.copy(alpha = glowAlpha * 0.45f),
+                                primaryColor.copy(alpha = glowAlpha * 0.12f),
+                                Color.Transparent,
+                            ),
+                            center = center,
+                            radius = radius,
+                        ),
+                        radius = radius,
                     )
                 }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = if (isGlassActive) {
+                liquidGlassContainerColor(baseFillColor.copy(alpha = fillAlpha), enabled = true, backdrop = backdrop)
+            } else {
+                baseFillColor.copy(alpha = fillAlpha)
+            },
+            tonalElevation = if (isGlassActive) 0.dp else (if (selected) 4.dp else 1.dp),
+            shadowElevation = if (isGlassActive) 0.dp else (if (selected) 6.dp else 2.dp),
+            border = BorderStroke(
+                width = if (selected) 1.5.dp else 1.dp,
+                brush = if (selected) {
+                    Brush.verticalGradient(
+                        0.0f to Color.White.copy(alpha = (borderAlpha + 0.2f).coerceAtMost(1f)),
+                        0.45f to primaryColor.copy(alpha = borderAlpha),
+                        1.0f to primaryColor.copy(alpha = borderAlpha * 0.5f),
+                    )
+                } else {
+                    Brush.verticalGradient(
+                        0.0f to Color.White.copy(alpha = borderAlpha),
+                        1.0f to Color.White.copy(alpha = borderAlpha * 0.35f),
+                    )
+                },
+            ),
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (isGlassActive && backdrop != null) {
+                        Modifier.liquidGlassChrome(
+                            CircleShape,
+                            enabled = true,
+                            preset = LiquidGlassPreset.BottomNavigation,
+                            backdrop = backdrop,
+                            interactionSource = interactionSource,
+                        )
+                    } else Modifier
+                )
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = {
+                        hapticManager.click()
+                        onClick()
+                    },
+                ),
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                // Subtle top specular highlight arc inside circle
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .drawBehind {
+                            drawCircle(
+                                brush = Brush.verticalGradient(
+                                    0.0f to Color.White.copy(alpha = if (selected) 0.24f else 0.10f),
+                                    0.45f to Color.White.copy(alpha = 0.02f),
+                                    1.0f to Color.Transparent,
+                                ),
+                                radius = size.minDimension / 2f,
+                            )
+                        }
+                )
+
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = iconTint,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .graphicsLayer {
+                            scaleX = iconScale
+                            scaleY = iconScale
+                        },
+                )
             }
         }
     }

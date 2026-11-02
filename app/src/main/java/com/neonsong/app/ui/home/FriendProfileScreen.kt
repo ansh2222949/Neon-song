@@ -76,6 +76,7 @@ import com.neonsong.app.data.repository.HomeTrack
 import com.neonsong.app.playback.PlayableTrack
 import com.neonsong.app.ui.common.ArtworkImage
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.rememberExpressiveHeaderBackdrop
 import com.neonsong.app.ui.common.ExpressiveLoadingIndicator
 import com.neonsong.app.ui.common.HeaderActionIcon
 import com.neonsong.app.ui.common.TrackContextMenuSheet
@@ -96,6 +97,7 @@ import com.neonsong.app.ui.theme.ListContainerShape
 import com.neonsong.app.ui.theme.NowPlayingCardShape
 import com.neonsong.app.ui.theme.StatPillShape
 import com.neonsong.app.ui.theme.TrackRowShape
+import com.neonsong.app.ui.theme.liquidGlassSource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -113,6 +115,7 @@ fun FriendProfileScreen(
     val musicPlayer = LocalMusicPlayer.current
     val addToPlaylist = LocalAddToPlaylist.current
     val listState = rememberLazyListState()
+    val headerBackdrop = rememberExpressiveHeaderBackdrop()
     var menuTrack by remember { mutableStateOf<HomeTrack?>(null) }
 
     LaunchedEffect(username) {
@@ -134,6 +137,7 @@ fun FriendProfileScreen(
                 title = displayTitle,
                 subtitle = "@$username",
                 onBack = onBack,
+                backdrop = headerBackdrop,
                 actions = {
                     HeaderActionIcon(
                         icon = Icons.Filled.PushPin,
@@ -159,7 +163,8 @@ fun FriendProfileScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(ListContainerShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainer),
+                    .background(MaterialTheme.colorScheme.surfaceContainer)
+                    .liquidGlassSource(headerBackdrop),
             ) {
                 if (uiState.isLoading) {
                     Box(

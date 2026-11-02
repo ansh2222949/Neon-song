@@ -81,6 +81,8 @@ class GenreResolver @Inject constructor(
                     if (names.isNotEmpty()) result = names.joinToString(", ")
                 }
             }
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            throw cancellation
         } catch (e: Exception) {
             Log.d(TAG, "track.getInfo toptags miss for $name / $artist", e)
         }
@@ -99,6 +101,8 @@ class GenreResolver @Inject constructor(
                         val genre = parsed.results.firstOrNull()?.primaryGenreName
                         if (!genre.isNullOrBlank() && genre != "Music") genre else ""
                     }
+                } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                    throw cancellation
                 } catch (e: Exception) {
                     Log.d(TAG, "iTunes genre lookup miss for $name / $artist", e)
                     ""

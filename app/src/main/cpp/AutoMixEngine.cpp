@@ -2,6 +2,7 @@
 #include <cmath>
 #include <algorithm>
 #include <cstring>
+#include <thread>
 
 namespace lastwave::audio {
 
@@ -17,6 +18,13 @@ AutoMixEngine::AutoMixEngine() noexcept {
 }
 
 void AutoMixEngine::configure(double sampleRate) noexcept {
+    std::lock_guard<std::mutex> lock(configureMutex_);
+    isConfiguring_.store(true, std::memory_order_release);
+
+    while (processingCount_.load(std::memory_order_acquire) > 0) {
+        std::this_thread::yield();
+    }
+
     if (sampleRate <= 0.0) sampleRate = 48000.0;
     sampleRate_ = sampleRate;
 
@@ -29,16 +37,27 @@ void AutoMixEngine::configure(double sampleRate) noexcept {
 
     // Buffer capacity: 30 seconds of stereo Float32
     const std::size_t ringFrames = static_cast<std::size_t>(sampleRate_ * 30.0);
-    deckBRingBuffer_.assign(ringFrames * 2, 0.0F);
-    deckBReadCounter_.store(0, std::memory_order_relaxed);
-    deckBWriteCounter_.store(0, std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> deckLock(deckBMutex_);
+        deckBRingBuffer_.assign(ringFrames * 2, 0.0F);
+        deckBReadCounter_.store(0, std::memory_order_relaxed);
+        deckBWriteCounter_.store(0, std::memory_order_relaxed);
+        deckBLeadingTrimFrames_.store(0, std::memory_order_relaxed);
+        deckBTrimCalculated_ = false;
+    }
 
     // Large enough for the largest Media3 callback we accept. These buffers
     // are sized only during configure(), never from process().
     deckBScratch_.assign(8192 * 2, 0.0F);
     deckBStretchedScratch_.assign(8192 * 2, 0.0F);
 
-    reset();
+    resetDspState();
+    state_.store(AutoMixState::Idle, std::memory_order_release);
+    resetRequested_.store(false, std::memory_order_release);
+    pendingFadeBars_.store(0, std::memory_order_release);
+    pendingFadeDurationSec_.store(-1.0, std::memory_order_release);
+
+    isConfiguring_.store(false, std::memory_order_release);
 }
 
 void AutoMixEngine::setEnabled(bool enabled) noexcept {
@@ -62,19 +81,34 @@ int AutoMixEngine::getBarMode() const noexcept {
 
 void AutoMixEngine::reset() noexcept {
     state_.store(AutoMixState::Idle, std::memory_order_release);
-    std::fill(deckBRingBuffer_.begin(), deckBRingBuffer_.end(), 0.0F);
-    deckBReadCounter_.store(0, std::memory_order_release);
-    deckBWriteCounter_.store(0, std::memory_order_release);
+    transitionProgress_.store(0.0F, std::memory_order_release);
+    pendingFadeBars_.store(0, std::memory_order_release);
+    pendingFadeDurationSec_.store(-1.0, std::memory_order_release);
+    resetRequested_.store(true, std::memory_order_release);
 
+    // If audio thread is idle, execute DSP reset immediately
+    if (processingCount_.load(std::memory_order_acquire) == 0) {
+        if (resetRequested_.exchange(false, std::memory_order_acq_rel)) {
+            resetDspState();
+        }
+    }
+}
+
+void AutoMixEngine::resetDspState() noexcept {
     deckAFilter_.reset();
     deckBFilter_.reset();
     deckBStretcher_.reset();
     deckADetector_.reset();
-    deckBDetector_.reset();
     deckAEcho_.reset();
+    deckAEcho_.setEnabled(false);
 
+    // Drain Deck B ring buffer strictly on consumer side
+    const auto write = deckBWriteCounter_.load(std::memory_order_acquire);
+    deckBReadCounter_.store(write, std::memory_order_release);
     deckBLeadingTrimFrames_.store(0, std::memory_order_release);
     deckBTrimCalculated_ = false;
+    deckBDetector_.reset();
+
     transitionTotalFrames_ = 0;
     transitionCurrentFrame_ = 0;
     transitionProgress_.store(0.0F, std::memory_order_release);
@@ -88,7 +122,10 @@ void AutoMixEngine::reset() noexcept {
 std::size_t AutoMixEngine::writeDeckBPcm(const float* stereoPcm, std::size_t frames) noexcept {
     if (stereoPcm == nullptr || frames == 0) return 0;
 
+    std::lock_guard<std::mutex> lock(deckBMutex_);
+
     const std::size_t totalCapacityFrames = deckBRingBuffer_.size() / 2;
+    if (totalCapacityFrames == 0) return 0;
     const std::uint64_t writeCounter = deckBWriteCounter_.load(std::memory_order_relaxed);
     const std::uint64_t readCounter = deckBReadCounter_.load(std::memory_order_acquire);
     const std::size_t availableFrames = static_cast<std::size_t>(writeCounter - readCounter);
@@ -111,7 +148,7 @@ std::size_t AutoMixEngine::writeDeckBPcm(const float* stereoPcm, std::size_t fra
 
     // Calculate leading silence trim on first chunk
     if (!deckBTrimCalculated_ && availableFrames + framesToWrite >= static_cast<std::size_t>(sampleRate_ * 0.5)) {
-        trimDeckBLeadingSilence();
+        trimDeckBLeadingSilenceLocked();
     }
 
     AutoMixState curr = state_.load(std::memory_order_acquire);
@@ -122,7 +159,7 @@ std::size_t AutoMixEngine::writeDeckBPcm(const float* stereoPcm, std::size_t fra
     return framesToWrite;
 }
 
-void AutoMixEngine::trimDeckBLeadingSilence() noexcept {
+void AutoMixEngine::trimDeckBLeadingSilenceLocked() noexcept {
     const std::size_t totalCapacityFrames = deckBRingBuffer_.size() / 2;
     const std::uint64_t readCounter = deckBReadCounter_.load(std::memory_order_acquire);
     const std::uint64_t writeCounter = deckBWriteCounter_.load(std::memory_order_acquire);
@@ -153,12 +190,14 @@ void AutoMixEngine::triggerFadeNow() noexcept {
 }
 
 void AutoMixEngine::triggerFadeBars(int bars) noexcept {
-    startTransition(AutoMixState::FadingFast, std::clamp(bars, 4, 16));
+    pendingFadeBars_.store(std::clamp(bars, 4, 16), std::memory_order_release);
+    state_.store(AutoMixState::FadingFast, std::memory_order_release);
 }
 
 void AutoMixEngine::triggerFadeDurationMs(std::int64_t durationMs) noexcept {
     const double seconds = static_cast<double>(std::max<std::int64_t>(1, durationMs)) / 1000.0;
-    startTransition(AutoMixState::FadingFast, barMode_.load(std::memory_order_acquire), seconds);
+    pendingFadeDurationSec_.store(seconds, std::memory_order_release);
+    state_.store(AutoMixState::FadingFast, std::memory_order_release);
 }
 
 void AutoMixEngine::startTransition(AutoMixState mode, int bars, double durationOverrideSeconds) noexcept {
@@ -210,11 +249,33 @@ void AutoMixEngine::process(float* deckAStereo, std::size_t frames) noexcept {
     if (!enabled_.load(std::memory_order_acquire)) {
         return;
     }
+    processingCount_.fetch_add(1, std::memory_order_acq_rel);
+
+    if (isConfiguring_.load(std::memory_order_acquire)) {
+        processingCount_.fetch_sub(1, std::memory_order_acq_rel);
+        return;
+    }
+
+    // 1. Check for requested DSP reset
+    if (resetRequested_.exchange(false, std::memory_order_acq_rel)) {
+        resetDspState();
+    }
+
+    // 2. Check for requested fade commands
+    const int pendingBars = pendingFadeBars_.exchange(0, std::memory_order_acq_rel);
+    const double pendingSec = pendingFadeDurationSec_.exchange(-1.0, std::memory_order_acq_rel);
+    if (pendingBars > 0 || pendingSec > 0.0) {
+        startTransition(AutoMixState::FadingFast,
+                        pendingBars > 0 ? pendingBars : barMode_.load(std::memory_order_acquire),
+                        pendingSec);
+    }
 
     constexpr std::size_t kMaxBlockFrames = 8192;
     for (std::size_t offset = 0; offset < frames; offset += kMaxBlockFrames) {
         processBlock(deckAStereo + offset * 2, std::min(kMaxBlockFrames, frames - offset));
     }
+
+    processingCount_.fetch_sub(1, std::memory_order_acq_rel);
 }
 
 void AutoMixEngine::processBlock(float* deckAStereo, std::size_t frames) noexcept {
@@ -282,9 +343,11 @@ void AutoMixEngine::processBlock(float* deckAStereo, std::size_t frames) noexcep
         }
 
         // Time-stretch Deck B if ratio != 1.0
-        if (frames * 2 > deckBStretchedScratch_.size()) return;
+        const std::size_t maxOutputFrames = deckBStretchedScratch_.size() / 2;
+        const std::size_t targetFrames = std::min(frames, maxOutputFrames);
+        if (targetFrames == 0) return;
         std::size_t stretchedFrames = deckBStretcher_.process(
-            deckBScratch_.data(), frames, deckBStretchedScratch_.data(), frames * 2);
+            deckBScratch_.data(), frames, deckBStretchedScratch_.data(), targetFrames);
         if (stretchedFrames < frames) {
             std::copy(deckBScratch_.begin() + stretchedFrames * 2, deckBScratch_.begin() + frames * 2,
                       deckBStretchedScratch_.begin() + stretchedFrames * 2);

@@ -71,21 +71,51 @@ internal object WidgetViews {
         options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
     }.getOrDefault(0)
 
+    internal data class CachedWidgetColors(
+        val bitmapGenerationId: Int,
+        val primaryColor: Int,
+        val onPrimaryColor: Int,
+        val bgTint: Int,
+    )
+
+    @Volatile
+    private var cachedSourceBitmap: Bitmap? = null
+
+    @Volatile
+    private var cachedSourceGenerationId: Int = -1
+
+    @Volatile
+    private var cachedRoundedBitmap: Bitmap? = null
+
+    @Volatile
+    private var cachedColorSourceBitmap: Bitmap? = null
+
+    @Volatile
+    private var cachedColors: CachedWidgetColors? = null
+
+    @Volatile
+    private var cachedArtPath: String? = null
+
+    @Volatile
+    private var cachedPathBitmap: Bitmap? = null
+
     fun build(
         context: Context,
         appWidgetId: Int,
         eqFrame: Int? = null,
         progressOverride: Float? = null,
+        memoryArt: Bitmap? = null,
     ): RemoteViews {
         val resolved = resolve(context)
-        val artBitmap = resolveArtBitmap(resolved.snapshot.artPath)
+        val artBitmap = resolveArt(memoryArt, resolved.snapshot.artPath)
+        val colors = resolveColors(context, artBitmap)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val sizeMap = mapOf(
-                SizeF(120f, 50f) to buildLayout(context, R.layout.widget_now_playing_compact, resolved, appWidgetId, eqFrame, progressOverride, artBitmap),
-                SizeF(220f, 50f) to buildLayout(context, R.layout.widget_now_playing, resolved, appWidgetId, eqFrame, progressOverride, artBitmap),
-                SizeF(120f, 115f) to buildLayout(context, R.layout.widget_now_playing_square, resolved, appWidgetId, eqFrame, progressOverride, artBitmap),
-                SizeF(250f, 115f) to buildLayout(context, R.layout.widget_now_playing_expanded, resolved, appWidgetId, eqFrame, progressOverride, artBitmap),
+                SizeF(120f, 50f) to buildLayout(context, R.layout.widget_now_playing_compact, resolved, appWidgetId, eqFrame, progressOverride, artBitmap, colors),
+                SizeF(220f, 50f) to buildLayout(context, R.layout.widget_now_playing, resolved, appWidgetId, eqFrame, progressOverride, artBitmap, colors),
+                SizeF(120f, 115f) to buildLayout(context, R.layout.widget_now_playing_square, resolved, appWidgetId, eqFrame, progressOverride, artBitmap, colors),
+                SizeF(250f, 115f) to buildLayout(context, R.layout.widget_now_playing_expanded, resolved, appWidgetId, eqFrame, progressOverride, artBitmap, colors),
             )
             return RemoteViews(sizeMap)
         }
@@ -99,7 +129,61 @@ internal object WidgetViews {
             width in 1 until 220 -> R.layout.widget_now_playing_compact
             else -> R.layout.widget_now_playing
         }
-        return buildLayout(context, layoutId, resolved, appWidgetId, eqFrame, progressOverride, artBitmap)
+        return buildLayout(context, layoutId, resolved, appWidgetId, eqFrame, progressOverride, artBitmap, colors)
+    }
+
+    private fun resolveArt(memoryArt: Bitmap?, artPath: String?): Bitmap? {
+        if (memoryArt != null && !memoryArt.isRecycled) {
+            val genId = memoryArt.generationId
+            val existing = cachedRoundedBitmap
+            if (memoryArt === cachedSourceBitmap && (genId == cachedSourceGenerationId || genId == 0) && existing != null && !existing.isRecycled) {
+                return existing
+            }
+            val rounded = roundedCorners(memoryArt, 0.22f)
+            cachedSourceBitmap = memoryArt
+            cachedSourceGenerationId = genId
+            cachedRoundedBitmap = rounded
+            return rounded
+        }
+        if (!artPath.isNullOrBlank()) {
+            val existing = cachedPathBitmap
+            if (artPath == cachedArtPath && existing != null && !existing.isRecycled) {
+                return existing
+            }
+            val decoded = resolveArtBitmap(artPath)
+            cachedArtPath = artPath
+            cachedPathBitmap = decoded
+            return decoded
+        }
+        return null
+    }
+
+    private fun resolveColors(context: Context, artBitmap: Bitmap?): CachedWidgetColors? {
+        if (artBitmap == null || artBitmap.isRecycled) return null
+        val genId = artBitmap.generationId
+        val existing = cachedColors
+        if (existing != null && artBitmap === cachedColorSourceBitmap && (existing.bitmapGenerationId == genId || genId == 0)) {
+            return existing
+        }
+        return runCatching {
+            val palette = androidx.palette.graphics.Palette.from(artBitmap).maximumColorCount(16).generate()
+            val swatch = palette.vibrantSwatch
+                ?: palette.dominantSwatch
+                ?: palette.mutedSwatch
+            if (swatch != null) {
+                val primaryColor = swatch.rgb
+                val onPrimaryColor = swatch.titleTextColor
+                val bgTint = androidx.core.graphics.ColorUtils.blendARGB(
+                    ContextCompat.getColor(context, R.color.widget_surface),
+                    primaryColor,
+                    0.14f,
+                )
+                CachedWidgetColors(genId, primaryColor, onPrimaryColor, bgTint).also {
+                    cachedColors = it
+                    cachedColorSourceBitmap = artBitmap
+                }
+            } else null
+        }.getOrNull()
     }
 
     private fun buildLayout(
@@ -110,6 +194,7 @@ internal object WidgetViews {
         eqFrame: Int?,
         progressOverride: Float?,
         artBitmap: Bitmap?,
+        colors: CachedWidgetColors?,
     ): RemoteViews {
         val views = RemoteViews(context.packageName, layoutId)
         bind(
@@ -120,6 +205,7 @@ internal object WidgetViews {
             eqFrame = eqFrame,
             progressOverride = progressOverride,
             artBitmap = artBitmap,
+            colors = colors,
             isCompact = (layoutId == R.layout.widget_now_playing_compact),
         )
         return views
@@ -133,6 +219,7 @@ internal object WidgetViews {
         eqFrame: Int?,
         progressOverride: Float?,
         artBitmap: Bitmap?,
+        colors: CachedWidgetColors?,
         isCompact: Boolean,
     ) {
         val snapshot = resolved.snapshot
@@ -203,6 +290,37 @@ internal object WidgetViews {
             val tint = ContextCompat.getColor(context, R.color.widget_icon_tint)
             views.setInt(R.id.widget_prev, "setColorFilter", tint)
             views.setInt(R.id.widget_next, "setColorFilter", tint)
+        }
+
+        // Dynamic color extraction per song from album art (cached, 0ms overhead during animation)
+        if (colors != null) {
+            views.setTextColor(R.id.widget_state, colors.onPrimaryColor)
+            views.setInt(R.id.widget_play_pause, "setColorFilter", colors.onPrimaryColor)
+            views.setInt(R.id.widget_next, "setColorFilter", colors.onPrimaryColor)
+            views.setInt(R.id.widget_prev, "setColorFilter", colors.primaryColor)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                views.setColorStateList(
+                    R.id.widget_play_pause_container,
+                    "setBackgroundTintList",
+                    android.content.res.ColorStateList.valueOf(colors.primaryColor),
+                )
+                views.setColorStateList(
+                    R.id.widget_next_container,
+                    "setBackgroundTintList",
+                    android.content.res.ColorStateList.valueOf(colors.primaryColor),
+                )
+                views.setColorStateList(
+                    R.id.widget_root,
+                    "setBackgroundTintList",
+                    android.content.res.ColorStateList.valueOf(colors.bgTint),
+                )
+                views.setColorStateList(
+                    R.id.widget_progress,
+                    "setProgressTintList",
+                    android.content.res.ColorStateList.valueOf(colors.primaryColor),
+                )
+            }
         }
 
         // Artwork: pre-decoded squircle bitmap or fallback

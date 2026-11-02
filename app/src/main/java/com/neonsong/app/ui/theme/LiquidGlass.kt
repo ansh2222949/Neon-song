@@ -4,17 +4,22 @@ import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerBasedShape
@@ -35,6 +40,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
@@ -44,6 +51,12 @@ import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.DrawStyle
+import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.rememberGraphicsLayer
@@ -58,12 +71,15 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastFirstOrNull
 import androidx.compose.ui.util.lerp
+
+
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -79,6 +95,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.sign
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import com.kyant.backdrop.backdrops.layerBackdrop as nativeBackdrop
+
 
 /** Shared opt-in flag for Settings > Experimental > Liquid Glass. */
 val LocalLiquidGlass = staticCompositionLocalOf { false }
@@ -314,6 +331,454 @@ fun createSquirclePath(
     }
     path.close()
     return path
+}
+
+// ── Liquid Glass Design System Core ──────────────────────────────────────────
+
+/** Helper to draw an Outline with a solid color. */
+fun DrawScope.drawOutline(
+    outline: Outline,
+    color: Color,
+) {
+    when (outline) {
+        is Outline.Rectangle -> drawRect(color = color, topLeft = outline.rect.topLeft, size = outline.rect.size)
+        is Outline.Rounded -> {
+            val rrect = outline.roundRect
+            if (rrect.topLeftCornerRadius == rrect.topRightCornerRadius &&
+                rrect.topLeftCornerRadius == rrect.bottomLeftCornerRadius &&
+                rrect.topLeftCornerRadius == rrect.bottomRightCornerRadius
+            ) {
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(rrect.left, rrect.top),
+                    size = Size(rrect.width, rrect.height),
+                    cornerRadius = rrect.topLeftCornerRadius,
+                )
+            } else {
+                val path = Path().apply { addRoundRect(rrect) }
+                drawPath(path = path, color = color)
+            }
+        }
+        is Outline.Generic -> drawPath(path = outline.path, color = color)
+    }
+}
+
+/** Helper to draw an Outline with a brush and optional stroke style. */
+fun DrawScope.drawOutline(
+    outline: Outline,
+    brush: Brush,
+    style: DrawStyle = Fill,
+) {
+    when (outline) {
+        is Outline.Rectangle -> drawRect(brush = brush, topLeft = outline.rect.topLeft, size = outline.rect.size, style = style)
+        is Outline.Rounded -> {
+            val rrect = outline.roundRect
+            if (rrect.topLeftCornerRadius == rrect.topRightCornerRadius &&
+                rrect.topLeftCornerRadius == rrect.bottomLeftCornerRadius &&
+                rrect.topLeftCornerRadius == rrect.bottomRightCornerRadius
+            ) {
+                drawRoundRect(
+                    brush = brush,
+                    topLeft = Offset(rrect.left, rrect.top),
+                    size = Size(rrect.width, rrect.height),
+                    cornerRadius = rrect.topLeftCornerRadius,
+                    style = style,
+                )
+            } else {
+                val path = Path().apply { addRoundRect(rrect) }
+                drawPath(path = path, brush = brush, style = style)
+            }
+        }
+        is Outline.Generic -> drawPath(path = outline.path, brush = brush, style = style)
+    }
+}
+
+/**
+ * Design tokens and material recipe for the Liquid Glass Design System.
+ */
+object LiquidGlassTheme {
+    /** Returns translucent glass background color with subtle accent depth. */
+    fun backgroundColor(
+        isDark: Boolean,
+        accent: Color,
+        isAmoled: Boolean = false,
+    ): Color {
+        return if (isAmoled) {
+            Color(0xD9000000)
+        } else if (isDark) {
+            val a = if (accent.isSpecified) accent else Color(0xFF6C9EFF)
+            Color(
+                red = lerp(0.07f, a.red, 0.08f),
+                green = lerp(0.08f, a.green, 0.08f),
+                blue = lerp(0.12f, a.blue, 0.08f),
+                alpha = 0.82f,
+            )
+        } else {
+            val a = if (accent.isSpecified) accent else Color(0xFF2463EB)
+            Color(
+                red = lerp(0.97f, a.red, 0.05f),
+                green = lerp(0.98f, a.green, 0.05f),
+                blue = lerp(1.00f, a.blue, 0.05f),
+                alpha = 0.88f,
+            )
+        }
+    }
+
+    /** Directional specular reflective border brush (incident light from top-left, accent sheen, ambient shadow). */
+    fun borderBrush(
+        isDark: Boolean,
+        accent: Color,
+        size: Size,
+    ): Brush {
+        val a = if (accent.isSpecified) accent else Color.White
+        return Brush.linearGradient(
+            0.0f to Color.White.copy(alpha = if (isDark) 0.38f else 0.65f),
+            0.45f to a.copy(alpha = if (isDark) 0.28f else 0.40f),
+            1.0f to Color.White.copy(alpha = if (isDark) 0.08f else 0.16f),
+            start = Offset(0f, 0f),
+            end = Offset(size.width, size.height),
+        )
+    }
+
+    /** Top specular sheen brush simulating physical curved optical glass refraction. */
+    fun specularSheenBrush(
+        isDark: Boolean,
+    ): Brush {
+        return Brush.verticalGradient(
+            0.0f to Color.White.copy(alpha = if (isDark) 0.12f else 0.22f),
+            0.35f to Color.White.copy(alpha = if (isDark) 0.03f else 0.07f),
+            1.0f to Color.Transparent,
+        )
+    }
+}
+
+/**
+ * State holder for water-like touch interactions on Liquid Glass surfaces.
+ * Captures touch position, animates expanding circular liquid wave / refraction ripple,
+ * and handles fluid spring compression with natural recovery.
+ */
+class LiquidTouchInteraction(
+    private val scope: CoroutineScope,
+) {
+    val pressScale = Animatable(1f)
+    val rippleProgress = Animatable(0f)
+    val rippleAlpha = Animatable(0f)
+    var touchPosition by mutableStateOf(Offset.Zero)
+        private set
+
+    private val springSpec = spring<Float>(
+        dampingRatio = 0.68f,
+        stiffness = 850f,
+    )
+
+    fun onTouchDown(position: Offset) {
+        touchPosition = position
+        scope.launch {
+            pressScale.animateTo(0.94f, springSpec)
+        }
+        scope.launch {
+            rippleProgress.snapTo(0f)
+            rippleAlpha.snapTo(1f)
+            launch {
+                rippleProgress.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+                )
+            }
+            launch {
+                rippleAlpha.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+                )
+            }
+        }
+    }
+
+    fun onTouchRelease() {
+        scope.launch {
+            pressScale.animateTo(1f, springSpec)
+        }
+    }
+
+    fun onTouchCancel() {
+        scope.launch {
+            pressScale.animateTo(1f, springSpec)
+            rippleAlpha.animateTo(0f, tween(150))
+        }
+    }
+}
+
+@Composable
+fun rememberLiquidTouchInteraction(): LiquidTouchInteraction {
+    val scope = rememberCoroutineScope()
+    return remember(scope) { LiquidTouchInteraction(scope) }
+}
+
+/**
+ * Water-like liquid touch modifier.
+ * Tracks pointer events non-intrusively (never consumes clicks or scroll gestures),
+ * scales with a physical spring compression, and draws an expanding liquid wave / caustic ring
+ * radiating outward from the touch position.
+ */
+fun Modifier.liquidTouchEffect(
+    interaction: LiquidTouchInteraction,
+    accent: Color = Color.Unspecified,
+    enabled: Boolean = true,
+): Modifier {
+    if (!enabled) return this
+
+    return this
+        .graphicsLayer {
+            val scale = interaction.pressScale.value
+            scaleX = scale
+            scaleY = scale
+        }
+        .pointerInput(interaction) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                interaction.onTouchDown(down.position)
+
+                val pointerId = down.id
+                while (true) {
+                    val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                    val change = event.changes.fastFirstOrNull { it.id == pointerId }
+                    if (change == null || !change.pressed) {
+                        interaction.onTouchRelease()
+                        break
+                    }
+                    if (change.isConsumed) {
+                        interaction.onTouchCancel()
+                        break
+                    }
+                }
+            }
+        }
+        .drawWithCache {
+            val resolvedAccent = if (accent.isSpecified) accent else Color.White
+            onDrawWithContent {
+                drawContent()
+
+                val progress = interaction.rippleProgress.value
+                val alpha = interaction.rippleAlpha.value
+                if (progress > 0.001f && alpha > 0.01f) {
+                    val maxRadius = kotlin.math.hypot(size.width, size.height)
+                    val currentRadius = maxRadius * progress
+                    val center = interaction.touchPosition
+
+                    // 1. Soft refraction bloom at touch origin
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            0.0f to resolvedAccent.copy(alpha = 0.16f * alpha),
+                            0.6f to Color.White.copy(alpha = 0.08f * alpha),
+                            1.0f to Color.Transparent,
+                            center = center,
+                            radius = (maxRadius * 0.35f).coerceAtLeast(1f),
+                        ),
+                        radius = (maxRadius * 0.35f).coerceAtLeast(1f),
+                        center = center,
+                        blendMode = BlendMode.Plus,
+                    )
+
+                    // 2. Liquid wave caustic ring
+                    val ringWidth = (size.minDimension * 0.22f).coerceIn(24.dp.toPx(), 72.dp.toPx())
+                    val innerRadius = (currentRadius - ringWidth * 0.5f).coerceAtLeast(0f)
+                    val outerRadius = currentRadius + ringWidth * 0.5f
+
+                    if (outerRadius > 0f) {
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                0.0f to Color.Transparent,
+                                (innerRadius / outerRadius).coerceIn(0f, 0.99f) to Color.Transparent,
+                                ((innerRadius + currentRadius) / (2f * outerRadius)).coerceIn(0f, 1f) to Color.White.copy(alpha = 0.24f * alpha),
+                                1.0f to Color.Transparent,
+                                center = center,
+                                radius = outerRadius,
+                            ),
+                            radius = outerRadius,
+                            center = center,
+                            blendMode = BlendMode.Plus,
+                        )
+                    }
+                }
+            }
+        }
+}
+
+/**
+ * Core Liquid Glass surface modifier.
+ * Renders translucent glass material with depth, directional specular border,
+ * top incident light sheen, and optional water-like touch interactions.
+ * Completely allocation-free during draw calls via [drawWithCache].
+ */
+@Composable
+fun Modifier.liquidGlassSurface(
+    shape: Shape = SquircleShape(20.dp),
+    borderWidth: Dp = 1.dp,
+    accentTint: Color = Color.Unspecified,
+    interactive: Boolean = false,
+    onClick: (() -> Unit)? = null,
+    interaction: LiquidTouchInteraction? = if (interactive || onClick != null) rememberLiquidTouchInteraction() else null,
+): Modifier {
+    val isGlass = LocalLiquidGlass.current
+    val isDark = LocalIsDarkTheme.current
+    val strokeWidthPx = with(LocalDensity.current) { borderWidth.toPx() }
+    val resolvedAccent = if (accentTint.isSpecified) accentTint else MaterialTheme.colorScheme.primary
+
+    val baseModifier = this.clip(shape)
+
+    val surfaceModifier = baseModifier.drawWithCache {
+        val bg = if (isGlass) {
+            LiquidGlassTheme.backgroundColor(isDark = isDark, accent = resolvedAccent)
+        } else {
+            if (isDark) Color(0xFF1E222B) else Color(0xFFEFF2F8)
+        }
+
+        val borderBrush = LiquidGlassTheme.borderBrush(isDark = isDark, accent = resolvedAccent, size = size)
+        val sheenBrush = LiquidGlassTheme.specularSheenBrush(isDark = isDark)
+        val outline = shape.createOutline(size, layoutDirection, this)
+
+        onDrawBehind {
+            // 1. Base translucent glass material
+            drawOutline(outline, color = bg)
+
+            // 2. Optical glass specular top sheen
+            drawRect(
+                brush = sheenBrush,
+                blendMode = BlendMode.Plus,
+            )
+
+            // 3. Directional specular border
+            if (strokeWidthPx > 0f) {
+                drawOutline(
+                    outline = outline,
+                    brush = borderBrush,
+                    style = Stroke(width = strokeWidthPx),
+                )
+            }
+        }
+    }
+
+    val interactiveModifier = if (interaction != null) {
+        surfaceModifier.liquidTouchEffect(interaction = interaction, accent = resolvedAccent)
+    } else {
+        surfaceModifier
+    }
+
+    return if (onClick != null) {
+        interactiveModifier.clickable(role = Role.Button, onClick = onClick)
+    } else {
+        interactiveModifier
+    }
+}
+
+/**
+ * Premium Liquid Glass Button with translucent material, specular border, and water-like touch response.
+ */
+@Composable
+fun LiquidGlassButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    shape: Shape = CircleShape,
+    accentTint: Color = Color.Unspecified,
+    borderWidth: Dp = 1.dp,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+    content: @Composable RowScope.() -> Unit,
+) {
+    val interaction = rememberLiquidTouchInteraction()
+    val resolvedAccent = if (accentTint.isSpecified) accentTint else MaterialTheme.colorScheme.primary
+    Box(
+        modifier = modifier
+            .liquidGlassSurface(
+                shape = shape,
+                borderWidth = borderWidth,
+                accentTint = resolvedAccent,
+                interactive = enabled,
+                onClick = if (enabled) onClick else null,
+                interaction = interaction,
+            )
+            .padding(contentPadding),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            content = content,
+        )
+    }
+}
+
+/**
+ * Liquid Glass Icon Button with water ripple, specular border, and 48dp minimum touch target.
+ */
+@Composable
+fun LiquidGlassIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier.size(44.dp),
+    enabled: Boolean = true,
+    shape: Shape = CircleShape,
+    accentTint: Color = Color.Unspecified,
+    borderWidth: Dp = 1.dp,
+    contentDescription: String? = null,
+    content: @Composable () -> Unit,
+) {
+    val interaction = rememberLiquidTouchInteraction()
+    val resolvedAccent = if (accentTint.isSpecified) accentTint else MaterialTheme.colorScheme.primary
+    Box(
+        modifier = modifier
+            .liquidGlassSurface(
+                shape = shape,
+                borderWidth = borderWidth,
+                accentTint = resolvedAccent,
+                interactive = enabled,
+                onClick = if (enabled) onClick else null,
+                interaction = interaction,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
+    }
+}
+
+/**
+ * Liquid Glass Filter/Choice Chip with fluid touch reaction and selected glow.
+ */
+@Composable
+fun LiquidGlassChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    label: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    shape: Shape = CircleShape,
+    accentTint: Color = Color.Unspecified,
+    leadingIcon: (@Composable () -> Unit)? = null,
+) {
+    val resolvedAccent = if (accentTint.isSpecified) accentTint else MaterialTheme.colorScheme.primary
+    val chipAccent = if (selected) resolvedAccent else Color.Transparent
+    val interaction = rememberLiquidTouchInteraction()
+
+    Box(
+        modifier = modifier
+            .liquidGlassSurface(
+                shape = shape,
+                borderWidth = if (selected) 1.5.dp else 1.dp,
+                accentTint = if (selected) resolvedAccent else Color.Unspecified,
+                interactive = enabled,
+                onClick = if (enabled) onClick else null,
+                interaction = interaction,
+            )
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            leadingIcon?.invoke()
+            label()
+        }
+    }
 }
 
 /** Keeps glass inside Material's visual bounds while retaining its outer touch target. */
@@ -710,17 +1175,19 @@ enum class LiquidGlassPreset {
     ContextMenu,
     Overlay,
     Card,
+    Header,
 }
 
 private fun LiquidGlassPreset.isGlassTarget(): Boolean = when (this) {
     LiquidGlassPreset.BottomNavigation,
     LiquidGlassPreset.MiniPlayer,
     LiquidGlassPreset.PlayerControls,
-    LiquidGlassPreset.FloatingControls -> true
+    LiquidGlassPreset.FloatingControls,
+    LiquidGlassPreset.Header,
     LiquidGlassPreset.ModalSheet,
     LiquidGlassPreset.ContextMenu,
     LiquidGlassPreset.Overlay,
-    LiquidGlassPreset.Card -> false
+    LiquidGlassPreset.Card -> true
 }
 
 /**
@@ -739,16 +1206,21 @@ fun Modifier.liquidGlassChrome(
     contentBrightness: Float = 0f,
     onPointerPosition: ((Offset?) -> Unit)? = null,
 ): Modifier {
-    if (!enabled || !preset.isGlassTarget() || backdrop == null || !isLiquidGlassBackdropSupported()) {
+    if (!enabled || !LocalLiquidGlass.current) {
         return this
     }
-    // interactionSource/ambient/contentBrightness deliberately ignored:
-    // Uses observe-only GlassInteraction, no haptics, no ambient drift.
-    return this.liquidGlass(
-        backdrop = backdrop,
+    if (preset.isGlassTarget() && backdrop != null && isLiquidGlassBackdropSupported()) {
+        return this.liquidGlass(
+            backdrop = backdrop,
+            shape = shape,
+            interactive = true,
+            highlight = Highlight.Default,
+        )
+    }
+    return this.liquidGlassSurface(
         shape = shape,
-        interactive = true,
-        highlight = Highlight.Default,
+        borderWidth = 1.dp,
+        interactive = false,
     )
 }
 

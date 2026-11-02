@@ -73,6 +73,7 @@ class AddonClient(
         val url = if (baseUrl.endsWith("/manifest.json")) baseUrl else "$baseUrl/manifest.json"
         try {
             val reqBuilder = Request.Builder().url(url).get()
+            reqBuilder.header("User-Agent", "Neon Song-Player/1.0")
             signRequest(url, "GET", reqBuilder)
             val req = reqBuilder.build()
             client.newCall(req).execute().use { res ->
@@ -103,6 +104,7 @@ class AddonClient(
 
         try {
             val reqBuilder = Request.Builder().url(url).get()
+            reqBuilder.header("User-Agent", "Neon Song-Player/1.0")
             signRequest(url, "GET", reqBuilder)
             val req = reqBuilder.build()
             client.newCall(req).execute().use { res ->
@@ -144,12 +146,13 @@ class AddonClient(
 
         try {
             val reqBuilder = Request.Builder().url(url).get()
-            if (isDownload) {
-                reqBuilder.header("X-LW-Intent", "download")
-                reqBuilder.header("User-Agent", "Neon Song-Downloader/1.0")
-            } else {
+            val useStreamIntent = !isDownload || atmos || quality.equals("atmos", ignoreCase = true)
+            if (useStreamIntent) {
                 reqBuilder.header("X-LW-Intent", "stream")
                 reqBuilder.header("User-Agent", "Neon Song-Player/1.0")
+            } else {
+                reqBuilder.header("X-LW-Intent", "download")
+                reqBuilder.header("User-Agent", "Neon Song-Downloader/1.0")
             }
             signRequest(url, "GET", reqBuilder)
             val req = reqBuilder.build()

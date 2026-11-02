@@ -63,6 +63,7 @@ import com.neonsong.app.data.generate.GeneratedTrack
 import com.neonsong.app.playback.toPlayableTrack
 import com.neonsong.app.ui.common.ArtworkImage
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.rememberExpressiveHeaderBackdrop
 import com.neonsong.app.ui.common.ExpressiveMotion
 import com.neonsong.app.ui.common.GroupGap
 import com.neonsong.app.ui.common.GroupPosition
@@ -77,6 +78,7 @@ import com.neonsong.app.ui.common.groupShape
 import com.neonsong.app.ui.player.LocalMiniPlayerScrollClearance
 import com.neonsong.app.ui.player.LocalMusicPlayer
 import com.neonsong.app.ui.theme.ExpressivePillShape
+import com.neonsong.app.ui.theme.liquidGlassSource
 
 @Composable
 private fun shimmerBrush(): Brush {
@@ -113,6 +115,7 @@ private fun shimmerBrush(): Brush {
 @Composable
 fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val headerBackdrop = rememberExpressiveHeaderBackdrop()
     val musicPlayer = LocalMusicPlayer.current
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -146,13 +149,19 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
             title = "Discover",
             subtitle = if (state.isYtConnected) "Discover frash tracks" else "Discover frash tracks",
             onBack = onBack,
+            backdrop = headerBackdrop,
             actions = {
                 HeaderActionIcon(Icons.Filled.BookmarkAdd, "Save as playlist", viewModel::saveAsPlaylist)
                 HeaderActionIcon(Icons.Filled.Shuffle, "Shuffle Recommendations", viewModel::surpriseMe)
             },
         )
 
-        Box(Modifier.fillMaxSize().safeHorizontalContentPadding()) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .safeHorizontalContentPadding()
+                .liquidGlassSource(headerBackdrop),
+        ) {
             Crossfade(
                 targetState = state.isLoading && state.tracks.isEmpty(),
                 animationSpec = tween(ExpressiveMotion.Standard, easing = FastOutSlowInEasing),

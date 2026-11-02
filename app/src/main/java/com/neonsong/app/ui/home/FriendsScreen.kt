@@ -30,9 +30,11 @@ import com.neonsong.app.ui.common.adaptiveContentWidth
 import com.neonsong.app.ui.common.ExpressiveGroup
 import com.neonsong.app.ui.common.ExpressiveGroupTrackRow
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.rememberExpressiveHeaderBackdrop
 import com.neonsong.app.ui.player.LocalMiniPlayerScrollClearance
 import com.neonsong.app.ui.common.safeDrawingBottomPadding
 import com.neonsong.app.ui.common.safeHorizontalContentPadding
+import com.neonsong.app.ui.theme.liquidGlassSource
 private val FriendsContainerShape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
 /**
@@ -56,6 +58,7 @@ fun FriendsScreen(
     onOpenFriendProfile: (username: String, displayName: String?, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val headerBackdrop = rememberExpressiveHeaderBackdrop()
 
     // Loads the friends list the first time this screen is reached, same
     // trigger openFriendsSheet() used to provide via the old sheet's open
@@ -82,6 +85,7 @@ fun FriendsScreen(
             title = "Friends",
             subtitle = if (friends.isNotEmpty()) "Long-press a friend to pin them to the top" else null,
             onBack = onBack,
+            backdrop = headerBackdrop,
         )
 
         androidx.compose.foundation.layout.Spacer(Modifier.height(10.dp))
@@ -119,7 +123,8 @@ fun FriendsScreen(
                     // — not a sizing issue this time, just a genuinely
                     // missing modifier from the Dialog-to-screen
                     // conversion.
-                    .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                    .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                    .liquidGlassSource(headerBackdrop),
             ) {
             when {
                 isLoading -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {

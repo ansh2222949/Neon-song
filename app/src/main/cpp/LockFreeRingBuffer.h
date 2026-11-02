@@ -67,6 +67,27 @@ public:
         readIndex_.store(write, std::memory_order_release);
     }
 
+    // SPSC-safe flush invoked strictly from the consumer thread.
+    // Advancing readIndex_ to writeIndex_ drops all pending readable samples
+    // without racing against any concurrent writeIndex_ update from the producer.
+    void clearFromConsumer() noexcept {
+        const auto write = writeIndex_.load(std::memory_order_acquire);
+        readIndex_.store(write, std::memory_order_release);
+    }
+
+    [[nodiscard]] std::uint64_t currentWriteIndex() const noexcept {
+        return writeIndex_.load(std::memory_order_acquire);
+    }
+
+    void clearUpTo(std::uint64_t targetWrite) noexcept {
+        const auto currentRead = readIndex_.load(std::memory_order_relaxed);
+        const auto currentWrite = writeIndex_.load(std::memory_order_acquire);
+        const auto safeTarget = std::min(targetWrite, currentWrite);
+        if (safeTarget > currentRead) {
+            readIndex_.store(safeTarget, std::memory_order_release);
+        }
+    }
+
 private:
     void copyIntoRing(const T* source, std::size_t count, std::size_t offset) noexcept {
         const auto first = std::min(count, capacity_ - offset);

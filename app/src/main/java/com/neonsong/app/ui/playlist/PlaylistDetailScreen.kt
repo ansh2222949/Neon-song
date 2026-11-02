@@ -1,4 +1,5 @@
 package com.neonsong.app.ui.playlist
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -49,7 +50,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -101,6 +101,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.RectangleShape
@@ -130,6 +131,8 @@ import com.neonsong.app.data.playlist.isYouTubeOnly
 import com.neonsong.app.playback.toPlayableTrack
 import com.neonsong.app.ui.common.ArtworkImage
 import com.neonsong.app.ui.common.ExpressiveLoadingIndicator
+import com.neonsong.app.ui.theme.LiquidGlassIconButton
+import com.neonsong.app.ui.theme.liquidGlassSurface
 import com.neonsong.app.ui.common.PlaylistCover
 import com.neonsong.app.ui.common.TrackContextMenuSheet
 import com.neonsong.app.ui.common.TrackMenuCapabilities
@@ -150,6 +153,29 @@ enum class PlaylistTrackSort(val label: String) {
     NAME("Name"),
     ARTIST("Artist"),
     PLAY_TIME("Play time"),
+}
+
+internal object PlaylistSortMemory {
+    private const val PREFS = "playlist_track_sort"
+    private const val GLOBAL_KEY = "global_last_sort"
+
+    fun load(context: android.content.Context, playlistId: Long): Pair<PlaylistTrackSort, Boolean> {
+        val prefs = context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
+        val raw = prefs.getString(playlistId.toString(), null)
+            ?: prefs.getString(GLOBAL_KEY, null)
+            ?: return PlaylistTrackSort.CUSTOM to true
+        val sort = PlaylistTrackSort.entries.firstOrNull { it.name == raw.substringBefore(':') }
+            ?: return PlaylistTrackSort.CUSTOM to true
+        return sort to (raw.substringAfter(':') == "asc")
+    }
+
+    fun save(context: android.content.Context, playlistId: Long, sort: PlaylistTrackSort, ascending: Boolean) {
+        val prefs = context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).edit()
+        val serialized = "${sort.name}:${if (ascending) "asc" else "desc"}"
+        prefs.putString(playlistId.toString(), serialized)
+        prefs.putString(GLOBAL_KEY, serialized)
+        prefs.apply()
+    }
 }
 
 private fun formatDate(millis: Long): String =
@@ -198,7 +224,7 @@ fun PlaylistDetailScreen(
     }
 
     val isThisPlaylistPlaying = playbackState.isPlaying && playbackState.sourceLabel == playlist.title
-    var coverEditorOpen by remember { mutableStateOf(false) }
+    var coverEditorOpen by rememberSaveable { mutableStateOf(false) }
     var coverPickerPending by remember { mutableStateOf(false) }
     val coverPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -214,11 +240,12 @@ fun PlaylistDetailScreen(
     var overflowMenuOpen by remember { mutableStateOf(false) }
     val syncedPlaylistIds by viewModel.syncedPlaylistIds.collectAsStateWithLifecycle()
     var sortMenuOpen by remember { mutableStateOf(false) }
-    var currentSort by remember { mutableStateOf(PlaylistTrackSort.CUSTOM) }
-    var sortAscending by remember { mutableStateOf(true) }
-    var isReorderLocked by remember { mutableStateOf(true) }
-    var searchQuery by remember { mutableStateOf("") }
-    var isSearchActive by remember { mutableStateOf(false) }
+    val initialSort = remember(playlistId) { PlaylistSortMemory.load(context, playlistId) }
+    var currentSort by rememberSaveable(playlistId) { mutableStateOf(initialSort.first) }
+    var sortAscending by rememberSaveable(playlistId) { mutableStateOf(initialSort.second) }
+    var isReorderLocked by rememberSaveable(playlistId) { mutableStateOf(true) }
+    var searchQuery by rememberSaveable(playlistId) { mutableStateOf("") }
+    var isSearchActive by rememberSaveable(playlistId) { mutableStateOf(false) }
 
     val displayTracks = remember(playlist.tracks, currentSort, sortAscending, searchQuery) {
         val sorted = when (currentSort) {
@@ -587,12 +614,18 @@ fun PlaylistDetailScreen(
                                         },
                                         onClick = {
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            val newSort: PlaylistTrackSort
+                                            val newAscending: Boolean
                                             if (currentSort == option) {
-                                                sortAscending = !sortAscending
+                                                newSort = option
+                                                newAscending = !sortAscending
                                             } else {
-                                                currentSort = option
-                                                sortAscending = option != PlaylistTrackSort.PLAY_TIME
+                                                newSort = option
+                                                newAscending = option != PlaylistTrackSort.PLAY_TIME
                                             }
+                                            currentSort = newSort
+                                            sortAscending = newAscending
+                                            PlaylistSortMemory.save(context, playlistId, newSort, newAscending)
                                             sortMenuOpen = false
                                         },
                                     )
@@ -734,10 +767,9 @@ fun PlaylistDetailScreen(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 if (displayTracks.isEmpty()) return@NativeTrackRow
-                                // index is from composition time; the list can
-                                // shrink (remove/move) before the tap lands —
-                                // an OOB startIndex crashed playback at the edge.
-                                val safeIndex = index.coerceIn(displayTracks.indices)
+                                // index is from composition time; match track by key first to avoid list mutation drift
+                                val trackIndex = displayTracks.indexOfFirst { it.key == track.key }.takeIf { it >= 0 }
+                                val safeIndex = trackIndex ?: index.coerceIn(displayTracks.indices)
                                 runCatching {
                                     musicPlayer.playQueue(
                                         displayTracks.map(GeneratedTrack::toPlayableTrack),
@@ -867,13 +899,18 @@ fun PlaylistDetailScreen(
             label = "topBarElevation",
         )
 
-        Surface(
-            color = topBarBg,
-            tonalElevation = topBarElevation,
-            shadowElevation = topBarElevation,
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .align(Alignment.TopCenter),
+                .align(Alignment.TopCenter)
+                .then(
+                    if (showScrolledHeader) {
+                        Modifier.liquidGlassSurface(
+                            shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                            borderWidth = 1.dp,
+                        )
+                    } else Modifier
+                ),
         ) {
             Row(
                 modifier = Modifier
@@ -884,21 +921,16 @@ fun PlaylistDetailScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Circular back button
-                IconButton(
+                LiquidGlassIconButton(
                     onClick = onBack,
-                    modifier = Modifier
-                        .size(42.dp)
-                        .background(
-                            if (showScrolledHeader) Color.Transparent else Color.Black.copy(alpha = 0.38f),
-                            CircleShape,
-                        ),
+                    modifier = Modifier.size(40.dp),
+                    contentDescription = "Back",
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
                         tint = if (showScrolledHeader) MaterialTheme.colorScheme.onSurface else Color.White,
-                        modifier = Modifier.size(22.dp),
+                        modifier = Modifier.size(20.dp),
                     )
                 }
 
@@ -1328,35 +1360,29 @@ private fun NativeTrackRow(
         label = "rowBg",
     )
 
-    val rowModifier = if (isPlaying) {
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(
-                Brush.horizontalGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
-                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f),
-                    ),
-                ),
-            )
-            .graphicsLayer {
-                scaleX = rowScale
-                scaleY = rowScale
-            }
+    val containerColor = if (isPlaying) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
     } else {
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .graphicsLayer {
-                scaleX = rowScale
-                scaleY = rowScale
-            }
+        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.70f)
+    }
+    val containerBorder = if (isPlaying) {
+        androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
+    } else {
+        androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f))
     }
 
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(16.dp))
+        .graphicsLayer {
+            scaleX = rowScale
+            scaleY = rowScale
+        }
+
     Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = Color.Transparent,
+        shape = RoundedCornerShape(16.dp),
+        color = containerColor,
+        border = containerBorder,
         modifier = rowModifier,
     ) {
         Row(
@@ -1471,18 +1497,8 @@ private fun NativeTrackRow(
 
             // Drag handle (only when reorder is enabled by the caller)
             dragHandle?.invoke()
-            // Options menu button
-            IconButton(
-                onClick = onMenu,
-                modifier = Modifier.size(36.dp),
-            ) {
-                Icon(
-                    Icons.Filled.MoreVert,
-                    contentDescription = "Song options",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                    modifier = Modifier.size(18.dp),
-                )
-            }
+            // Options menu button with stroke / outline container matching Discover and Statistics
+            com.neonsong.app.ui.common.OverflowMenuButton(onClick = onMenu)
         }
     }
 }

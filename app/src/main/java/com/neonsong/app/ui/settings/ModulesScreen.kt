@@ -33,8 +33,9 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import com.neonsong.app.ui.common.ExpressiveHeader
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -61,6 +62,9 @@ import androidx.compose.ui.platform.LocalContext
 import android.content.Intent
 import android.net.Uri
 import com.neonsong.app.data.addon.AddonHealth
+import com.neonsong.app.ui.theme.LocalLiquidGlassBackdrop
+import com.neonsong.app.ui.theme.liquidGlassSource
+import com.neonsong.app.ui.theme.rememberLayerBackdrop
 
 /**
  * Settings -> Provider Modules & Addons.
@@ -80,6 +84,11 @@ fun ModulesScreen(
     val addonName by viewModel.addonName.collectAsStateWithLifecycle()
     val addonEnabled by viewModel.addonEnabled.collectAsStateWithLifecycle()
     val addonHealth by viewModel.addonHealth.collectAsStateWithLifecycle()
+    val modulesBackground = MaterialTheme.colorScheme.background
+    val modulesBackdrop = rememberLayerBackdrop {
+        drawRect(modulesBackground)
+        drawContent()
+    }
 
     var showAddonDialog by remember { mutableStateOf(false) }
     var addonInputText by remember { mutableStateOf("") }
@@ -164,21 +173,22 @@ fun ModulesScreen(
         )
     }
 
+    CompositionLocalProvider(LocalLiquidGlassBackdrop provides modulesBackdrop) {
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.settings_modules_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
-                    }
-                },
+            ExpressiveHeader(
+                title = stringResource(R.string.settings_modules_title),
+                subtitle = stringResource(R.string.settings_modules_title),
+                onBack = onBack,
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .liquidGlassSource(modulesBackdrop),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
@@ -396,6 +406,7 @@ fun ModulesScreen(
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
+    }
     }
 }
 

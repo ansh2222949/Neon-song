@@ -48,6 +48,7 @@ import com.neonsong.app.data.music.YouTubePlaylistResult
 import com.neonsong.app.ui.common.ArtworkImage
 import com.neonsong.app.ui.common.ExpressiveGroupTrackRow
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.rememberExpressiveHeaderBackdrop
 import com.neonsong.app.ui.common.ExpressiveLoadingIndicator
 import com.neonsong.app.ui.common.GroupGap
 import com.neonsong.app.ui.common.groupPositionFor
@@ -60,6 +61,8 @@ import com.neonsong.app.ui.common.TrackMenuTarget
 import com.neonsong.app.ui.common.TrackMiniTrayData
 import com.neonsong.app.ui.common.TrackMiniTraySheet
 import com.neonsong.app.ui.player.LocalMiniPlayerScrollClearance
+import com.neonsong.app.ui.theme.liquidGlassSource
+import com.neonsong.app.ui.theme.LayerBackdrop
 
 @Composable
 fun FeedPlaylistDetailScreen(
@@ -68,6 +71,7 @@ fun FeedPlaylistDetailScreen(
     viewModel: FeedPlaylistDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val headerBackdrop = rememberExpressiveHeaderBackdrop()
 
     LaunchedEffect(playlistId) {
         viewModel.load(playlistId)
@@ -89,6 +93,7 @@ fun FeedPlaylistDetailScreen(
             title = playlist?.title?.takeIf(String::isNotBlank) ?: "Playlist",
             subtitle = playlist?.author ?: "YouTube Music",
             onBack = onBack,
+            backdrop = headerBackdrop,
         )
 
         when (val current = state) {
@@ -143,6 +148,7 @@ fun FeedPlaylistDetailScreen(
                     isSaving = current.isSaving,
                     savedToLibrary = current.savedToLibrary,
                     saveError = current.saveError,
+                    backdrop = headerBackdrop,
                 )
             }
         }
@@ -159,12 +165,13 @@ private fun PlaylistContent(
     isSaving: Boolean,
     savedToLibrary: Boolean,
     saveError: String?,
+    backdrop: LayerBackdrop?,
 ) {
     var menuTrack by remember { mutableStateOf<YouTubeMusicTrack?>(null) }
     // Long-press (deep press) opens the mini tray; 3-dot keeps the full sheet.
     var miniTrayIndex by remember { mutableStateOf<Int?>(null) }
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().liquidGlassSource(backdrop),
         contentPadding = PaddingValues(
             top = 20.dp,
             bottom = 24.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),

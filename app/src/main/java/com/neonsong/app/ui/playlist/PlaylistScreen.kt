@@ -98,6 +98,7 @@ import com.neonsong.app.data.playlist.isYouTubeOnly
 import com.neonsong.app.playback.toPlayableTrack
 import com.neonsong.app.ui.common.ArtworkImage
 import com.neonsong.app.ui.common.ExpressiveHeader
+import com.neonsong.app.ui.common.rememberExpressiveHeaderBackdrop
 import com.neonsong.app.ui.common.PlaylistCover
 import com.neonsong.app.ui.common.TrackContextMenuSheet
 import com.neonsong.app.ui.common.TrackMenuCapabilities
@@ -105,6 +106,7 @@ import com.neonsong.app.ui.common.TrackMenuTarget
 import com.neonsong.app.ui.common.adaptiveContentWidth
 import com.neonsong.app.ui.shell.FloatingNavDefaults
 import com.neonsong.app.ui.theme.ExpressivePillShape
+import com.neonsong.app.ui.theme.liquidGlassSource
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -124,6 +126,7 @@ fun PlaylistScreen(
     viewModel: PlaylistViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val headerBackdrop = rememberExpressiveHeaderBackdrop()
     val context = LocalContext.current
     val musicPlayer = com.neonsong.app.ui.player.LocalMusicPlayer.current
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
@@ -162,6 +165,7 @@ fun PlaylistScreen(
             var sortMenuExpanded by remember { mutableStateOf(false) }
             ExpressiveHeader(
                 title = if (selectedPlaylists.isNotEmpty()) "${selectedPlaylists.size} selected" else "Playlist",
+                backdrop = headerBackdrop,
                 subtitle = if (selectedPlaylists.isNotEmpty()) "Long press to select more" else if (state.playlists.any { it.isYouTubeOnly && it.remoteTrackCount == null }) {
                     "${state.playlists.size} Playlists"
                 } else {
@@ -237,7 +241,8 @@ fun PlaylistScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                    .liquidGlassSource(headerBackdrop),
             ) {
                 when {
                     state.isLoading && state.playlists.isEmpty() && !state.isGenerating -> LoadingState()

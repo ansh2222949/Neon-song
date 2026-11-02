@@ -112,7 +112,10 @@ bool AudioEngine::startLocked(std::int32_t preferredOutputSampleRate) {
 
     {
         std::lock_guard<std::mutex> producerLock(producerMutex_);
-        // Never let a stale ring pointer outlive the state rebuild below.
+        for (std::size_t d = 0; d < kDeckCount; ++d) {
+            std::lock_guard<std::mutex> deckLock(deckProducerMutexes_[d]);
+            activeDeckRings_[d].store(nullptr, std::memory_order_release);
+        }
         activeRingBuffer_.store(nullptr, std::memory_order_release);
         releaseProducerStateLocked();
         const auto capacitySamples = static_cast<std::size_t>(sampleRate) *
@@ -121,6 +124,27 @@ bool AudioEngine::startLocked(std::int32_t preferredOutputSampleRate) {
         rawScratch_.resize(kProducerChunkFrames * kOutputChannels);
         stereoScratch_.resize(kProducerChunkFrames * kOutputChannels);
         resampledScratch_.resize(kMaxResampledFrames * kOutputChannels);
+
+        for (std::size_t d = 0; d < kDeckCount; ++d) {
+            deckRings_[d] = std::make_unique<LockFreeRingBuffer<float>>(capacitySamples);
+            deckRawScratch_[d].resize(kProducerChunkFrames * kOutputChannels);
+            deckStereoScratch_[d].resize(kProducerChunkFrames * kOutputChannels);
+            deckResampledScratch_[d].resize(kMaxResampledFrames * kOutputChannels);
+        }
+        realtimeScratchA_.assign(kProducerChunkFrames * 4, 0.0F);
+        realtimeScratchB_.assign(kProducerChunkFrames * 4, 0.0F);
+        realtimeStretchedA_.assign(kProducerChunkFrames * 4, 0.0F);
+        realtimeStretchedB_.assign(kProducerChunkFrames * 4, 0.0F);
+        for (std::size_t d = 0; d < kDeckCount; ++d) {
+            deckStretchers_[d].configure(static_cast<double>(sampleRate), kOutputChannels);
+            deckStretchers_[d].setTimeRatio(1.0F);
+            deckSpeed_[d].store(1.0F, std::memory_order_release);
+            deckPitch_[d].store(1.0F, std::memory_order_release);
+            deckTimeRatioTarget_[d].store(1.0F, std::memory_order_release);
+            deckStretcherAppliedRatio_[d] = 1.0F;
+            deckWsolaDrained_[d].store(true, std::memory_order_release);
+            deckFlushTargetWrite_[d].store(0, std::memory_order_release);
+        }
     }
 
     oboeDsp_.setPeakProtectionEnabled(true);
@@ -150,9 +174,13 @@ bool AudioEngine::startLocked(std::int32_t preferredOutputSampleRate) {
 
     outputSampleRate_.store(sampleRate, std::memory_order_release);
     activeRingBuffer_.store(ringBuffer_.get(), std::memory_order_release);
+    activeDeckRings_[0].store(deckRings_[0].get(), std::memory_order_release);
+    activeDeckRings_[1].store(deckRings_[1].get(), std::memory_order_release);
     stream_ = std::move(openedStream);
     if (stream_->requestStart() != oboe::Result::OK) {
         activeRingBuffer_.store(nullptr, std::memory_order_release);
+        activeDeckRings_[0].store(nullptr, std::memory_order_release);
+        activeDeckRings_[1].store(nullptr, std::memory_order_release);
         stream_->close();
         stream_.reset();
         outputSampleRate_.store(0, std::memory_order_release);
@@ -169,6 +197,8 @@ void AudioEngine::stop() noexcept {
     playbackEnabled_.store(false, std::memory_order_release);
     restartAllowed_.store(false, std::memory_order_release);
     activeRingBuffer_.store(nullptr, std::memory_order_release);
+    activeDeckRings_[0].store(nullptr, std::memory_order_release);
+    activeDeckRings_[1].store(nullptr, std::memory_order_release);
     if (stream_ != nullptr) {
         stream_->requestStop();
         stream_->close();
@@ -188,17 +218,9 @@ bool AudioEngine::isRunning() const noexcept {
 
 void AudioEngine::flushOutput() noexcept {
     std::lock_guard<std::mutex> controlLock(controlMutex_);
-    auto* ring = activeRingBuffer_.load(std::memory_order_acquire);
-    if (ring == nullptr || stream_ == nullptr) return;
-    // Park the consumer on silence first so the callback stops touching the
-    // ring while its contents are dropped. The stream itself stays open:
-    // reopening AAudio per track/seek is what produced pops on OEM stacks.
-    activeRingBuffer_.store(nullptr, std::memory_order_release);
-    {
-        std::lock_guard<std::mutex> producerLock(producerMutex_);
-        ring->clear();
-        resamplerFlushing_ = false;
-    }
+    if (stream_ == nullptr) return;
+    flushDeck(0);
+    flushDeck(1);
     underrunActive_ = false;
     recoveryFading_ = false;
     underrunFadePosition_ = fadeInCurve_.size();
@@ -208,7 +230,203 @@ void AudioEngine::flushOutput() noexcept {
     lastOutput_.fill(0.0F);
     underrunAnchor_.fill(0.0F);
     cleanFrames_ = 0;
-    activeRingBuffer_.store(ring, std::memory_order_release);
+}
+
+void AudioEngine::flushDeck(int deckId) noexcept {
+    if (deckId < 0 || deckId >= static_cast<int>(kDeckCount)) return;
+    const std::size_t idx = static_cast<std::size_t>(deckId);
+    std::lock_guard<std::mutex> lock(deckProducerMutexes_[idx]);
+
+    auto* ring = activeDeckRings_[idx].load(std::memory_order_relaxed);
+    if (ring == nullptr) {
+        ring = deckRings_[idx].get();
+    }
+    const std::uint64_t target = ring != nullptr ? ring->currentWriteIndex() : 0;
+    deckFlushTargetWrite_[idx].store(target, std::memory_order_release);
+
+    // Request consumer-owned SPSC ring buffer reset up to target
+    deckFlushRequests_[idx].fetch_add(1, std::memory_order_release);
+
+    if (deckResamplers_[idx] != nullptr) {
+        soxr_clear(asSoxr(deckResamplers_[idx]));
+    }
+    deckResamplersFlushing_[idx] = false;
+    deckResamplersDrained_[idx].store(true, std::memory_order_release);
+    deckStretchers_[idx].reset();
+    deckWsolaDrained_[idx].store(true, std::memory_order_release);
+    deckFramesRendered_[idx].store(0, std::memory_order_release);
+
+    // If stream is stopped or idle, consumer thread is not running, so clear directly
+    if (!isRunning() && ring != nullptr) {
+        ring->clearUpTo(target);
+    }
+}
+
+std::size_t AudioEngine::deckBufferedFrames(int deckId) const noexcept {
+    if (deckId < 0 || deckId >= static_cast<int>(kDeckCount)) return 0;
+    const auto* ring = activeDeckRings_[static_cast<std::size_t>(deckId)].load(std::memory_order_acquire);
+    return ring == nullptr ? 0 : ring->availableToRead() / kOutputChannels;
+}
+
+void AudioEngine::setDeckVolume(int deckId, float volume) noexcept {
+    if (deckId >= 0 && deckId < static_cast<int>(kDeckCount)) {
+        deckVolumes_[static_cast<std::size_t>(deckId)].store(
+            std::clamp(volume, 0.0F, 1.0F), std::memory_order_release);
+    }
+}
+
+float AudioEngine::deckVolume(int deckId) const noexcept {
+    if (deckId >= 0 && deckId < static_cast<int>(kDeckCount)) {
+        return deckVolumes_[static_cast<std::size_t>(deckId)].load(std::memory_order_acquire);
+    }
+    return 1.0F;
+}
+
+void AudioEngine::setCrossfadeProgress(float progress) noexcept {
+    crossfadeProgress_.store(std::clamp(progress, 0.0F, 1.0F), std::memory_order_release);
+}
+
+float AudioEngine::crossfadeProgress() const noexcept {
+    return crossfadeProgress_.load(std::memory_order_acquire);
+}
+
+void AudioEngine::setDeckPlaybackParameters(int deckId, float speed, float pitch) noexcept {
+    if (deckId < 0 || deckId >= static_cast<int>(kDeckCount)) return;
+    const std::size_t d = static_cast<std::size_t>(deckId);
+    const float clampedSpeed = std::clamp(speed, 0.25F, 3.0F);
+    const float clampedPitch = std::clamp(pitch, 0.25F, 3.0F);
+    const float oldPitch = deckPitch_[d].load(std::memory_order_relaxed);
+
+    deckSpeed_[d].store(clampedSpeed, std::memory_order_release);
+    deckPitch_[d].store(clampedPitch, std::memory_order_release);
+
+    // WSOLA stretch ratio = speed / pitch
+    // If pitch increases by 1.25x, resampler makes duration 0.8x.
+    // WSOLA time-stretches by (speed / pitch). When speed=1.0, WSOLA ratio is 0.8x,
+    // which stretches duration back to 1.0x, keeping duration unchanged while pitch is 1.25x!
+    const float wsolaRatio = std::clamp(clampedSpeed / clampedPitch, 0.25F, 3.0F);
+    deckTimeRatioTarget_[d].store(wsolaRatio, std::memory_order_release);
+
+    // If pitch changed, reconfigure deck resampler on next write
+    if (std::abs(clampedPitch - oldPitch) > 0.001F) {
+        std::lock_guard<std::mutex> lock(deckProducerMutexes_[d]);
+        const auto inRate = deckResamplerInputRates_[d];
+        if (inRate > 0) {
+            deckResamplerInputRates_[d] = 0; // Force re-creation with new pitch target
+            (void) configureDeckResamplerLocked(deckId, inRate);
+        }
+    }
+}
+
+float AudioEngine::deckSpeed(int deckId) const noexcept {
+    if (deckId >= 0 && deckId < static_cast<int>(kDeckCount)) {
+        return deckSpeed_[static_cast<std::size_t>(deckId)].load(std::memory_order_acquire);
+    }
+    return 1.0F;
+}
+
+float AudioEngine::deckPitch(int deckId) const noexcept {
+    if (deckId >= 0 && deckId < static_cast<int>(kDeckCount)) {
+        return deckPitch_[static_cast<std::size_t>(deckId)].load(std::memory_order_acquire);
+    }
+    return 1.0F;
+}
+
+void AudioEngine::setDeckTimeRatio(int deckId, float ratio) noexcept {
+    if (deckId >= 0 && deckId < static_cast<int>(kDeckCount)) {
+        const float clamped = std::clamp(ratio, 0.25F, 3.0F);
+        deckTimeRatioTarget_[static_cast<std::size_t>(deckId)].store(clamped, std::memory_order_release);
+        deckSpeed_[static_cast<std::size_t>(deckId)].store(clamped, std::memory_order_release);
+    }
+}
+
+float AudioEngine::deckTimeRatio(int deckId) const noexcept {
+    if (deckId >= 0 && deckId < static_cast<int>(kDeckCount)) {
+        return deckTimeRatioTarget_[static_cast<std::size_t>(deckId)].load(std::memory_order_acquire);
+    }
+    return 1.0F;
+}
+
+void AudioEngine::setDeckPlaying(int deckId, bool playing) noexcept {
+    if (deckId < 0 || deckId >= static_cast<int>(kDeckCount)) return;
+    deckPlaying_[static_cast<std::size_t>(deckId)].store(playing, std::memory_order_release);
+    const bool anyPlaying = deckPlaying_[0].load(std::memory_order_acquire) ||
+                            deckPlaying_[1].load(std::memory_order_acquire);
+    playbackEnabled_.store(anyPlaying, std::memory_order_release);
+}
+
+bool AudioEngine::isDeckPlaying(int deckId) const noexcept {
+    if (deckId < 0 || deckId >= static_cast<int>(kDeckCount)) return false;
+    return deckPlaying_[static_cast<std::size_t>(deckId)].load(std::memory_order_acquire);
+}
+
+void AudioEngine::drainDeckResampler(int deckId) noexcept {
+    if (deckId < 0 || deckId >= static_cast<int>(kDeckCount)) return;
+    const std::size_t d = static_cast<std::size_t>(deckId);
+    std::lock_guard<std::mutex> lock(deckProducerMutexes_[d]);
+    auto* ring = activeDeckRings_[d].load(std::memory_order_acquire);
+    if (ring == nullptr || deckResamplers_[d] == nullptr) {
+        deckResamplersDrained_[d].store(true, std::memory_order_release);
+        return;
+    }
+    deckResamplersFlushing_[d] = true;
+    while (true) {
+        const std::size_t availableOutputFrames = std::min(
+            kMaxResampledFrames,
+            ring->availableToWrite() / kOutputChannels);
+        if (availableOutputFrames == 0) break;
+
+        std::size_t outputDone = 0;
+        const soxr_error_t error = soxr_process(
+            asSoxr(deckResamplers_[d]),
+            nullptr,
+            0,
+            nullptr,
+            deckResampledScratch_[d].data(),
+            availableOutputFrames,
+            &outputDone);
+        if (error != nullptr || outputDone == 0) {
+            deckResamplersDrained_[d].store(true, std::memory_order_release);
+            break;
+        }
+        const std::size_t writtenSamples = ring->write(
+            deckResampledScratch_[d].data(),
+            outputDone * kOutputChannels);
+        if (writtenSamples != outputDone * kOutputChannels) {
+            break;
+        }
+    }
+}
+
+bool AudioEngine::isDeckResamplerDrained(int deckId) const noexcept {
+    if (deckId < 0 || deckId >= static_cast<int>(kDeckCount)) return true;
+    return deckResamplersDrained_[static_cast<std::size_t>(deckId)].load(std::memory_order_acquire);
+}
+
+bool AudioEngine::isDeckWsolaDrained(int deckId) const noexcept {
+    if (deckId >= 0 && deckId < static_cast<int>(kDeckCount)) {
+        return deckWsolaDrained_[static_cast<std::size_t>(deckId)].load(std::memory_order_acquire);
+    }
+    return true;
+}
+
+std::uint64_t AudioEngine::deckFramesRendered(int deckId) const noexcept {
+    if (deckId < 0 || deckId >= static_cast<int>(kDeckCount)) return 0;
+    return deckFramesRendered_[static_cast<std::size_t>(deckId)].load(std::memory_order_acquire);
+}
+
+std::int64_t AudioEngine::presentationLatencyUs() const noexcept {
+    std::lock_guard<std::mutex> controlLock(controlMutex_);
+    if (stream_ == nullptr) return 0;
+    const auto rate = outputSampleRate_.load(std::memory_order_acquire);
+    if (rate <= 0) return 0;
+
+    auto latencyResult = stream_->calculateLatencyMillis();
+    if (latencyResult && latencyResult.value() > 0.0) {
+        return static_cast<std::int64_t>(latencyResult.value() * 1000.0);
+    }
+    const auto bufferFrames = stream_->getBufferSizeInFrames();
+    return (static_cast<std::int64_t>(bufferFrames) * 1000000LL) / rate;
 }
 
 std::size_t AudioEngine::writePcm(
@@ -217,25 +435,48 @@ std::size_t AudioEngine::writePcm(
     PcmFormat format,
     std::int32_t inputSampleRate,
     std::int32_t inputChannelCount) {
-    if (pcm == nullptr || frameCount == 0 || inputSampleRate <= 0 ||
-        (inputChannelCount != 1 && inputChannelCount != kOutputChannels) ||
-        PcmConverter::bytesPerSample(format) == 0) {
+    const auto result = writeDeckPcm(0, pcm, frameCount, format, inputSampleRate, inputChannelCount);
+    return result > 0 ? static_cast<std::size_t>(result) : 0U;
+}
+
+std::int64_t AudioEngine::writeDeckPcm(
+    int deckId,
+    const void* pcm,
+    std::size_t frameCount,
+    PcmFormat format,
+    std::int32_t inputSampleRate,
+    std::int32_t inputChannelCount) {
+    if (deckId < 0 || deckId >= static_cast<int>(kDeckCount)) {
+        return -4; // Invalid deck
+    }
+    if (pcm == nullptr || PcmConverter::bytesPerSample(format) == 0) {
+        return -1; // Invalid buffer
+    }
+    if (frameCount == 0) {
         return 0;
+    }
+    if (inputSampleRate <= 0 || (inputChannelCount != 1 && inputChannelCount != kOutputChannels)) {
+        return -2; // Invalid format
     }
 
-    std::lock_guard<std::mutex> producerLock(producerMutex_);
-    auto* ring = activeRingBuffer_.load(std::memory_order_acquire);
+    const std::size_t d = static_cast<std::size_t>(deckId);
+    std::lock_guard<std::mutex> producerLock(deckProducerMutexes_[d]);
+    auto* ring = activeDeckRings_[d].load(std::memory_order_acquire);
     const std::int32_t destinationRate = outputSampleRate_.load(std::memory_order_acquire);
-    if (ring == nullptr || destinationRate <= 0 ||
-        !configureResamplerLocked(inputSampleRate)) {
-        return 0;
+    if (ring == nullptr || destinationRate <= 0) {
+        return -3; // Engine not started / unavailable
+    }
+    if (!configureDeckResamplerLocked(deckId, inputSampleRate)) {
+        return -2; // Resampler configuration failed
     }
     inputAlreadyProcessed_.store(false, std::memory_order_release);
+    deckWsolaDrained_[d].store(false, std::memory_order_release);
 
     const auto* inputBytes = static_cast<const std::uint8_t*>(pcm);
     const std::size_t bytesPerFrame = PcmConverter::bytesPerSample(format) *
         static_cast<std::size_t>(inputChannelCount);
-    const double ratio = static_cast<double>(destinationRate) / inputSampleRate;
+    const float pitch = deckPitch_[d].load(std::memory_order_relaxed);
+    const double ratio = (static_cast<double>(destinationRate) * static_cast<double>(pitch)) / inputSampleRate;
     const std::size_t ratioSafeChunk = std::max<std::size_t>(
         1,
         static_cast<std::size_t>((kMaxResampledFrames - 256) /
@@ -251,25 +492,25 @@ std::size_t AudioEngine::writePcm(
         const void* chunkInput = inputBytes + consumedFrames * bytesPerFrame;
         const std::size_t inputSamples = chunkFrames *
             static_cast<std::size_t>(inputChannelCount);
-        if (!PcmConverter::toFloat(chunkInput, inputSamples, format, rawScratch_.data())) {
+        if (!PcmConverter::toFloat(chunkInput, inputSamples, format, deckRawScratch_[d].data())) {
             break;
         }
 
         if (inputChannelCount == 1) {
             for (std::size_t frame = 0; frame < chunkFrames; ++frame) {
-                stereoScratch_[frame * 2U] = rawScratch_[frame];
-                stereoScratch_[frame * 2U + 1U] = rawScratch_[frame];
+                deckStereoScratch_[d][frame * 2U] = deckRawScratch_[d][frame];
+                deckStereoScratch_[d][frame * 2U + 1U] = deckRawScratch_[d][frame];
             }
         } else {
             std::memcpy(
-                stereoScratch_.data(),
-                rawScratch_.data(),
+                deckStereoScratch_[d].data(),
+                deckRawScratch_[d].data(),
                 chunkFrames * kOutputChannels * sizeof(float));
         }
 
-        if (resampler_ == nullptr) {
+        if (deckResamplers_[d] == nullptr) {
             const std::size_t writtenSamples = ring->write(
-                stereoScratch_.data(),
+                deckStereoScratch_[d].data(),
                 chunkFrames * kOutputChannels);
             const std::size_t writtenFrames = writtenSamples / kOutputChannels;
             consumedFrames += writtenFrames;
@@ -285,23 +526,27 @@ std::size_t AudioEngine::writePcm(
         std::size_t inputDone = 0;
         std::size_t outputDone = 0;
         const soxr_error_t error = soxr_process(
-            asSoxr(resampler_),
-            stereoScratch_.data(),
+            asSoxr(deckResamplers_[d]),
+            deckStereoScratch_[d].data(),
             chunkFrames,
             &inputDone,
-            resampledScratch_.data(),
+            deckResampledScratch_[d].data(),
             availableOutputFrames,
             &outputDone);
         if (error != nullptr) break;
 
         const std::size_t writtenSamples = ring->write(
-            resampledScratch_.data(),
+            deckResampledScratch_[d].data(),
             outputDone * kOutputChannels);
         if (writtenSamples != outputDone * kOutputChannels) break;
         consumedFrames += inputDone;
         if (inputDone == 0) break;
     }
-    return consumedFrames;
+    if (consumedFrames > 0) {
+        deckResamplersDrained_[d].store(false, std::memory_order_release);
+    }
+    deckFramesWritten_[d].fetch_add(consumedFrames, std::memory_order_release);
+    return static_cast<std::int64_t>(consumedFrames);
 }
 
 std::size_t AudioEngine::writeProcessedPcm(
@@ -588,9 +833,7 @@ bool AudioEngine::configureMediaResamplerLocked() {
 }
 
 std::size_t AudioEngine::bufferedFrames() const noexcept {
-    std::lock_guard<std::mutex> producerLock(producerMutex_);
-    const auto* ring = activeRingBuffer_.load(std::memory_order_acquire);
-    return ring == nullptr ? 0 : ring->availableToRead() / kOutputChannels;
+    return deckBufferedFrames(0) + deckBufferedFrames(1);
 }
 
 oboe::DataCallbackResult AudioEngine::onAudioReady(
@@ -598,27 +841,64 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
     void* audioData,
     std::int32_t numFrames) {
     auto* output = static_cast<float*>(audioData);
-    auto* ring = activeRingBuffer_.load(std::memory_order_acquire);
+    auto* ringA = activeDeckRings_[0].load(std::memory_order_acquire);
+    auto* ringB = activeDeckRings_[1].load(std::memory_order_acquire);
     if (output == nullptr || numFrames <= 0) return oboe::DataCallbackResult::Continue;
 
     const std::size_t requestedFrames = static_cast<std::size_t>(numFrames);
-    // While the ring is unpublished, stop()/flushOutput()/restart own every
-    // piece of fade/prebuffer state below. The callback then renders plain
-    // silence and touches nothing, which turns "null ring" into a proper
-    // handoff instead of a data race.
-    if (ring == nullptr) {
+    if (ringA == nullptr && ringB == nullptr) {
         std::memset(output, 0, requestedFrames * kOutputChannels * sizeof(float));
         return oboe::DataCallbackResult::Continue;
     }
 
+    // Process consumer-owned SPSC ring buffer flush requests
+    for (std::size_t d = 0; d < kDeckCount; ++d) {
+        const std::uint64_t req = deckFlushRequests_[d].load(std::memory_order_acquire);
+        if (req != deckFlushAcks_[d]) {
+            auto* ring = activeDeckRings_[d].load(std::memory_order_relaxed);
+            if (ring != nullptr) {
+                ring->clearUpTo(deckFlushTargetWrite_[d].load(std::memory_order_acquire));
+            }
+            deckStretchers_[d].reset();
+            deckWsolaDrained_[d].store(true, std::memory_order_release);
+            deckFlushAcks_[d] = req;
+        }
+
+        const float ratioTarget = deckTimeRatioTarget_[d].load(std::memory_order_acquire);
+        if (std::abs(ratioTarget - deckStretcherAppliedRatio_[d]) > 0.0001F) {
+            deckStretchers_[d].setTimeRatio(ratioTarget);
+            deckStretcherAppliedRatio_[d] = ratioTarget;
+        }
+    }
+
     const bool playingNow = playbackEnabled_.load(std::memory_order_acquire);
-    // While paused, keep draining any queued tail under the 5 ms output
-    // volume ramp instead of hard-cutting to silence â€” a mid-sample gate is
-    // audible as a click on every device class.
+    const bool deckAPlaying = deckPlaying_[0].load(std::memory_order_acquire);
+    const bool deckBPlaying = deckPlaying_[1].load(std::memory_order_acquire);
+
+    // Smooth pause-tail draining per deck
+    const float pauseStep = outputVolumeRampStep_ * 2.0F;
+    if (deckAPlaying) {
+        deckPauseGain_[0] = std::min(1.0F, deckPauseGain_[0] + pauseStep);
+    } else {
+        deckPauseGain_[0] = std::max(0.0F, deckPauseGain_[0] - pauseStep);
+    }
+
+    if (deckBPlaying) {
+        deckPauseGain_[1] = std::min(1.0F, deckPauseGain_[1] + pauseStep);
+    } else {
+        deckPauseGain_[1] = std::max(0.0F, deckPauseGain_[1] - pauseStep);
+    }
+
+    const bool anyDeckActive = deckAPlaying || deckBPlaying ||
+        deckPauseGain_[0] > 0.0F || deckPauseGain_[1] > 0.0F;
+
+    const std::size_t availA = (ringA != nullptr) ? (ringA->availableToRead() / kOutputChannels) : 0;
+    const std::size_t availB = (ringB != nullptr) ? (ringB->availableToRead() / kOutputChannels) : 0;
+    const std::size_t availableFrames = availA + availB;
+
     const bool drainingPauseTail =
-        !playingNow && currentOutputVolume_ > 0.0F &&
-        ring->availableToRead() >= kOutputChannels;
-    if (!playingNow && !drainingPauseTail) {
+        !playingNow && currentOutputVolume_ > 0.0F && availableFrames > 0;
+    if ((!playingNow && !drainingPauseTail) || !anyDeckActive) {
         std::memset(output, 0, requestedFrames * kOutputChannels * sizeof(float));
         underrunActive_ = false;
         recoveryFading_ = false;
@@ -627,7 +907,7 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
         lastOutput_.fill(0.0F);
         return oboe::DataCallbackResult::Continue;
     }
-    const std::size_t availableFrames = ring->availableToRead() / kOutputChannels;
+
     if (prebuffering_ && playingNow &&
         (availableFrames == 0 ||
             (availableFrames < prebufferFrames_ && prebufferWaitCallbacks_-- > 0))) {
@@ -639,11 +919,106 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
         recoveryFading_ = true;
         recoveryFadePosition_ = 0;
     }
-    const std::size_t readSamples = ring->read(output, requestedFrames * kOutputChannels);
-    const std::size_t validFrames = readSamples / kOutputChannels;
+
+    std::size_t framesA = 0;
+    if ((deckAPlaying || deckPauseGain_[0] > 0.0F) && ringA != nullptr) {
+        const std::size_t readA = ringA->read(realtimeScratchA_.data(), requestedFrames * kOutputChannels);
+        framesA = readA / kOutputChannels;
+        deckFramesRendered_[0].fetch_add(framesA, std::memory_order_release);
+    }
+
+    std::size_t framesB = 0;
+    if ((deckBPlaying || deckPauseGain_[1] > 0.0F) && ringB != nullptr) {
+        const std::size_t readB = ringB->read(realtimeScratchB_.data(), requestedFrames * kOutputChannels);
+        framesB = readB / kOutputChannels;
+        deckFramesRendered_[1].fetch_add(framesB, std::memory_order_release);
+    }
+
+    // Apply WSOLA time stretching to Deck A if ratio != 1.0
+    const float* aSamples = realtimeScratchA_.data();
+    std::size_t activeFramesA = framesA;
+    if (std::abs(deckStretcherAppliedRatio_[0] - 1.0F) > 0.001F) {
+        if (framesA > 0) {
+            const std::size_t stretched = deckStretchers_[0].process(
+                realtimeScratchA_.data(),
+                framesA,
+                realtimeStretchedA_.data(),
+                requestedFrames);
+            aSamples = realtimeStretchedA_.data();
+            activeFramesA = stretched;
+            deckWsolaDrained_[0].store(false, std::memory_order_release);
+        } else if (deckResamplersDrained_[0].load(std::memory_order_relaxed) &&
+                   (deckAPlaying || deckPauseGain_[0] > 0.0F)) {
+            const std::size_t flushed = deckStretchers_[0].flush(
+                realtimeStretchedA_.data(),
+                requestedFrames);
+            if (flushed > 0) {
+                aSamples = realtimeStretchedA_.data();
+                activeFramesA = flushed;
+                deckFramesRendered_[0].fetch_add(activeFramesA, std::memory_order_release);
+                deckWsolaDrained_[0].store(false, std::memory_order_release);
+            } else {
+                deckWsolaDrained_[0].store(true, std::memory_order_release);
+            }
+        }
+    } else {
+        deckWsolaDrained_[0].store(true, std::memory_order_release);
+    }
+
+    // Apply WSOLA time stretching to Deck B if ratio != 1.0
+    const float* bSamples = realtimeScratchB_.data();
+    std::size_t activeFramesB = framesB;
+    if (std::abs(deckStretcherAppliedRatio_[1] - 1.0F) > 0.001F) {
+        if (framesB > 0) {
+            const std::size_t stretched = deckStretchers_[1].process(
+                realtimeScratchB_.data(),
+                framesB,
+                realtimeStretchedB_.data(),
+                requestedFrames);
+            bSamples = realtimeStretchedB_.data();
+            activeFramesB = stretched;
+            deckWsolaDrained_[1].store(false, std::memory_order_release);
+        } else if (deckResamplersDrained_[1].load(std::memory_order_relaxed) &&
+                   (deckBPlaying || deckPauseGain_[1] > 0.0F)) {
+            // Resampler is drained and ring is empty: flush WSOLA tail
+            const std::size_t flushed = deckStretchers_[1].flush(
+                realtimeStretchedB_.data(),
+                requestedFrames);
+            if (flushed > 0) {
+                bSamples = realtimeStretchedB_.data();
+                activeFramesB = flushed;
+                deckFramesRendered_[1].fetch_add(activeFramesB, std::memory_order_release);
+                deckWsolaDrained_[1].store(false, std::memory_order_release);
+            } else {
+                deckWsolaDrained_[1].store(true, std::memory_order_release);
+            }
+        }
+    } else {
+        deckWsolaDrained_[1].store(true, std::memory_order_release);
+    }
+
+    const std::size_t validFrames = std::max(activeFramesA, activeFramesB);
     const bool wasUnderrun = underrunActive_;
 
     if (validFrames > 0) {
+        const float xfade = crossfadeProgress_.load(std::memory_order_relaxed);
+        // Equal-power crossfade curve with per-deck volume and pause gain
+        const float gainA = std::cos(xfade * 1.57079632679F) *
+            deckVolumes_[0].load(std::memory_order_relaxed) * deckPauseGain_[0];
+        const float gainB = std::sin(xfade * 1.57079632679F) *
+            deckVolumes_[1].load(std::memory_order_relaxed) * deckPauseGain_[1];
+
+        for (std::size_t f = 0; f < validFrames; ++f) {
+            const std::size_t off = f * kOutputChannels;
+            const float sA_0 = (f < activeFramesA) ? aSamples[off] : 0.0F;
+            const float sA_1 = (f < activeFramesA) ? aSamples[off + 1U] : 0.0F;
+            const float sB_0 = (f < activeFramesB) ? bSamples[off] : 0.0F;
+            const float sB_1 = (f < activeFramesB) ? bSamples[off + 1U] : 0.0F;
+
+            output[off]      = sA_0 * gainA + sB_0 * gainB;
+            output[off + 1U] = sA_1 * gainA + sB_1 * gainB;
+        }
+
         if (!inputAlreadyProcessed_.load(std::memory_order_acquire)) {
             oboeDsp_.process(output, static_cast<std::int32_t>(validFrames));
         }
@@ -652,10 +1027,6 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
             recoveryFadePosition_ = 0;
         }
 
-        // Bit-perfect must not scale valid PCM: recovery fades and the
-        // output-volume ramp are bypassed so the gain stays exactly 1.0.
-        // Starvation fill below only covers missing frames (no valid
-        // samples exist to preserve there).
         const bool outputBitPerfect = oboeDsp_.isBitPerfectEnabled();
         for (std::size_t frame = 0; frame < validFrames; ++frame) {
             float recoveryGain = 1.0F;
@@ -667,8 +1038,6 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
                 }
             }
             const std::size_t offset = frame * kOutputChannels;
-            // Pausing fades toward zero through the same ramp; resuming fades
-            // back up â€” both click-free.
             const float volumeTarget = playingNow
                 ? targetOutputVolume_.load(std::memory_order_relaxed)
                 : 0.0F;
@@ -692,8 +1061,6 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
         if (playingNow) {
             if (!wasUnderrun || validFrames > 0) {
                 underrunCount_.fetch_add(1, std::memory_order_release);
-            }
-            if (!wasUnderrun || validFrames > 0) {
                 underrunAnchor_ = lastOutput_;
                 underrunFadePosition_ = 0;
             }
@@ -710,16 +1077,15 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
             prebuffering_ = true;
             prebufferWaitCallbacks_ = kPrebufferMaxCallbacks;
             cleanFrames_ = 0;
-            // Adaptive resume runway: every episode doubles the required
-            // prebuffer (capped at half the ring) so cascading starvation on
-            // a throttling device self-extinguishes instead of repeating.
-            const auto capacityFrames = ring->capacity() / kOutputChannels;
-            prebufferFrames_ = std::max(
-                prebufferBaseFrames_,
-                std::min(prebufferFrames_ * 2U, capacityFrames / 2U));
+            const auto capacityFrames = (ringA != nullptr)
+                ? (ringA->capacity() / kOutputChannels)
+                : (ringB != nullptr ? ringB->capacity() / kOutputChannels : 0);
+            if (capacityFrames > 0) {
+                prebufferFrames_ = std::max(
+                    prebufferBaseFrames_,
+                    std::min(prebufferFrames_ * 2U, capacityFrames / 2U));
+            }
         } else {
-            // Pause tail fully drained: plain silence with no accounting so a
-            // long pause is never mistaken for playback starvation.
             std::memset(
                 output + validFrames * kOutputChannels,
                 0,
@@ -729,10 +1095,6 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
         }
     } else {
         underrunActive_ = false;
-        // Sustained glitch-free playback gradually forgives past underruns so
-        // a single transient CPU spike (navigation, camera, OEM throttling)
-        // can never accumulate into a permanent session downgrade, and steps
-        // the adaptive prebuffer back toward its baseline.
         cleanFrames_ += requestedFrames;
         while (cleanFrames_ >= underrunDecayIntervalFrames_) {
             cleanFrames_ -= underrunDecayIntervalFrames_;
@@ -763,6 +1125,8 @@ void AudioEngine::onErrorAfterClose(
 
     streamRestartCount_.fetch_add(1, std::memory_order_release);
     activeRingBuffer_.store(nullptr, std::memory_order_release);
+    activeDeckRings_[0].store(nullptr, std::memory_order_release);
+    activeDeckRings_[1].store(nullptr, std::memory_order_release);
     stream_.reset();
     outputSampleRate_.store(0, std::memory_order_release);
     {
@@ -772,16 +1136,18 @@ void AudioEngine::onErrorAfterClose(
     try {
         (void) startLocked(requestedOutputSampleRate_.load(std::memory_order_acquire));
     } catch (...) {
-        // This callback runs on Oboe's recovery thread, outside a JNI frame.
-        // Never allow an allocation failure during restart to terminate the
-        // whole process.
         restartAllowed_.store(false, std::memory_order_release);
         activeRingBuffer_.store(nullptr, std::memory_order_release);
+        activeDeckRings_[0].store(nullptr, std::memory_order_release);
+        activeDeckRings_[1].store(nullptr, std::memory_order_release);
         outputSampleRate_.store(0, std::memory_order_release);
     }
 }
 
 void AudioEngine::releaseProducerStateLocked() noexcept {
+    // Synchronize against any active deck producer operations
+    std::scoped_lock lock(deckProducerMutexes_[0], deckProducerMutexes_[1]);
+
     if (resampler_ != nullptr) {
         soxr_delete(asSoxr(resampler_));
         resampler_ = nullptr;
@@ -792,44 +1158,89 @@ void AudioEngine::releaseProducerStateLocked() noexcept {
     rawScratch_.clear();
     stereoScratch_.clear();
     resampledScratch_.clear();
+
+    for (std::size_t d = 0; d < kDeckCount; ++d) {
+        if (deckResamplers_[d] != nullptr) {
+            soxr_delete(asSoxr(deckResamplers_[d]));
+            deckResamplers_[d] = nullptr;
+        }
+        deckResamplerInputRates_[d] = 0;
+        deckResamplersFlushing_[d] = false;
+        deckResamplersDrained_[d].store(true, std::memory_order_release);
+        deckRings_[d].reset();
+        deckRawScratch_[d].clear();
+        deckStereoScratch_[d].clear();
+        deckResampledScratch_[d].clear();
+        deckPlaying_[d].store(false, std::memory_order_release);
+        deckPauseGain_[d] = 1.0F;
+    }
+    realtimeScratchA_.clear();
+    realtimeScratchB_.clear();
+    realtimeStretchedA_.clear();
+    realtimeStretchedB_.clear();
+    for (std::size_t d = 0; d < kDeckCount; ++d) {
+        deckStretchers_[d].reset();
+        deckStretcherAppliedRatio_[d] = 1.0F;
+        deckTimeRatioTarget_[d].store(1.0F, std::memory_order_release);
+        deckSpeed_[d].store(1.0F, std::memory_order_release);
+        deckPitch_[d].store(1.0F, std::memory_order_release);
+    }
 }
 
 bool AudioEngine::configureResamplerLocked(std::int32_t inputSampleRate) {
-    const std::int32_t destinationRate = outputSampleRate_.load(std::memory_order_acquire);
-    if (destinationRate <= 0) return false;
-    // A NULL-input soxr flush is terminal. A new track/configuration gets a
-    // fresh resampler even when its sample rate matches the previous track.
-    if (resamplerFlushing_) {
-        if (resampler_ != nullptr) soxr_delete(asSoxr(resampler_));
-        resampler_ = nullptr;
-        resamplerInputRate_ = 0;
-        resamplerFlushing_ = false;
-    }
-    if (resamplerInputRate_ == inputSampleRate) return true;
+    return configureDeckResamplerLocked(0, inputSampleRate);
+}
 
-    if (resampler_ != nullptr) {
-        soxr_delete(asSoxr(resampler_));
-        resampler_ = nullptr;
+bool AudioEngine::configureDeckResamplerLocked(int deckId, std::int32_t inputSampleRate) {
+    if (deckId < 0 || deckId >= static_cast<int>(kDeckCount)) return false;
+    const std::size_t d = static_cast<std::size_t>(deckId);
+    const std::int32_t baseDestinationRate = outputSampleRate_.load(std::memory_order_acquire);
+    if (baseDestinationRate <= 0) return false;
+
+    const float pitch = deckPitch_[d].load(std::memory_order_relaxed);
+    const double targetOutRate = static_cast<double>(baseDestinationRate) * static_cast<double>(pitch);
+
+    if (deckResamplersFlushing_[d]) {
+        if (deckResamplers_[d] != nullptr) soxr_delete(asSoxr(deckResamplers_[d]));
+        deckResamplers_[d] = nullptr;
+        deckResamplerInputRates_[d] = 0;
+        deckResamplersFlushing_[d] = false;
     }
-    resamplerInputRate_ = inputSampleRate;
-    if (inputSampleRate == destinationRate) return true;
+    const bool noPitchShift = std::abs(pitch - 1.0F) < 0.001F;
+    if (deckResamplerInputRates_[d] == inputSampleRate) {
+        if (inputSampleRate == baseDestinationRate && noPitchShift) {
+            if (deckResamplers_[d] != nullptr) {
+                soxr_delete(asSoxr(deckResamplers_[d]));
+                deckResamplers_[d] = nullptr;
+            }
+            return true;
+        }
+        if (deckResamplers_[d] != nullptr) return true;
+    }
+
+    if (deckResamplers_[d] != nullptr) {
+        soxr_delete(asSoxr(deckResamplers_[d]));
+        deckResamplers_[d] = nullptr;
+    }
+    deckResamplerInputRates_[d] = inputSampleRate;
+    if (inputSampleRate == baseDestinationRate && noPitchShift) return true;
 
     soxr_error_t error = nullptr;
     const soxr_io_spec_t ioSpec = soxr_io_spec(SOXR_FLOAT32_I, SOXR_FLOAT32_I);
     const soxr_quality_spec_t qualitySpec = soxr_quality_spec(SOXR_HQ, 0);
     const soxr_runtime_spec_t runtimeSpec = soxr_runtime_spec(1);
-    resampler_ = soxr_create(
+    deckResamplers_[d] = soxr_create(
         static_cast<double>(inputSampleRate),
-        static_cast<double>(destinationRate),
+        targetOutRate,
         kOutputChannels,
         &error,
         &ioSpec,
         &qualitySpec,
         &runtimeSpec);
-    if (error != nullptr || resampler_ == nullptr) {
-        if (resampler_ != nullptr) soxr_delete(asSoxr(resampler_));
-        resampler_ = nullptr;
-        resamplerInputRate_ = 0;
+    if (error != nullptr || deckResamplers_[d] == nullptr) {
+        if (deckResamplers_[d] != nullptr) soxr_delete(asSoxr(deckResamplers_[d]));
+        deckResamplers_[d] = nullptr;
+        deckResamplerInputRates_[d] = 0;
         return false;
     }
     return true;
