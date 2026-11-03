@@ -17,6 +17,8 @@
   <img src="https://img.shields.io/badge/License-GPLv3-blue?style=for-the-badge" alt="GPLv3" />
 </p>
 
+> **Origin and license:** Neon Song is a modified derivative of [LastWave Native](https://github.com/Clash-Projects/LastWave-Native). This project is released under GPL-3.0. See [NOTICE.md](NOTICE.md) for the upstream credit and modification notice.
+
 ---
 
 ## 📥 Download
@@ -117,4 +119,4 @@ See [Builds and releases](builds/README.md) for local APK builds, phone download
 ---
 
 ## 📄 License
-This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See the [LICENSE](LICENSE) file for details.
+This modified project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). Bundled libraries, media, and other third-party materials may carry separate license terms; retain their notices and check their licenses before redistributing them.

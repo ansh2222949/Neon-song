@@ -3,6 +3,7 @@
 Start here for project and contributor information:
 
 - [Project overview, features, and build instructions](../README.md)
+- [Upstream origin, modification, and license notice](../NOTICE.md)
 - [APK build and download notes](../builds/README.md)
 - [GitHub release workflow](../.github/workflows/release.yml)
 - [Changelog](../CHANGELOG.md)
