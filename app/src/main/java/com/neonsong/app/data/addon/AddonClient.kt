@@ -49,13 +49,21 @@ class AddonClient(
             return
         }
 
-        // 2. Fallback to Java HMAC if clientSecret provided or default known secret
-        val secret = clientSecret?.takeIf { it.isNotBlank() } ?: DEFAULT_ADDON_SECRET
+        // 2. Use only an explicitly configured client secret as a Java fallback.
+        // Never ship a default addon credential in the app.
+        val uri = try {
+            java.net.URI(urlStr)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not parse addon request URL for signing", e)
+            throw IllegalStateException("Could not sign addon request", e)
+        }
+        val path = uri.path ?: "/"
+        val tokenMatch = Regex("""/a/([^/]+)""").find(path)
+        val token = tokenMatch?.groupValues?.get(1) ?: return
+        val secret = clientSecret?.takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("Addon signing key is not configured")
+
         try {
-            val uri = java.net.URI(urlStr)
-            val path = uri.path ?: "/"
-            val tokenMatch = Regex("""/a/([^/]+)""").find(path)
-            val token = tokenMatch?.groupValues?.get(1) ?: return
             val ts = (System.currentTimeMillis() / 1000L).toString()
             val message = "$ts\n${method.uppercase()}\n$path\n$token"
             val mac = javax.crypto.Mac.getInstance("HmacSHA256")
@@ -64,7 +72,8 @@ class AddonClient(
             reqBuilder.header("X-LW-TS", ts)
             reqBuilder.header("X-LW-Sign", sign)
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to sign addon request: ${e.message}")
+            Log.w(TAG, "Failed to sign addon request", e)
+            throw IllegalStateException("Could not sign addon request", e)
         }
     }
 
@@ -211,7 +220,6 @@ class AddonClient(
 
     companion object {
         private const val TAG = "AddonClient"
-        private const val DEFAULT_ADDON_SECRET = "REVOKED_ADDON_CREDENTIAL"
 
         fun normalizeBase(raw: String): String {
             val trimmed = raw.trim().trimEnd('/')
