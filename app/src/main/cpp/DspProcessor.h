@@ -13,7 +13,7 @@ namespace neonsong::audio {
 
 class DspProcessor final {
 public:
-    static constexpr std::size_t kEqualizerBandCount = 15;
+    static constexpr std::size_t kEqualizerBandCount = 16;
 
     DspProcessor() noexcept;
     ~DspProcessor();
@@ -23,6 +23,9 @@ public:
     void setStudioMasterClarity(bool enabled) noexcept;
     void setBitPerfect(bool enabled) noexcept;
     void setPeakProtectionEnabled(bool enabled) noexcept;
+    void setBauerCrossfeedEnabled(bool enabled) noexcept;
+    void setAnalogTubeWarmthEnabled(bool enabled) noexcept;
+    void setMonoBassEnabled(bool enabled) noexcept;
     void setEqualizer(
         bool enabled,
         const float* gainsDb,
@@ -161,11 +164,17 @@ private:
 
     double sampleRate_{48000.0};
     float currentWet_{0.0F};
+    float currentCrossfeedWet_{0.0F};
+    float currentTubeWarmthWet_{0.0F};
+    float currentMonoBassWet_{0.0F};
     float rampPerFrame_{1.0F / 2400.0F};
     std::atomic<bool> targetEnabled_{false};
     std::atomic<bool> bitPerfectEnabled_{false};
     std::atomic<bool> peakProtectionEnabled_{false};
     std::atomic<bool> targetEqualizerEnabled_{false};
+    std::atomic<bool> targetBauerCrossfeedEnabled_{false};
+    std::atomic<bool> targetAnalogTubeWarmthEnabled_{false};
+    std::atomic<bool> targetMonoBassEnabled_{false};
     std::atomic<std::uint32_t> targetEqualizerRevision_{0};
     std::array<std::atomic<float>, kEqualizerBandCount> targetEqGainsDb_{};
     std::array<float, kEqualizerBandCount> currentEqGainsDb_{};
@@ -173,7 +182,7 @@ private:
     std::int32_t equalizerUpdateCountdown_{0};
     std::int32_t equalizerHeadroomCountdown_{0};
     std::uint32_t appliedEqualizerRevision_{0};
-    std::uint16_t activeEqualizerBands_{0};
+    std::uint32_t activeEqualizerBands_{0};
     float currentPreampDb_{0.0F};
     float currentPreampGain_{1.0F};
     float equalizerMaximumBoostDb_{0.0F};
@@ -185,6 +194,11 @@ private:
     float dcBlockerR_{0.999F};
     std::array<double, 2> dcXPrev_{};
     std::array<double, 2> dcYPrev_{};
+    // Separate low-frequency coupling for the asymmetric tube curve prevents
+    // its even harmonics from accumulating an audible DC offset.
+    float tubeDcBlockerR_{0.999F};
+    std::array<double, 2> tubeDcXPrev_{};
+    std::array<double, 2> tubeDcYPrev_{};
     std::int32_t microFadeFrameCount_{96};
     std::int32_t microFadePosition_{0};
     bool clarityChainActive_{false};

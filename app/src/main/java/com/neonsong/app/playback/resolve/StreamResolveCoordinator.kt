@@ -2,6 +2,7 @@ package com.neonsong.app.playback.resolve
 
 import com.neonsong.app.data.music.YouTubeAudioStream
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import java.io.File
 
 /**
@@ -14,7 +15,7 @@ class StreamResolveCoordinator(
     private val extract: suspend (youtubeVideoId: String) -> YouTubeAudioStream,
     private val logger: ResolverLogger = AndroidResolverLogger,
 ) {
-    val cache = PlaybackStreamCache(cacheDir)
+    val cache = PlaybackStreamCache(cacheDir, scope = scope)
     val playback = PlaybackResolver(cache, logger)
     val prefetch = PrefetchResolver(cache, logger)
     private val extraction = StreamExtraction(scope, cache, extract)
@@ -41,9 +42,9 @@ class StreamResolveCoordinator(
         identity: TrackIdentity,
         durationMs: Long?,
         onReady: suspend (StreamCache) -> Unit,
-    ) {
-        if (playback.requested?.youtubeVideoId == identity.youtubeVideoId) return
-        prefetch.enqueue(
+    ): Job? {
+        if (playback.requested?.youtubeVideoId == identity.youtubeVideoId) return null
+        return prefetch.enqueue(
             scope = scope,
             identity = identity,
             durationMs = durationMs,

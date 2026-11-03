@@ -10,9 +10,9 @@ namespace {
 
 constexpr double kPi = 3.1415926535897932384626433832795;
 constexpr std::array<double, DspProcessor::kEqualizerBandCount> kEqFrequenciesHz{
-    25.0, 40.0, 63.0, 100.0, 160.0,
+    20.0, 40.0, 63.0, 100.0, 160.0,
     250.0, 400.0, 630.0, 1000.0, 1600.0,
-    2500.0, 4000.0, 6300.0, 10000.0, 16000.0,
+    2500.0, 4000.0, 6300.0, 10000.0, 16000.0, 20000.0
 };
 // Updating 15 biquads every 32 samples was needlessly expensive while a
 // preset was smoothing. 128 samples is still below perceptual control
@@ -28,7 +28,6 @@ constexpr float kOutputCeiling = 0.944060876F;
 constexpr float kSoftKneeThreshold = 0.841395141F;
 constexpr float kEqualizerPreLimiterBoostDb = 1.0F;
 constexpr float kClarityMakeupGain = 1.04F;
-constexpr float kClarityStereoWidth = 1.22F;
 constexpr float kAirExciterAmount = 0.18F;
 // Studio Master Clarity design gains (dB). Single source for configure()
 // and trim rebuilds; per-stage trims add to these values.
@@ -149,10 +148,15 @@ void DspProcessor::configure(double sampleRate) noexcept {
         1.0 - std::exp(-1.0 / (sampleRate_ * 0.150)));
     dcBlockerR_ = static_cast<float>(
         std::exp(-2.0 * kPi * 10.0 / sampleRate_));
+    tubeDcBlockerR_ = static_cast<float>(
+        std::exp(-2.0 * kPi * 3.0 / sampleRate_));
     microFadeFrameCount_ = std::max(
         1,
         static_cast<std::int32_t>(std::llround(sampleRate_ * 0.002)));
     currentWet_ = targetEnabled_.load(std::memory_order_acquire) ? 1.0F : 0.0F;
+    currentCrossfeedWet_ = targetBauerCrossfeedEnabled_.load(std::memory_order_acquire) ? 1.0F : 0.0F;
+    currentTubeWarmthWet_ = targetAnalogTubeWarmthEnabled_.load(std::memory_order_acquire) ? 1.0F : 0.0F;
+    currentMonoBassWet_ = targetMonoBassEnabled_.load(std::memory_order_acquire) ? 1.0F : 0.0F;
     const bool equalizerEnabled = targetEqualizerEnabled_.load(std::memory_order_acquire);
     activeEqualizerBands_ = 0;
     for (std::size_t band = 0; band < kEqualizerBandCount; ++band) {
@@ -163,7 +167,7 @@ void DspProcessor::configure(double sampleRate) noexcept {
         if (std::abs(currentEqGainsDb_[band]) >= 0.0005F) {
             equalizerBands_[band] = Biquad::peaking(
                 sampleRate_, kEqFrequenciesHz[band], kEqQ, currentEqGainsDb_[band]);
-            activeEqualizerBands_ |= static_cast<std::uint16_t>(1U << band);
+            activeEqualizerBands_ |= static_cast<std::uint32_t>(1U << band);
         } else {
             equalizerBands_[band] = Biquad{};
         }
@@ -215,6 +219,8 @@ void DspProcessor::reset() noexcept {
     microFadePosition_ = 0;
     dcXPrev_.fill(0.0);
     dcYPrev_.fill(0.0);
+    tubeDcXPrev_.fill(0.0);
+    tubeDcYPrev_.fill(0.0);
 }
 
 void DspProcessor::setStudioMasterClarity(bool enabled) noexcept {
@@ -227,6 +233,18 @@ void DspProcessor::setBitPerfect(bool enabled) noexcept {
 
 void DspProcessor::setPeakProtectionEnabled(bool enabled) noexcept {
     peakProtectionEnabled_.store(enabled, std::memory_order_release);
+}
+
+void DspProcessor::setBauerCrossfeedEnabled(bool enabled) noexcept {
+    targetBauerCrossfeedEnabled_.store(enabled, std::memory_order_release);
+}
+
+void DspProcessor::setAnalogTubeWarmthEnabled(bool enabled) noexcept {
+    targetAnalogTubeWarmthEnabled_.store(enabled, std::memory_order_release);
+}
+
+void DspProcessor::setMonoBassEnabled(bool enabled) noexcept {
+    targetMonoBassEnabled_.store(enabled, std::memory_order_release);
 }
 
 void DspProcessor::setEqualizer(
@@ -373,6 +391,9 @@ void DspProcessor::process(
     const float target = (targetEnabled_.load(std::memory_order_acquire) && !atmosBypassed)
         ? 1.0F
         : 0.0F;
+    const bool targetCrossfeed = targetBauerCrossfeedEnabled_.load(std::memory_order_acquire);
+    const bool targetTubeWarmth = targetAnalogTubeWarmthEnabled_.load(std::memory_order_acquire);
+    const bool targetMonoBass = targetMonoBassEnabled_.load(std::memory_order_acquire);
     const bool peakProtectionEnabled = peakProtectionEnabled_.load(std::memory_order_acquire);
     const auto equalizerRevision = targetEqualizerRevision_.load(std::memory_order_acquire);
     if (equalizerRevision != appliedEqualizerRevision_) {
@@ -392,9 +413,11 @@ void DspProcessor::process(
             }
         }
     }
-    const bool enhancementTargeted = target > 0.0F ||
-        targetEqualizerHasGain;
+    const bool enhancementTargeted = target > 0.0F || targetEqualizerHasGain ||
+        targetCrossfeed || targetTubeWarmth || targetMonoBass;
     const bool enhancementStateActive = currentWet_ > 0.0F ||
+        currentCrossfeedWet_ > 0.0F || currentTubeWarmthWet_ > 0.0F ||
+        currentMonoBassWet_ > 0.0F ||
         activeEqualizerBands_ != 0U ||
         std::abs(currentPreampGain_ - 1.0F) >= 0.00001F ||
         std::abs(limiterGain_ - 1.0F) >= 0.00001F;
@@ -405,6 +428,8 @@ void DspProcessor::process(
         (enhancementTargeted || enhancementStateActive);
     const bool controlsBypassed = !enhancementTargeted && !protectionRequired;
     const bool stateBypassed = currentWet_ == 0.0F &&
+        currentCrossfeedWet_ == 0.0F && currentTubeWarmthWet_ == 0.0F &&
+        currentMonoBassWet_ == 0.0F &&
         activeEqualizerBands_ == 0U &&
         std::abs(currentPreampGain_ - 1.0F) < 0.00001F &&
         std::abs(limiterGain_ - 1.0F) < 0.00001F;
@@ -415,12 +440,37 @@ void DspProcessor::process(
         return;
     }
 
+    const auto tubeSaturate = [](float input) noexcept {
+        // A deliberately mild asymmetric polynomial creates low-order even
+        // harmonics without a per-sample transcendental call on mobile CPUs.
+        const float x = std::clamp(input, -1.5F, 1.5F);
+        const float x2 = x * x;
+        return x + 0.03F * x2 - 0.04F * x2 * x;
+    };
+    const auto coupleTubeOutput = [this](float input, std::size_t channel) noexcept {
+        const double dcInput = input;
+        const double dcOutput = dcInput - tubeDcXPrev_[channel] +
+            tubeDcBlockerR_ * tubeDcYPrev_[channel];
+        tubeDcXPrev_[channel] = dcInput;
+        tubeDcYPrev_[channel] = dcOutput;
+        return std::isfinite(dcOutput) ? static_cast<float>(dcOutput) : 0.0F;
+    };
+
     for (std::int32_t frame = 0; frame < frameCount; ++frame) {
         if (currentWet_ < target) {
             currentWet_ = std::min(target, currentWet_ + rampPerFrame_);
         } else if (currentWet_ > target) {
             currentWet_ = std::max(target, currentWet_ - rampPerFrame_);
         }
+        const float crossfeedTarget = targetCrossfeed ? 1.0F : 0.0F;
+        const float tubeWarmthTarget = targetTubeWarmth ? 1.0F : 0.0F;
+        const float monoBassTarget = targetMonoBass ? 1.0F : 0.0F;
+        currentCrossfeedWet_ += std::clamp(
+            crossfeedTarget - currentCrossfeedWet_, -rampPerFrame_, rampPerFrame_);
+        currentTubeWarmthWet_ += std::clamp(
+            tubeWarmthTarget - currentTubeWarmthWet_, -rampPerFrame_, rampPerFrame_);
+        currentMonoBassWet_ += std::clamp(
+            monoBassTarget - currentMonoBassWet_, -rampPerFrame_, rampPerFrame_);
         // Clarity wet/dry mix follows the same 50 ms ramp so mix and preset
         // moves never click. At the default 1.0 the factor stays exactly
         // 1.0, keeping the output bit-identical.
@@ -434,7 +484,7 @@ void DspProcessor::process(
         if (equalizerUpdateCountdown_-- <= 0) {
             const bool eqEnabled = targetEqualizerEnabled_.load(std::memory_order_acquire);
             bool coefficientsChanged = false;
-            std::uint16_t nextActiveBands = 0;
+            std::uint32_t nextActiveBands = 0;
             if (eqEnabled || activeEqualizerBands_ != 0U) {
                 for (std::size_t band = 0; band < kEqualizerBandCount; ++band) {
                     const bool bandFitsOutputRate = kEqFrequenciesHz[band] < sampleRate_ * 0.45;
@@ -456,14 +506,14 @@ void DspProcessor::process(
                     }
                     if (std::abs(currentEqGainsDb_[band]) >= 0.0005F ||
                         std::abs(targetGain) >= 0.0005F) {
-                        nextActiveBands |= static_cast<std::uint16_t>(1U << band);
+                        nextActiveBands |= static_cast<std::uint32_t>(1U << band);
                     }
                 }
             }
-            const auto deactivatedBands = static_cast<std::uint16_t>(
-                activeEqualizerBands_ & static_cast<std::uint16_t>(~nextActiveBands));
+            const auto deactivatedBands = static_cast<std::uint32_t>(
+                activeEqualizerBands_ & static_cast<std::uint32_t>(~nextActiveBands));
             for (std::size_t band = 0; band < kEqualizerBandCount; ++band) {
-                if ((deactivatedBands & static_cast<std::uint16_t>(1U << band)) != 0U) {
+                if ((deactivatedBands & static_cast<std::uint32_t>(1U << band)) != 0U) {
                     equalizerBands_[band].clear();
                 }
             }
@@ -549,7 +599,7 @@ void DspProcessor::process(
         }
         if (activeEqualizerBands_ != 0U) {
             for (std::size_t band = 0; band < kEqualizerBandCount; ++band) {
-                if ((activeEqualizerBands_ & static_cast<std::uint16_t>(1U << band)) == 0U) {
+                if ((activeEqualizerBands_ & static_cast<std::uint32_t>(1U << band)) == 0U) {
                     continue;
                 }
                 equalizedLeft = equalizerBands_[band].tick(equalizedLeft, 0);
@@ -604,25 +654,42 @@ void DspProcessor::process(
             wetLeft += excitedLeft * clarityExciterAmount_;
             wetRight += excitedRight * clarityExciterAmount_;
 
-            if (channelCount == 2) {
-                const float mid = (wetLeft + wetRight) * 0.5F;
-                const float rawSide = (wetLeft - wetRight) * 0.5F;
-                // Mono-Bass (Anti-Blur): pass side through 130 Hz highpass so bass stays centered mono
-                const float sideHigh = monoBassFilter_.tick(rawSide, 0) * clarityTrimLinear_[6];
-                const float wideSide = sideHigh * kClarityStereoWidth;
-                wetLeft = mid + wideSide;
-                wetRight = mid - wideSide;
-            }
             wetLeft *= kClarityMakeupGain;
             wetRight *= kClarityMakeupGain;
-            // Headphone crossfeed is intentionally not applied globally: on
-            // phone speakers and some OEM spatializers it can create phasey,
-            // device-dependent coloration that listeners report as distortion.
             outputLeft += (wetLeft - dryLeft) * clarityMix;
             outputRight += (wetRight - dryRight) * clarityMix;
         }
 
-        // Analog soft-knee saturation: provides clean headroom without squashing the track
+        // Optional effects are independent settings with a shared 50 ms wet
+        // ramp. Crossfeed precedes mono-bass so the final low-frequency side
+        // energy remains centered when both effects are enabled.
+        if (channelCount == 2 && currentCrossfeedWet_ > 0.0F) {
+            float crossfedLeft = outputLeft;
+            float crossfedRight = outputRight;
+            crossfeed_.process(crossfedLeft, crossfedRight);
+            outputLeft += (crossfedLeft - outputLeft) * currentCrossfeedWet_;
+            outputRight += (crossfedRight - outputRight) * currentCrossfeedWet_;
+        }
+
+        if (currentTubeWarmthWet_ > 0.0F) {
+            const float tubeLeft = coupleTubeOutput(tubeSaturate(outputLeft), 0);
+            const float tubeRight = channelCount == 2
+                ? coupleTubeOutput(tubeSaturate(outputRight), 1)
+                : tubeLeft;
+            outputLeft += (tubeLeft - outputLeft) * currentTubeWarmthWet_;
+            outputRight += (tubeRight - outputRight) * currentTubeWarmthWet_;
+        }
+
+        if (channelCount == 2 && currentMonoBassWet_ > 0.0F) {
+            const float mid = (outputLeft + outputRight) * 0.5F;
+            const float side = (outputLeft - outputRight) * 0.5F;
+            const float filteredSide = monoBassFilter_.tick(side, 0) * clarityTrimLinear_[6];
+            const float centeredSide = side + (filteredSide - side) * currentMonoBassWet_;
+            outputLeft = mid + centeredSide;
+            outputRight = mid - centeredSide;
+        }
+
+        // Peak-protection soft knee follows optional tone shaping.
         auto softSaturate = [](float x) noexcept -> float {
             const float absX = std::abs(x);
             if (absX <= kSoftKneeThreshold) return x;
@@ -677,8 +744,13 @@ void DspProcessor::process(
         boxinessControl_.clear();
         presenceDetail_.clear();
         airDetail_.clear();
-        crossfeed_.clear();
         clarityChainActive_ = false;
+    }
+    if (!targetCrossfeed && currentCrossfeedWet_ == 0.0F) crossfeed_.clear();
+    if (!targetMonoBass && currentMonoBassWet_ == 0.0F) monoBassFilter_.clear();
+    if (!targetTubeWarmth && currentTubeWarmthWet_ == 0.0F) {
+        tubeDcXPrev_.fill(0.0);
+        tubeDcYPrev_.fill(0.0);
     }
 }
 

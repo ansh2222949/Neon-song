@@ -21,7 +21,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
-import androidx.compose.material3.IconButton
+import com.neonsong.app.ui.theme.GlassIconActionButton as IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -97,6 +97,8 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.HorizontalDivider
 import com.neonsong.app.util.BatteryOptimizationHelper
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ChevronRight
@@ -146,30 +148,31 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import com.neonsong.app.ui.theme.GlassActionButton as Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
+import com.neonsong.app.ui.theme.GlassCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChipDefaults
+import com.neonsong.app.ui.theme.GlassTonalActionButton as FilledTonalButton
+import com.neonsong.app.ui.theme.GlassTonalIconActionButton as FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
+import com.neonsong.app.ui.theme.GlassOutlinedActionButton as OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.neonsong.app.ui.theme.GlassTextActionButton as TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -259,7 +262,7 @@ private val ACCENT_PRESETS = listOf(
 
 // -- Expressive shape scale used only within this screen --
 private val CardOuterShape = RoundedCornerShape(28.dp)
-private val IconBadgeShape = RoundedCornerShape(14.dp)
+private val IconBadgeShape = RoundedCornerShape(8.dp)
 
 /** Where a row sits within a visually-connected group of settings rows —
  *  drives per-row corner radii so a multi-row group reads as one premium
@@ -267,40 +270,47 @@ private val IconBadgeShape = RoundedCornerShape(14.dp)
  *  below and the GROUP_GAP spacing used between rows in a group's Column). */
 private enum class GroupPosition { SINGLE, TOP, MIDDLE, BOTTOM }
 
-private val GROUP_OUTER_RADIUS = 28.dp
-private val GROUP_INNER_RADIUS = 6.dp
-private val GROUP_GAP = 3.dp
+private val AppleGroupBackground = Color(0xFF1C1C1E)
+private val AppleGroupRadius = 12.dp
+private val AppleDividerColor = Color.White.copy(alpha = 0.08f)
 
-private fun groupShape(position: GroupPosition): RoundedCornerShape = when (position) {
-    GroupPosition.SINGLE -> RoundedCornerShape(GROUP_OUTER_RADIUS)
-    GroupPosition.TOP -> RoundedCornerShape(
-        topStart = GROUP_OUTER_RADIUS, topEnd = GROUP_OUTER_RADIUS,
-        bottomStart = GROUP_INNER_RADIUS, bottomEnd = GROUP_INNER_RADIUS,
-    )
-    GroupPosition.MIDDLE -> RoundedCornerShape(GROUP_INNER_RADIUS)
-    GroupPosition.BOTTOM -> RoundedCornerShape(
-        topStart = GROUP_INNER_RADIUS, topEnd = GROUP_INNER_RADIUS,
-        bottomStart = GROUP_OUTER_RADIUS, bottomEnd = GROUP_OUTER_RADIUS,
-    )
-}
+private val GROUP_OUTER_RADIUS = 12.dp
+private val GROUP_INNER_RADIUS = 0.dp
+private val GROUP_GAP = 0.dp
 
-/** Wraps a fixed list of settings rows and assigns each one its
- *  GroupPosition automatically — SINGLE for a lone row, TOP/BOTTOM for the
- *  ends of a longer group, MIDDLE for everything between. Rows are stacked
- *  with a tiny GROUP_GAP rather than normal item spacing, so the group
- *  reads as one connected surface with rows peeking through a hairline gap
- *  rather than a list of separate cards. */
+private fun groupShape(position: GroupPosition): RoundedCornerShape = RoundedCornerShape(AppleGroupRadius)
+
+/**
+ * Authentic Apple Music Inset Grouped card container.
+ * Encapsulates grouped settings in a single rounded surface (12dp radius, #1C1C1E dark background)
+ * with indented hairline dividers (starting at 58dp) between rows.
+ */
 @Composable
 private fun SettingsGroup(rowCount: Int, content: @Composable (index: Int, position: GroupPosition) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(GROUP_GAP)) {
-        for (i in 0 until rowCount) {
-            val position = when {
-                rowCount == 1 -> GroupPosition.SINGLE
-                i == 0 -> GroupPosition.TOP
-                i == rowCount - 1 -> GroupPosition.BOTTOM
-                else -> GroupPosition.MIDDLE
+    Surface(
+        shape = RoundedCornerShape(AppleGroupRadius),
+        color = AppleGroupBackground,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            for (i in 0 until rowCount) {
+                val position = when {
+                    rowCount == 1 -> GroupPosition.SINGLE
+                    i == 0 -> GroupPosition.TOP
+                    i == rowCount - 1 -> GroupPosition.BOTTOM
+                    else -> GroupPosition.MIDDLE
+                }
+                content(i, position)
+                if (i < rowCount - 1) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 58.dp),
+                        thickness = 0.5.dp,
+                        color = AppleDividerColor,
+                    )
+                }
             }
-            content(i, position)
         }
     }
 }
@@ -489,6 +499,8 @@ fun SettingsScreen(
             }
         }
     }
+    var showAudioQualityScreen by rememberSaveable { mutableStateOf(false) }
+    var qualityPickerTarget by rememberSaveable { mutableStateOf<AudioQualityTarget?>(null) }
     var showQualityDialog by rememberSaveable { mutableStateOf(false) }
     var showDownloadQualityDialog by rememberSaveable { mutableStateOf(false) }
     var showEqSheet by rememberSaveable { mutableStateOf(false) }
@@ -588,16 +600,56 @@ fun SettingsScreen(
             }
         }
 
-        BackHandler(enabled = searchQuery.isNotBlank() || isSearchBarVisible || activeTab != null) {
-            if (searchQuery.isNotBlank() || isSearchBarVisible) {
-                viewModel.clearSearch()
-                isSearchBarVisible = false
-            } else if (activeTab != null) {
-                activeTab = null
+        BackHandler(enabled = qualityPickerTarget != null || showAudioQualityScreen || searchQuery.isNotBlank() || isSearchBarVisible || activeTab != null) {
+            when {
+                qualityPickerTarget != null -> qualityPickerTarget = null
+                showAudioQualityScreen -> showAudioQualityScreen = false
+                searchQuery.isNotBlank() || isSearchBarVisible -> {
+                    viewModel.clearSearch()
+                    isSearchBarVisible = false
+                }
+                activeTab != null -> activeTab = null
             }
         }
 
-        if (searchQuery.isNotBlank()) {
+        if (qualityPickerTarget != null) {
+            val target = qualityPickerTarget!!
+            AppleAudioQualityPickerScreen(
+                target = target,
+                preferLossless = misc.preferLosslessStreaming,
+                selectedQualityId = when (target) {
+                    AudioQualityTarget.CELLULAR_STREAMING -> misc.cellularStreamingQuality
+                    AudioQualityTarget.WIFI_STREAMING -> misc.wifiStreamingQuality
+                    AudioQualityTarget.DOWNLOADS -> misc.downloadQuality
+                },
+                onSelectTier = { tier ->
+                    when (target) {
+                        AudioQualityTarget.CELLULAR_STREAMING -> viewModel.setCellularStreamingQuality(tier.qualityId)
+                        AudioQualityTarget.WIFI_STREAMING -> viewModel.setWifiStreamingQuality(tier.qualityId)
+                        AudioQualityTarget.DOWNLOADS -> viewModel.setDownloadQuality(tier.qualityId)
+                    }
+                },
+                onBack = { qualityPickerTarget = null },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .liquidGlassSource(settingsBackdrop),
+            )
+        } else if (showAudioQualityScreen) {
+            AppleAudioQualityScreen(
+                preferLossless = misc.preferLosslessStreaming,
+                cellularQuality = misc.cellularStreamingQuality,
+                wifiQuality = misc.wifiStreamingQuality,
+                downloadQuality = misc.downloadQuality,
+                dolbyAtmosMode = misc.dolbyAtmosMode,
+                onToggleLossless = { viewModel.setPreferLosslessStreaming(it) },
+                onNavigateToTarget = { target -> qualityPickerTarget = target },
+                onSelectDolbyAtmos = { viewModel.setDolbyAtmosMode(it) },
+                onBack = { showAudioQualityScreen = false },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .liquidGlassSource(settingsBackdrop),
+            )
+        } else if (searchQuery.isNotBlank()) {
             SettingsSearchResultsList(
                 query = searchQuery,
                 topPadding = headerHeight + if (isSearchBarVisible) 68.dp else 0.dp,
@@ -614,6 +666,9 @@ fun SettingsScreen(
                     .liquidGlassSource(settingsBackdrop),
             )
         } else {
+        val mainSettingsListState = rememberLazyListState()
+        val tabListStates = remember { mutableMapOf<SettingsTab, LazyListState>() }
+
         AnimatedContent(
             targetState = activeTab,
             transitionSpec = {
@@ -634,7 +689,7 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .liquidGlassSource(settingsBackdrop),
         ) { tab ->
-            val listState = remember(tab) { LazyListState() }
+            val listState = if (tab == null) mainSettingsListState else tabListStates.getOrPut(tab) { LazyListState() }
 
             LaunchedEffect(highlightedSettingId, tab) {
                 if (highlightedSettingId != null && tab != null) {
@@ -690,21 +745,16 @@ fun SettingsScreen(
                         }
 
                         item {
-                            val audioQualityLabel = when (misc.losslessQuality) {
-                                28 -> "Dolby Atmos"
-                                27 -> "Max 24-bit / 192 kHz"
-                                7 -> "Hi-Res 24-bit / 96 kHz"
-                                6 -> "CD Lossless FLAC"
-                                5 -> "320 kbps MP3"
-                                4 -> "Data Saver HE-AAC"
-                                -1 -> "YouTube AAC / Opus"
-                                else -> "Max 24-bit / 192 kHz"
+                            val audioQualityLabel = if (misc.preferLosslessStreaming) {
+                                AppleAudioQualityTier.fromQualityId(misc.wifiStreamingQuality).title
+                            } else {
+                                "High Quality"
                             }
                             BentoQuickActionGrid(
                                 audioQualityLabel = audioQualityLabel,
                                 themeMode = theme.themeMode,
                                 accentHex = theme.accentColorHex,
-                                onOpenAudio = { activeTab = SettingsTab.AUDIO },
+                                onOpenAudio = { showAudioQualityScreen = true },
                                 onOpenAppearance = { activeTab = SettingsTab.APPEARANCE },
                             )
                         }
@@ -893,35 +943,28 @@ fun SettingsScreen(
                     val isIgnored = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
                     val audioRows = buildList<@Composable (GroupPosition) -> Unit> {
                         add { position ->
+                            val currentTier = AppleAudioQualityTier.fromQualityId(misc.wifiStreamingQuality)
+                            val subtitleText = if (misc.preferLosslessStreaming) {
+                                "${currentTier.title} • Lossless Audio On"
+                            } else {
+                                "High Quality • Lossless Audio Off"
+                            }
                             SettingsActionCard(
                                 icon = Icons.Filled.HighQuality,
-                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = stringResource(R.string.settings_streaming_quality),
-                                subtitle = if (misc.losslessQuality == -1) {
-                                    "YouTube Music • Native stream"
-                                } else {
-                                    "Preferred max: $qualitySubtitle • YouTube fallback"
-                                },
-                                onClick = { showQualityDialog = true },
+                                iconContainer = Color(0xFFFA2D48).copy(alpha = 0.15f),
+                                iconTint = Color(0xFFFA2D48),
+                                title = "Audio Quality",
+                                subtitle = subtitleText,
+                                onClick = { showAudioQualityScreen = true },
                                 position = position,
-                                isHighlighted = (highlightedSettingId == "audio.streaming_quality"),
-                            )
-                        }
-                        add { position ->
-                            SettingsActionCard(
-                                icon = Icons.Filled.CloudDownload,
-                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = stringResource(R.string.settings_download_quality),
-                                subtitle = if (misc.downloadQuality == -1) {
-                                    "YouTube Music • Source quality"
-                                } else {
-                                    "Preferred max: $downloadQualitySubtitle"
+                                isHighlighted = (highlightedSettingId == "audio.streaming_quality" || highlightedSettingId == "audio.quality"),
+                                trailingBadge = {
+                                    Text(
+                                        text = if (misc.preferLosslessStreaming) currentTier.title else "Off",
+                                        color = Color(0xFF8E8E93),
+                                        fontSize = 14.sp,
+                                    )
                                 },
-                                onClick = { showDownloadQualityDialog = true },
-                                position = position,
-                                isHighlighted = (highlightedSettingId == "audio.download_quality"),
                             )
                         }
                         add { position ->
@@ -1100,9 +1143,9 @@ fun SettingsScreen(
                                 subtitle = if (misc.isBitPerfectEnabled && eq.enabled) {
                                     "On • ${eq.presetName} (Bypassed by Bit-Perfect Mode)"
                                 } else if (eq.enabled) {
-                                    "On • ${eq.presetName} • 15-band"
+                                    "On • ${eq.presetName} • 16-band Studio EQ"
                                 } else {
-                                    "Shape your sound across 15 frequencies"
+                                    "16-Band Studio Mastering Equalizer (20 Hz - 20 kHz) & AutoEq"
                                 },
                                 onClick = { showEqSheet = true },
                                 position = position,
@@ -1177,6 +1220,64 @@ fun SettingsScreen(
                     }
                 }
             }
+
+                        item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionLabel("Audiophile DSP & Mastering")
+                    val curveLabel = when (misc.automixCurveType) {
+                        1 -> "Smoothstep S-Curve \u2022 Gentle fade"
+                        2 -> "Club Bass Swap \u2022 Midpoint crossover"
+                        3 -> "Fast Drop \u2022 High-energy drop"
+                        else -> "Equal Power (L\u00b2 + R\u00b2 = 1.0) \u2022 Constant energy"
+                    }
+                    SettingsGroup(rowCount = 4) { index, position ->
+                        when (index) {
+                            0 -> SettingsToggleCard(
+                                icon = Icons.Filled.Headphones,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = "Bauer Crossfeed",
+                                subtitle = if (misc.bauerCrossfeedEnabled) "Headphone crossfeed \u2022 softer hard-panned mixes" else "Off \u2022 original stereo image",
+                                checked = misc.bauerCrossfeedEnabled,
+                                onCheckedChange = viewModel::setBauerCrossfeedEnabled,
+                                position = position,
+                            )
+                            1 -> SettingsToggleCard(
+                                icon = Icons.Filled.Bolt,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "Analog Tube Warmth",
+                                subtitle = if (misc.analogTubeWarmthEnabled) "Gentle asymmetric harmonics \u2022 subtle warmth" else "Off \u2022 transparent playback",
+                                checked = misc.analogTubeWarmthEnabled,
+                                onCheckedChange = viewModel::setAnalogTubeWarmthEnabled,
+                                position = position,
+                            )
+                            2 -> SettingsToggleCard(
+                                icon = Icons.Filled.Waves,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = "Mono Bass (<130 Hz)",
+                                subtitle = if (misc.monoBassEnabled) "Centers low-frequency side energy below 130 Hz" else "Off \u2022 full stereo bass",
+                                checked = misc.monoBassEnabled,
+                                onCheckedChange = viewModel::setMonoBassEnabled,
+                                position = position,
+                            )
+                            3 -> SettingsActionCard(
+                                icon = Icons.Filled.AutoAwesome,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = "AutoMix DJ Curve",
+                                subtitle = curveLabel,
+                                onClick = {
+                                    val next = (misc.automixCurveType + 1) % 4
+                                    viewModel.setAutomixCurveType(next)
+                                },
+                                position = position,
+                            )
+                        }
+                    }
+                }
+            }
                     }
 
                     SettingsTab.APPEARANCE -> {
@@ -1186,10 +1287,10 @@ fun SettingsScreen(
                     AppearanceStudioHero(
                         themeMode = theme?.themeMode ?: ThemeMode.SYSTEM,
                         dynamicColorsEnabled = theme?.mode == AccentMode.DYNAMIC,
-                        liquidGlassEnabled = theme?.liquidGlass ?: false,
+                        liquidGlassEnabled = true,
                         nowPlayingColorsEnabled = misc.dynamicNowPlayingEnabled,
                     )
-                    SettingsGroup(rowCount = 8) { index, position ->
+                    SettingsGroup(rowCount = 7) { index, position ->
                         when (index) {
                             0 -> ThemeModeSelectorCard(
                                 currentThemeMode = theme?.themeMode ?: ThemeMode.SYSTEM,
@@ -1237,17 +1338,6 @@ fun SettingsScreen(
                                 isHighlighted = (highlightedSettingId == "appearance.dynamic_color"),
                             )
                             3 -> SettingsToggleCard(
-                                icon = Icons.Filled.BubbleChart,
-                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = stringResource(R.string.settings_liquid_glass),
-                                subtitle = stringResource(R.string.settings_liquid_glass_sub),
-                                checked = theme?.liquidGlass ?: false,
-                                onCheckedChange = viewModel::setLiquidGlass,
-                                position = position,
-                                isHighlighted = (highlightedSettingId == "appearance.liquid_glass"),
-                            )
-                            4 -> SettingsToggleCard(
                                 icon = Icons.Filled.Album,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -1258,7 +1348,7 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.dynamic_now_playing"),
                             )
-                            5 -> SettingsToggleCard(
+                            4 -> SettingsToggleCard(
                                 icon = Icons.Filled.TextFields,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -1269,7 +1359,7 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.app_font"),
                             )
-                            6 -> SettingsPhotoCard(
+                            5 -> SettingsPhotoCard(
                                 photoUri = misc.settingsPhotoUri,
                                 onClick = {
                                     runCatching {
@@ -1864,67 +1954,69 @@ fun SettingsScreen(
             }
         }
 
-        AnimatedVisibility(
-            visible = isSearchBarVisible,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut(),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = headerHeight),
-        ) {
-            SettingsSearchBar(
-                query = searchQuery,
-                onQueryChange = viewModel::onSearchQueryChange,
-                onClear = {
-                    if (searchQuery.isNotBlank()) {
-                        viewModel.clearSearch()
-                    } else {
-                        isSearchBarVisible = false
+        if (qualityPickerTarget == null && !showAudioQualityScreen) {
+            AnimatedVisibility(
+                visible = isSearchBarVisible,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = headerHeight),
+            ) {
+                SettingsSearchBar(
+                    query = searchQuery,
+                    onQueryChange = viewModel::onSearchQueryChange,
+                    onClear = {
+                        if (searchQuery.isNotBlank()) {
+                            viewModel.clearSearch()
+                        } else {
+                            isSearchBarVisible = false
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
+
+            ExpressiveHeader(
+                title = if (searchQuery.isNotBlank()) {
+                    stringResource(R.string.settings_search_title)
+                } else {
+                    when (activeTab) {
+                        SettingsTab.APPEARANCE -> "Appearance"
+                        else -> activeTab?.title ?: stringResource(R.string.settings)
                     }
                 },
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                    .align(Alignment.TopCenter)
+                    .onSizeChanged { headerHeightPx = it.height },
+                onBack = {
+                    if (searchQuery.isNotBlank() || isSearchBarVisible) {
+                        viewModel.clearSearch()
+                        isSearchBarVisible = false
+                    } else if (activeTab != null) {
+                        activeTab = null
+                    } else {
+                        onBack()
+                    }
+                },
+                actions = {
+                    HeaderActionIcon(
+                        icon = if (isSearchBarVisible || searchQuery.isNotBlank()) Icons.Filled.Close else Icons.Filled.Search,
+                        contentDescription = if (isSearchBarVisible || searchQuery.isNotBlank()) stringResource(R.string.settings_search_clear) else stringResource(R.string.settings_search_title),
+                        onClick = {
+                            if (isSearchBarVisible || searchQuery.isNotBlank()) {
+                                viewModel.clearSearch()
+                                isSearchBarVisible = false
+                            } else {
+                                isSearchBarVisible = true
+                            }
+                        },
+                    )
+                },
             )
         }
-
-        ExpressiveHeader(
-            title = if (searchQuery.isNotBlank()) {
-                stringResource(R.string.settings_search_title)
-            } else {
-                when (activeTab) {
-                    SettingsTab.APPEARANCE -> "Appearance"
-                    else -> activeTab?.title ?: stringResource(R.string.settings)
-                }
-            },
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .onSizeChanged { headerHeightPx = it.height },
-            onBack = {
-                if (searchQuery.isNotBlank() || isSearchBarVisible) {
-                    viewModel.clearSearch()
-                    isSearchBarVisible = false
-                } else if (activeTab != null) {
-                    activeTab = null
-                } else {
-                    onBack()
-                }
-            },
-            actions = {
-                HeaderActionIcon(
-                    icon = if (isSearchBarVisible || searchQuery.isNotBlank()) Icons.Filled.Close else Icons.Filled.Search,
-                    contentDescription = if (isSearchBarVisible || searchQuery.isNotBlank()) stringResource(R.string.settings_search_clear) else stringResource(R.string.settings_search_title),
-                    onClick = {
-                        if (isSearchBarVisible || searchQuery.isNotBlank()) {
-                            viewModel.clearSearch()
-                            isSearchBarVisible = false
-                        } else {
-                            isSearchBarVisible = true
-                        }
-                    },
-                )
-            },
-        )
 
         }
     }
@@ -2123,7 +2215,7 @@ fun SettingsScreen(
         com.neonsong.app.ui.settings.autoeq.AutoEqDialog(onDismiss = { showAutoEq = false })
     }
 
-    // -- Experimental 15-band equalizer --
+    // -- 16-band Audiophile Equalizer & AutoEQ --
     if (showEqSheet) {
         EqualizerSheet(
             eq = eq,
@@ -2132,6 +2224,10 @@ fun SettingsScreen(
             onPickPreset = viewModel::applyEqPreset,
             onBandPreview = viewModel::previewEqBandGain,
             onBandChange = viewModel::setEqBandGain,
+            onOpenAutoEq = {
+                showEqSheet = false
+                showAutoEq = true
+            },
         )
     }
 
@@ -2878,73 +2974,35 @@ private fun AppearanceStudioHero(
 
 @Composable
 private fun SectionLabel(text: String) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.padding(start = 6.dp, top = 6.dp, bottom = 2.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .width(3.dp)
-                .height(13.dp)
-                .clip(RoundedCornerShape(1.5.dp))
-                .background(MaterialTheme.colorScheme.primary)
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelLarge,
+    Text(
+        text = text.uppercase(),
+        style = MaterialTheme.typography.labelMedium.copy(
+            fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary,
-            letterSpacing = 0.4.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+            letterSpacing = 0.8.sp,
+        ),
+        color = Color(0xFF8E8E93),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.padding(start = 16.dp, top = 22.dp, bottom = 6.dp),
+    )
 }
 
 @Composable
 private fun IconBadge(icon: ImageVector, container: Color, tint: Color, modifier: Modifier = Modifier) {
     Box(
-        modifier
-            .size(42.dp)
-            .clip(IconBadgeShape)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        container.copy(alpha = 0.95f),
-                        container.copy(alpha = 0.65f),
-                    )
-                )
-            )
-            .border(
-                BorderStroke(
-                    1.2.dp,
-                    Brush.verticalGradient(
-                        listOf(
-                            Color.White.copy(alpha = 0.45f),
-                            tint.copy(alpha = 0.20f),
-                        )
-                    )
-                ),
-                shape = IconBadgeShape
-            ),
+        modifier = modifier
+            .size(30.dp)
+            .clip(RoundedCornerShape(7.dp))
+            .background(container),
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(18.dp)
-                .align(Alignment.TopCenter)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            Color.White.copy(alpha = 0.22f),
-                            Color.Transparent,
-                        )
-                    )
-                )
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(18.dp),
         )
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
     }
 }
 
@@ -3044,21 +3102,8 @@ private fun SettingsToggleCard(
     isHighlighted: Boolean = false,
 ) {
     val hapticManager = LocalHapticManager.current
-    val interactionSource = remember { MutableInteractionSource() }
-    val scale = rememberPressScale(interactionSource)
-    val shape = groupShape(position)
 
-    val glassBorder = Brush.linearGradient(
-        listOf(
-            Color.White.copy(alpha = 0.40f),
-            Color.White.copy(alpha = 0.08f),
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f),
-        ),
-        start = Offset(0f, 0f),
-        end = Offset(450f, 450f),
-    )
-
-    Card(
+    Surface(
         onClick = {
             if (enabled) {
                 val next = !checked
@@ -3066,83 +3111,58 @@ private fun SettingsToggleCard(
                 onCheckedChange(next)
             }
         },
-        shape = shape,
         enabled = enabled,
-        colors = CardDefaults.cardColors(
-            containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.70f),
-            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
-        ),
-        border = BorderStroke(
-            width = 1.2.dp,
-            brush = glassBorder,
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp, pressedElevation = 0.5.dp),
-        interactionSource = interactionSource,
+        color = if (isHighlighted) Color.White.copy(alpha = 0.12f) else Color.Transparent,
         modifier = Modifier
             .fillMaxWidth()
-            .scale(if (enabled) scale else 1f)
-            .settingHighlightGlow(isHighlighted = isHighlighted, shape = shape),
+            .settingHighlightGlow(isHighlighted = isHighlighted, shape = RoundedCornerShape(AppleGroupRadius)),
     ) {
-        Box(Modifier.fillMaxWidth()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(28.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.White.copy(alpha = 0.06f),
-                                Color.Transparent,
-                            )
-                        )
-                    )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconBadge(
+                icon,
+                if (enabled) iconContainer else iconContainer.copy(alpha = 0.5f),
+                if (enabled) iconTint else iconTint.copy(alpha = 0.5f),
             )
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconBadge(
-                    icon,
-                    if (enabled) iconContainer else iconContainer.copy(alpha = 0.5f),
-                    if (enabled) iconTint else iconTint.copy(alpha = 0.5f),
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
+                    fontWeight = FontWeight.Medium,
+                    color = if (enabled) Color.White else Color.White.copy(alpha = 0.45f),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    )
+                if (subtitle.isNotBlank()) {
                     Text(
                         subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                        color = if (enabled) Color(0xFF8E8E93) else Color(0xFF8E8E93).copy(alpha = 0.45f),
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
                 }
-                Spacer(Modifier.width(8.dp))
-                Switch(
-                    checked = checked,
-                    enabled = enabled,
-                    onCheckedChange = if (enabled) { nextVal ->
-                        hapticManager.toggle(nextVal)
-                        onCheckedChange(nextVal)
-                    } else null,
-                    thumbContent = if (checked) {
-                        {
-                            Icon(
-                                Icons.Filled.Check,
-                                contentDescription = null,
-                                modifier = Modifier.size(SwitchDefaults.IconSize),
-                            )
-                        }
-                    } else null,
-                )
             }
+            Spacer(Modifier.width(8.dp))
+            Switch(
+                checked = checked,
+                enabled = enabled,
+                onCheckedChange = if (enabled) { nextVal ->
+                    hapticManager.toggle(nextVal)
+                    onCheckedChange(nextVal)
+                } else null,
+                colors = androidx.compose.material3.SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Color(0xFF34C759),
+                    uncheckedThumbColor = Color(0xFFE5E5EA),
+                    uncheckedTrackColor = Color(0xFF39393D),
+                ),
+            )
         }
     }
 }
@@ -3817,76 +3837,57 @@ private fun SettingsActionCard(
     trailingBadge: (@Composable () -> Unit)? = null,
 ) {
     val hapticManager = LocalHapticManager.current
-    val interactionSource = remember { MutableInteractionSource() }
-    val scale = rememberPressScale(interactionSource)
-    val titleColor = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-    val shape = groupShape(position)
+    val titleColor = if (danger) MaterialTheme.colorScheme.error else Color.White
 
-    val glassBorder = Brush.linearGradient(
-        listOf(
-            Color.White.copy(alpha = 0.40f),
-            Color.White.copy(alpha = 0.08f),
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f),
-        ),
-        start = Offset(0f, 0f),
-        end = Offset(450f, 450f),
-    )
-
-    Card(
+    Surface(
         onClick = {
             hapticManager.click()
             onClick()
         },
-        shape = shape,
-        colors = CardDefaults.cardColors(
-            containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.70f)
-        ),
-        border = BorderStroke(
-            width = 1.2.dp,
-            brush = glassBorder,
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp, pressedElevation = 0.5.dp),
-        interactionSource = interactionSource,
+        color = if (isHighlighted) Color.White.copy(alpha = 0.12f) else Color.Transparent,
         modifier = Modifier
             .fillMaxWidth()
-            .scale(scale)
-            .settingHighlightGlow(isHighlighted = isHighlighted, shape = shape),
+            .settingHighlightGlow(isHighlighted = isHighlighted, shape = RoundedCornerShape(AppleGroupRadius)),
     ) {
-        Box(Modifier.fillMaxWidth()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(28.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.White.copy(alpha = 0.06f),
-                                Color.Transparent,
-                            )
-                        )
-                    )
-            )
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconBadge(icon, iconContainer, iconTint)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = titleColor, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                }
-                if (trailingBadge != null) {
-                    Spacer(Modifier.width(8.dp))
-                    trailingBadge()
-                }
-                Spacer(Modifier.width(4.dp))
-                Icon(
-                    Icons.Filled.ChevronRight,
-                    contentDescription = null,
-                    tint = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconBadge(icon, iconContainer, iconTint)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
+                    fontWeight = FontWeight.Medium,
+                    color = titleColor,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
+                if (subtitle.isNotBlank()) {
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                        color = Color(0xFF8E8E93),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                }
             }
+            if (trailingBadge != null) {
+                Spacer(Modifier.width(8.dp))
+                trailingBadge()
+            }
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = if (danger) MaterialTheme.colorScheme.error else Color(0xFF8E8E93),
+                modifier = Modifier.size(16.dp),
+            )
         }
     }
 }
@@ -3917,34 +3918,19 @@ private fun SettingsPhotoCard(
         end = Offset(450f, 450f),
     )
 
-    Card(
+    Surface(
         onClick = {
             hapticManager.click()
             onClick()
         },
-        shape = shape,
-        colors = CardDefaults.cardColors(
-            containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.70f),
-        ),
-        border = BorderStroke(1.2.dp, glassBorder),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp, pressedElevation = 0.5.dp),
+        shape = RoundedCornerShape(AppleGroupRadius),
+        color = AppleGroupBackground,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
         interactionSource = interactionSource,
-        modifier = Modifier.fillMaxWidth().scale(scale).settingHighlightGlow(isHighlighted, shape),
+        modifier = Modifier.fillMaxWidth().settingHighlightGlow(isHighlighted, RoundedCornerShape(AppleGroupRadius)),
     ) {
         Box(Modifier.fillMaxWidth()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(28.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.White.copy(alpha = 0.06f),
-                                Color.Transparent,
-                            )
-                        )
-                    )
-            )
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -4966,7 +4952,7 @@ private fun AboutCard(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
-                                androidx.compose.material3.LinearProgressIndicator(
+                                com.neonsong.app.ui.theme.GlassLinearProgressIndicator(
                                     progress = { updateInfo.downloadProgress },
                                     modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
                                 )
@@ -5339,6 +5325,7 @@ private fun EqualizerSheet(
     onPickPreset: (String) -> Unit,
     onBandPreview: (Int, Float) -> Unit,
     onBandChange: (Int, Float) -> Unit,
+    onOpenAutoEq: () -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -5358,14 +5345,14 @@ private fun EqualizerSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+        containerColor = Color(0xFF141416),
         tonalElevation = 0.dp,
-        scrimColor = Color.Black.copy(alpha = 0.32f),
+        scrimColor = Color.Black.copy(alpha = 0.5f),
         contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         dragHandle = {
             Surface(
                 shape = RoundedCornerShape(50),
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                color = Color.White.copy(alpha = 0.28f),
                 modifier = Modifier
                     .padding(top = 12.dp, bottom = 8.dp)
                     .size(width = 36.dp, height = 4.dp),
@@ -5398,13 +5385,13 @@ private fun EqualizerSheet(
                         modifier = Modifier
                             .size(44.dp)
                             .clip(RoundedCornerShape(14.dp))
-                            .background(MaterialTheme.colorScheme.primaryContainer),
+                            .background(Color(0xFFFA2D48).copy(alpha = 0.18f)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             Icons.Filled.GraphicEq,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            tint = Color(0xFFFA2D48),
                             modifier = Modifier.size(24.dp),
                         )
                     }
@@ -5414,13 +5401,14 @@ private fun EqualizerSheet(
                             "Equalizer",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
+                            color = Color.White,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            "15-band audio equalizer",
+                            "16-band audiophile equalizer",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = Color(0xFF8E8E93),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -5434,11 +5422,12 @@ private fun EqualizerSheet(
                     },
                     enabled = eq.enabled,
                 ) {
-                    Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp), tint = if (eq.enabled) Color(0xFFFA2D48) else Color(0xFF636366))
                     Spacer(Modifier.width(4.dp))
                     Text(
                         "Reset",
                         style = MaterialTheme.typography.labelMedium,
+                        color = if (eq.enabled) Color(0xFFFA2D48) else Color(0xFF636366),
                         maxLines = 1,
                         softWrap = false,
                     )
@@ -5447,9 +5436,9 @@ private fun EqualizerSheet(
 
             // Master On/Off Switch Card
             Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 2.dp,
+                shape = RoundedCornerShape(18.dp),
+                color = Color(0xFF1C1C1E),
+                tonalElevation = 0.dp,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(
@@ -5457,11 +5446,11 @@ private fun EqualizerSheet(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("Enable Equalizer", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                        Text("Enable Equalizer", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = Color.White)
                         Text(
-                            if (eq.enabled) "Shaping your music in real-time" else "Off \u2014 original audio passes through",
+                            if (eq.enabled) "Shaping your music in real-time" else "Off — original audio passes through bit-perfect",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = Color(0xFF8E8E93),
                             maxLines = 2,
                         )
                     }
@@ -5471,6 +5460,12 @@ private fun EqualizerSheet(
                             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                             onSetEnabled(enabled)
                         },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFFFA2D48),
+                            uncheckedThumbColor = Color(0xFF8E8E93),
+                            uncheckedTrackColor = Color(0xFF2C2C2E),
+                        ),
                     )
                 }
             }
@@ -5481,33 +5476,146 @@ private fun EqualizerSheet(
                 enabled = eq.enabled,
             )
 
-            // Presets Horizontal Flow
-            SectionLabel("Presets")
+            // Apple Music Genre & Tone Presets
+            SectionLabel("Apple Music EQ Presets")
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                EqualizerPresets.ALL.forEach { preset ->
+                EqualizerPresets.GENRE_PRESETS.forEach { preset ->
+                    val isSelected = eq.presetName.equals(preset.name, ignoreCase = true)
                     FilterChip(
-                        selected = eq.presetName.equals(preset.name, ignoreCase = true),
+                        selected = isSelected,
                         onClick = {
                             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                             onPickPreset(preset.name)
                         },
                         label = { Text(preset.name, style = MaterialTheme.typography.labelMedium) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFFFA2D48),
+                            selectedLabelColor = Color.White,
+                            containerColor = Color(0xFF1C1C1E),
+                            labelColor = Color(0xFFE5E5EA),
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = isSelected,
+                            borderColor = if (isSelected) Color.Transparent else Color(0xFF2C2C2E),
+                        ),
                     )
                 }
                 if (eq.presetName == EqualizerPresets.CUSTOM_NAME) {
-                    FilterChip(selected = true, onClick = {}, label = { Text("Custom", style = MaterialTheme.typography.labelMedium) })
+                    FilterChip(
+                        selected = true,
+                        onClick = {},
+                        label = { Text("Custom", style = MaterialTheme.typography.labelMedium) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFFFA2D48),
+                            selectedLabelColor = Color.White,
+                        ),
+                    )
+                }
+            }
+
+            // AutoEQ Headphone Calibration Section
+            Spacer(Modifier.height(4.dp))
+            SectionLabel("AutoEQ Headphone Calibration")
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                EqualizerPresets.AUTOEQ_APPROX_PRESETS.forEach { (preset, label) ->
+                    val isSelected = eq.presetName.equals(preset.name, ignoreCase = true)
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                            onPickPreset(preset.name)
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.Headphones,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp),
+                                tint = if (isSelected) Color.White else Color(0xFF0A84FF),
+                            )
+                        },
+                        label = { Text(label, style = MaterialTheme.typography.labelMedium) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFFFA2D48),
+                            selectedLabelColor = Color.White,
+                            containerColor = Color(0xFF1C1C1E),
+                            labelColor = Color(0xFFE5E5EA),
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = isSelected,
+                            borderColor = if (isSelected) Color.Transparent else Color(0xFF2C2C2E),
+                        ),
+                    )
+                }
+            }
+
+            // Dedicated AutoEQ Database Shortcut
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF1C1C1E),
+                tonalElevation = 0.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        onOpenAutoEq()
+                    },
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF0A84FF).copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Tune,
+                            contentDescription = null,
+                            tint = Color(0xFF0A84FF),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Browse 5,000+ Headphone Models",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                        )
+                        Text(
+                            "Calibrate with official AutoEQ acoustic measurements",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF8E8E93),
+                        )
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowForwardIos,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = Color(0xFF636366),
+                    )
                 }
             }
 
             // Native Equalizer Fader Board
             Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 2.dp,
+                shape = RoundedCornerShape(22.dp),
+                color = Color(0xFF1C1C1E),
+                tonalElevation = 0.dp,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 val curveAlpha = if (eq.enabled) 1f else 0.38f
@@ -5530,13 +5638,13 @@ private fun EqualizerSheet(
                             "+8 dB (Boost)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = Color(0xFFFA2D48),
                         )
                         Text(
                             "-8 dB (Cut)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = Color(0xFF8E8E93),
                         )
                     }
 
@@ -5570,18 +5678,17 @@ private fun EqualizerSheet(
             Text(
                 text = when {
                     !eq.enabled -> "Turn on to apply equalization live"
-                    eq.presetName == EqualizerPresets.CUSTOM_NAME -> "Custom profile \u2022 touch and drag any bar up/down"
-                    else -> "${eq.presetName} preset active \u2022 touch any bar to customize"
+                    eq.presetName == EqualizerPresets.CUSTOM_NAME -> "Custom profile • touch and drag any bar up/down"
+                    else -> "${eq.presetName} preset active • touch any bar to customize"
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Color(0xFF8E8E93),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
             )
         }
     }
 }
-
 /**
  * Goated native hardware equalizer fader bar:
  * - Vertical capsule track with central 0 dB baseline notch and active level gradient beam

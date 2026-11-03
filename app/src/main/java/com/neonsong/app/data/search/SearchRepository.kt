@@ -48,10 +48,13 @@ class SearchRepository @Inject constructor(
     private val http: OkHttpClient,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    private val suggestionsCache = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
 
     suspend fun getSuggestions(query: String): List<String> = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
         if (trimmed.isBlank()) return@withContext emptyList()
+        val cached = suggestionsCache[trimmed.lowercase()]
+        if (cached != null) return@withContext cached
         val url = "https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${URLEncoder.encode(trimmed, "UTF-8")}"
         val request = Request.Builder()
             .url(url)
@@ -64,7 +67,12 @@ class SearchRepository @Inject constructor(
                 val array = json.parseToJsonElement(body) as? JsonArray ?: return@withContext emptyList()
                 if (array.size < 2) return@withContext emptyList()
                 val suggestions = array[1] as? JsonArray ?: return@withContext emptyList()
-                suggestions.mapNotNull { (it as? JsonPrimitive)?.content }
+                val list = suggestions.mapNotNull { (it as? JsonPrimitive)?.content }
+                if (list.isNotEmpty()) {
+                    if (suggestionsCache.size > 200) suggestionsCache.clear()
+                    suggestionsCache[trimmed.lowercase()] = list
+                }
+                list
             }
         } catch (e: Exception) {
             emptyList()
@@ -156,7 +164,10 @@ class SearchRepository @Inject constructor(
         val forbiddenTags = listOf(
             "cover", "reaction", "karaoke", "parody", "tutorial", "instrumental",
             "slowed", "reverb", "sped up", "1 hour", "nightcore", "bass boosted",
-            "tribute", "dance cover", "how to play", "guitar lesson", "piano tutorial"
+            "tribute", "dance cover", "how to play", "guitar lesson", "piano tutorial",
+            "lyrics", "lyric", "official audio", "audio only", "(audio)", "[audio]", "audio version",
+            "visualizer", "art track", "full album", "static image", "still image", "cover art",
+            "wallpaper", "single image", "provided to youtube by", "poster"
         )
 
         data class ScoredVideo(val videoId: String, val score: Int)
@@ -166,7 +177,9 @@ class SearchRepository @Inject constructor(
             val vArtist = v.artist.lowercase()
 
             // 1. Strict disqualification for foreign/junk tags
-            if (forbiddenTags.any { vTitle.contains(it) }) return@mapNotNull null
+            if (forbiddenTags.any { vTitle.contains(it) } ||
+                vArtist.endsWith(" - topic") || vArtist == "topic" || vArtist.contains("art track")
+            ) return@mapNotNull null
 
             // 2. Artist verification:
             // At least one significant artist token must be found in candidate's artist or title

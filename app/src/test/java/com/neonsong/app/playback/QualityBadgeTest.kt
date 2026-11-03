@@ -172,6 +172,15 @@ audioCodec = "24/192kHz",
     }
 
     @Test
+    fun ac3AndEac3DoNotReceiveAtmosBadge() {
+        assertThat(qualityBadgeLabel(MusicPlayerState(audioCodec = "DOLBY DIGITAL"))).isEqualTo("DOLBY DIGITAL")
+        assertThat(qualityBadgeLabel(MusicPlayerState(audioCodec = "DOLBY DIGITAL PLUS"))).isEqualTo("DOLBY DIGITAL PLUS")
+        assertThat(spatialIndicatorLabel("DOLBY DIGITAL")).isNull()
+        assertThat(spatialIndicatorLabel("DOLBY DIGITAL PLUS")).isNull()
+        assertThat(spatialIndicatorLabel("DOLBY ATMOS")).isEqualTo("ATMOS")
+    }
+
+    @Test
     fun opusKeepsKbpsForm() {
         assertThat(
             qualityBadgeLabel(
@@ -384,4 +393,3 @@ audioCodec = "24/192kHz",
         assertThat(formatDetailedQualityBadge(null, null, isAtmos = true)).isEqualTo("DOLBY ATMOS")
     }
 }
-

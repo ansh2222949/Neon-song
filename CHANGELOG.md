@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.2.5] - 2026-11-03
+
+### Added & Improved
+- **Reliable queue transitions:** Pre-resolve the configured high-quality stream for the next track in normal playback, retain the three-track AutoDJ warm-up, and fall back cleanly if the preferred source is unavailable.
+- **Liquid Glass controls:** Extend animated glass buttons and progress/loading indicators through search and player surfaces; add an actual-next-track preview to the player queue panel.
+
 ## [4.2.4] - 2026-10-05
 
 ### Added & Improved

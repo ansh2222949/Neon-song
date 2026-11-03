@@ -42,17 +42,15 @@ import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.neonsong.app.ui.theme.GlassTextActionButton as TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -79,6 +77,8 @@ import com.neonsong.app.ui.common.adaptiveContentWidth
 import com.neonsong.app.ui.common.wobbleOverscroll
 import com.neonsong.app.ui.shell.FloatingNavDefaults
 import com.neonsong.app.ui.theme.ExpressivePillShape
+import com.neonsong.app.ui.theme.LiquidGlassButton
+import com.neonsong.app.ui.theme.LiquidGlassChip
 import com.neonsong.app.ui.theme.liquidGlassSource
 
 // Local expressive shape scale, matching the Settings screen's redesign so
@@ -112,7 +112,9 @@ fun GenerateScreen(
     }
 
     Box(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
         contentAlignment = Alignment.TopCenter,
     ) {
         Column(
@@ -139,6 +141,10 @@ fun GenerateScreen(
                 .liquidGlassSource(headerBackdrop)
                 .wobbleOverscroll(),
         ) {
+            item(key = "generator_intro") {
+                GeneratorWelcomeCard(selectedMode = state.selectedMode)
+            }
+
             if (state.isGenerating) {
                 item(key = "loadingOverlay") {
                     com.neonsong.app.ui.common.GenerationProgressCard(message = state.loadingMessage)
@@ -199,9 +205,7 @@ fun GenerateScreen(
                                     GenerateMode.SIMILAR_ARTISTS -> SimilarArtistSeedOptions(state, viewModel)
                                     GenerateMode.TAG -> TagOptions(state.tagInput, viewModel::setTagInput, viewModel::setGenreChip)
                                     GenerateMode.MIX -> HintText("Top tracks, recent plays, deep cuts and accountless YouTube radio.")
-                                    GenerateMode.RECOMMENDATIONS -> HintText(
-                                        "$RECOMMENDATION_TRACK_COUNT dual-engine tracks, respecting your exclusions",
-                                    )
+                                    GenerateMode.RECOMMENDATIONS -> RecommendationModeCard()
                                     GenerateMode.NEVER_HEARD -> HintText(
                                         "Fresh discoveries tailored to your taste, strictly excluding songs you've heard before across listening history, library, and likes.",
                                     )
@@ -225,11 +229,12 @@ fun GenerateScreen(
                                     )
                                 }
                                 Spacer(Modifier.height(10.dp))
-                                Button(
+                                LiquidGlassButton(
                                     onClick = viewModel::generate,
                                     enabled = !state.isGenerating,
                                     shape = ExpressivePillShape,
                                     modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                                 ) {
                                     Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(8.dp))
@@ -261,7 +266,11 @@ fun GenerateScreen(
                                 Spacer(Modifier.width(10.dp))
                                 Text(error, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
                             }
-                            TextButton(onClick = viewModel::dismissError) { Text("Dismiss") }
+                            LiquidGlassButton(
+                                onClick = viewModel::dismissError,
+                                shape = ExpressivePillShape,
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                            ) { Text("Dismiss") }
                         }
                     }
                 }
@@ -269,6 +278,102 @@ fun GenerateScreen(
         }
     }
     }
+    }
+}
+
+@Composable
+private fun GeneratorWelcomeCard(selectedMode: GenerateMode?) {
+    Card(
+        shape = GeneratorOuterCardShape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Box {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.23f),
+                                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f),
+                                MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ),
+                        ),
+                    ),
+            )
+            Row(
+                Modifier.padding(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.AutoAwesome,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(27.dp),
+                    )
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        selectedMode?.label ?: "Make a playlist that feels like you",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        selectedMode?.description ?: "Pick a starting point. Tune the details, then let your next mix take shape.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecommendationModeCard() {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.Explore,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(22.dp),
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "$RECOMMENDATION_TRACK_COUNT fresh picks",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Text(
+                    "YouTube Music first, with your exclusions respected.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f),
+                )
+            }
+        }
     }
 }
 
@@ -310,7 +415,11 @@ private fun PeriodOptions(period: String, onPeriodChange: (String) -> Unit) {
     Spacer(Modifier.height(8.dp))
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(GENERATE_PERIODS, key = { it.first }) { (value, label) ->
-            FilterChip(selected = period == value, onClick = { onPeriodChange(value) }, label = { Text(label) })
+            LiquidGlassChip(
+                selected = period == value,
+                onClick = { onPeriodChange(value) },
+                label = { Text(label) },
+            )
         }
     }
 }
@@ -329,7 +438,11 @@ private fun TagOptions(tag: String, onTagChange: (String) -> Unit, onChipPick: (
     Spacer(Modifier.height(10.dp))
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(GENRE_QUICK_CHIPS, key = { it }) { chip ->
-            FilterChip(selected = tag == chip, onClick = { onChipPick(chip) }, label = { Text(chip) })
+            LiquidGlassChip(
+                selected = tag == chip,
+                onClick = { onChipPick(chip) },
+                label = { Text(chip) },
+            )
         }
     }
 }
@@ -353,7 +466,11 @@ private fun SimilarTrackSeedOptions(state: GenerateUiState, viewModel: GenerateV
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(8.dp))
-        TextButton(onClick = viewModel::searchSeedTrack) { Text("Search") }
+        LiquidGlassButton(
+            onClick = viewModel::searchSeedTrack,
+            shape = ExpressivePillShape,
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+        ) { Text("Search") }
     }
     Spacer(Modifier.height(10.dp))
     Text("Seed Artist", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
@@ -367,7 +484,11 @@ private fun SimilarTrackSeedOptions(state: GenerateUiState, viewModel: GenerateV
         modifier = Modifier.fillMaxWidth(),
     )
     Spacer(Modifier.height(10.dp))
-    TextButton(onClick = viewModel::loadTopTracksForSeed) { Text("Load My Top Tracks") }
+    LiquidGlassButton(
+        onClick = viewModel::loadTopTracksForSeed,
+        shape = ExpressivePillShape,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+    ) { Text("Load My Top Tracks") }
     if (state.seedTrackResults.isNotEmpty()) {
         Column(Modifier.height(160.dp)) {
             LazyColumn {
@@ -398,10 +519,18 @@ private fun SimilarArtistSeedOptions(state: GenerateUiState, viewModel: Generate
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(8.dp))
-        TextButton(onClick = viewModel::searchSeedArtist) { Text("Search") }
+        LiquidGlassButton(
+            onClick = viewModel::searchSeedArtist,
+            shape = ExpressivePillShape,
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+        ) { Text("Search") }
     }
     Spacer(Modifier.height(10.dp))
-    TextButton(onClick = viewModel::loadTopArtistsForSeed) { Text("Load My Top Artists") }
+    LiquidGlassButton(
+        onClick = viewModel::loadTopArtistsForSeed,
+        shape = ExpressivePillShape,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+    ) { Text("Load My Top Artists") }
     if (state.seedArtistResults.isNotEmpty()) {
         Column(Modifier.height(160.dp)) {
             LazyColumn {

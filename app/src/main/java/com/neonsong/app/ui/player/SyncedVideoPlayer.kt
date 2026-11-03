@@ -1,9 +1,9 @@
-﻿package com.neonsong.app.ui.player
+package com.neonsong.app.ui.player
 
 import android.app.Activity
 import android.content.ContextWrapper
 import android.util.Log
-import android.view.TextureView
+import android.view.SurfaceView
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
@@ -50,9 +50,9 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilledTonalButton
+import com.neonsong.app.ui.theme.GlassTonalActionButton as FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.neonsong.app.ui.theme.GlassIconActionButton as IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -69,7 +69,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -114,6 +113,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.math.abs
@@ -143,15 +143,19 @@ class SyncedVideoViewModel @Inject constructor(
     val uiState: StateFlow<SyncedVideoUiState> = _uiState.asStateFlow()
 
     private var currentKey: String? = null
+    private var loadJob: Job? = null
 
     fun loadVideo(title: String, artist: String, videoId: String?) {
         val key = "$title|$artist|$videoId"
-        if (currentKey == key && _uiState.value is SyncedVideoUiState.Ready) return
+        if (currentKey == key && (_uiState.value is SyncedVideoUiState.Ready || loadJob?.isActive == true)) return
+        loadJob?.cancel()
         currentKey = key
 
-        viewModelScope.launch {
+        loadJob = viewModelScope.launch {
             _uiState.value = SyncedVideoUiState.Loading
-            videoRepository.resolveVideo(title, artist, videoId)
+            val result = videoRepository.resolveVideo(title, artist, videoId)
+            if (!isActive || currentKey != key) return@launch
+            result
                 .onSuccess { bundle ->
                     _uiState.value = SyncedVideoUiState.Ready(
                         bundle = bundle,
@@ -186,6 +190,12 @@ class SyncedVideoViewModel @Inject constructor(
         currentKey = null
         loadVideo(title, artist, videoId)
     }
+
+    fun cancelPendingLoad() {
+        loadJob?.cancel()
+        loadJob = null
+        currentKey = null
+    }
 }
 
 /**
@@ -217,10 +227,6 @@ fun SyncedVideoPlayerDialog(
     var scrubProgress by remember { mutableFloatStateOf(0f) }
     var doubleTapFeedback by remember { mutableStateOf<String?>(null) }
     var showQualityDialog by remember { mutableStateOf(false) }
-
-    LaunchedEffect(track) {
-        viewModel.loadVideo(track.title, track.artist, track.videoId)
-    }
 
     // Auto-hide controls in fullscreen after inactivity
     LaunchedEffect(controlsVisible, isFullscreen, isUserScrubbing) {
@@ -262,9 +268,9 @@ fun SyncedVideoPlayerDialog(
     val videoPlayer = remember(context) {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                /* minBufferMs = */ 2_000,
-                /* maxBufferMs = */ 8_000,
-                /* bufferForPlaybackMs = */ 1_000,
+                /* minBufferMs = */ 5_000,
+                /* maxBufferMs = */ 30_000,
+                /* bufferForPlaybackMs = */ 750,
                 /* bufferForPlaybackAfterRebufferMs = */ 2_000,
             )
             .setPrioritizeTimeOverSizeThresholds(true)
@@ -293,6 +299,14 @@ fun SyncedVideoPlayerDialog(
                     .build()
             }
     }
+
+    LaunchedEffect(track.videoId, track.title, track.artist) {
+        isRendered = false
+        videoPlayer.stop()
+        videoPlayer.clearMediaItems()
+        viewModel.loadVideo(track.title, track.artist, track.videoId)
+    }
+
 
     DisposableEffect(videoPlayer) {
         val listener = object : Player.Listener {
@@ -324,23 +338,22 @@ fun SyncedVideoPlayerDialog(
             val mediaItem = MediaItem.Builder()
                 .setUri(stream.url)
                 .apply {
-                    stream.mimeType?.let { setMimeType(it) }
+                    stream.mimeType?.substringBefore(';')?.trim()?.takeIf { it.isNotBlank() }?.let { setMimeType(it) }
                 }
                 .build()
-            videoPlayer.setMediaItem(mediaItem)
+            videoPlayer.setMediaItem(mediaItem, currentPos.coerceAtLeast(0L))
             videoPlayer.prepare()
-            videoPlayer.seekTo(currentPos)
             videoPlayer.playWhenReady = playerState.isPlaying
         }
     }
 
-    // Exact millisecond synchronization loop (PLL)
+    // Stable audio-master synchronization loop (PLL)
     LaunchedEffect(videoPlayer, playerState.isPlaying, uiState) {
         if (uiState !is SyncedVideoUiState.Ready) return@LaunchedEffect
+        var lastHardSeekAtMs = Long.MIN_VALUE
         while (isActive) {
             val audioPos = musicPlayer.currentPositionMs()
             val videoPos = videoPlayer.currentPosition
-            val driftMs = videoPos - audioPos
             val audioSpeed = playerState.speed
 
             // Play / Pause sync
@@ -348,25 +361,27 @@ fun SyncedVideoPlayerDialog(
                 videoPlayer.playWhenReady = playerState.isPlaying
             }
 
-            // Drift compensation
-            if (abs(driftMs) > 150L) {
-                // Hard seek for significant drift or user seeks
-                videoPlayer.seekTo(audioPos)
-                if (videoPlayer.playbackParameters.speed != audioSpeed) {
-                    videoPlayer.playbackParameters = PlaybackParameters(audioSpeed)
+            // Only seek while ready, and rate-limit it. Frequent seeks make the
+            // hardware decoder discard frames and look like playback lag.
+            if (videoPlayer.playbackState == Player.STATE_READY) {
+                val allowHardSeek = lastHardSeekAtMs == Long.MIN_VALUE ||
+                    android.os.SystemClock.elapsedRealtime() - lastHardSeekAtMs >= SyncedVideoClockSync.SEEK_COOLDOWN_MS
+                val decision = SyncedVideoClockSync.evaluateSync(
+                    videoPosMs = videoPos,
+                    audioPosMs = audioPos,
+                    baseSpeed = audioSpeed,
+                    allowHardSeek = allowHardSeek,
+                )
+                if (decision.action == SyncAction.HARD_SEEK) {
+                    decision.seekTargetMs?.let(videoPlayer::seekTo)
+                    lastHardSeekAtMs = android.os.SystemClock.elapsedRealtime()
                 }
-            } else if (abs(driftMs) > 40L) {
-                // Micro-phase adjustment for sub-millisecond convergence without stutters
-                val speedCorrection = if (driftMs > 0) 0.95f else 1.05f
-                videoPlayer.playbackParameters = PlaybackParameters(audioSpeed * speedCorrection)
-            } else {
-                // Exact sync achieved
-                if (videoPlayer.playbackParameters.speed != audioSpeed) {
-                    videoPlayer.playbackParameters = PlaybackParameters(audioSpeed)
+                if (videoPlayer.playbackParameters.speed != decision.targetSpeed) {
+                    videoPlayer.playbackParameters = PlaybackParameters(decision.targetSpeed)
                 }
             }
 
-            delay(50L) // 20 times per second high-precision clock
+            delay(250L) // sync often enough for music video playback without frame-rate polling
         }
     }
 
@@ -568,20 +583,22 @@ fun SyncedVideoPlayerDialog(
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        // Media3 ExoPlayer TextureView
+                        // Media3 SurfaceView keeps decoded video frames on the direct surface path.
                         AndroidView(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .alpha(videoAlpha),
+                            modifier = Modifier.fillMaxSize(),
                             factory = { viewContext ->
-                                TextureView(viewContext).apply {
+                                SurfaceView(viewContext).apply {
                                     layoutParams = FrameLayout.LayoutParams(
                                         ViewGroup.LayoutParams.MATCH_PARENT,
                                         ViewGroup.LayoutParams.MATCH_PARENT,
                                     )
-                                    isOpaque = true
-                                    videoPlayer.setVideoTextureView(this)
+                                    alpha = videoAlpha
+                                    videoPlayer.setVideoSurfaceView(this)
                                 }
+                            },
+                            update = { surfaceView ->
+                                surfaceView.alpha = videoAlpha
+                                videoPlayer.setVideoSurfaceView(surfaceView)
                             },
                         )
 

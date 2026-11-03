@@ -70,6 +70,18 @@ Java_com_neonsong_app_playback_NativeAutoMixEngine_nativeSetBarMode(
 }
 
 JNIEXPORT void JNICALL
+Java_com_neonsong_app_playback_NativeAutoMixEngine_nativeSetCurveType(
+    JNIEnv*,
+    jclass,
+    jlong handle,
+    jint curveType) {
+    auto* engine = fromHandle(handle);
+    if (engine != nullptr) {
+        engine->setCurveType(static_cast<int>(curveType));
+    }
+}
+
+JNIEXPORT void JNICALL
 Java_com_neonsong_app_playback_NativeAutoMixEngine_nativeTriggerFadeNow(
     JNIEnv*,
     jclass,

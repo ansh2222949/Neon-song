@@ -183,23 +183,22 @@ class LosslessMusicApi @Inject constructor(
         }
 
         private val MANIFEST_CODECS = Regex("""codecs="([^"]+)"""")
+        private val ATMOS_CODEC = Regex(
+            """(?:\batmos\b|\bdolby[\s._-]+atmos\b|\bec\+3\b|\beac3[-_ ]?joc\b|\bjoc\b)""",
+            RegexOption.IGNORE_CASE,
+        )
+        private val EAC3_CODEC = Regex("""(?:\bec-3\b|\bec3\b|\beac3\b)""", RegexOption.IGNORE_CASE)
+        private val AC3_CODEC = Regex("""(?:\bac-3\b|\bac3\b)""", RegexOption.IGNORE_CASE)
         private val MANIFEST_SAMPLE_RATE = Regex("""audioSamplingRate="(\d+)"""", RegexOption.IGNORE_CASE)
         // Tidal rendition id carries ground truth: id="FLAC_HIRES,48000,24".
         // Parsed when present so a missing/slow probe or stale catalogue tier
         // can never downgrade a real 24-bit rendition to a fabricated 16.
         private val MANIFEST_RENDITION = Regex("""Representation[^>]*id="[^"]*,(\d+),(\d+)"""", RegexOption.IGNORE_CASE)
 
-        /**
-         * True when DASH manifest XML carries E-AC-3 / Dolby Atmos (or JOC).
-         * Tidal's atmos endpoint answers stereo-only tracks with FLAC/AAC, so
-         * those stay false. Channel-count is not required: Atmos JOC often
-         * declares a Dolby hex mask (`F801`) or 16ch, not `value="6"`.
-         */
+        /** True only when the DASH manifest explicitly identifies Atmos or JOC. */
         fun isAtmosManifest(mpdXml: String): Boolean {
             if (mpdXml.isBlank()) return false
-            val lower = mpdXml.lowercase()
-            return lower.contains("ec-3") || lower.contains("eac3") || lower.contains("ec3") ||
-                lower.contains("atmos") || lower.contains("joc")
+            return ATMOS_CODEC.containsMatchIn(mpdXml)
         }
 
         fun isSpatialManifest(mpdXml: String): Boolean {
@@ -250,19 +249,43 @@ class LosslessMusicApi @Inject constructor(
             return MANIFEST_RENDITION.find(xml)?.groupValues?.getOrNull(2)?.toIntOrNull()?.takeIf { it in 8..32 }
         }
 
-        /** True for E-AC-3 spatial codec labels. Pure; safe to unit-test on JVM. */
+        /** True only for codec labels that explicitly signal Atmos/JOC. */
         fun isAtmosCodec(codec: String?): Boolean {
-            val c = codec?.trim()?.lowercase().orEmpty()
-            return c.startsWith("ec-3") || c.startsWith("eac3") || c.startsWith("ac-3")
+            return codec?.let(ATMOS_CODEC::containsMatchIn) == true
         }
 
-        /** True when the stream bytes are E-AC-3 spatial. Fail-open (false) when unreadable. */
+        fun isEac3Codec(codec: String?): Boolean =
+            codec?.let(EAC3_CODEC::containsMatchIn) == true
+
+        fun isAc3Codec(codec: String?): Boolean =
+            codec?.let(AC3_CODEC::containsMatchIn) == true
+
+        fun isLossyDolbyCodec(codec: String?): Boolean =
+            isEac3Codec(codec) || isAc3Codec(codec)
+
+        fun isSpatialAudioCodec(codec: String?): Boolean =
+            isAtmosCodec(codec) ||
+                codec?.contains("mha1", ignoreCase = true) == true ||
+                codec?.contains("mhm1", ignoreCase = true) == true
+
+        fun dolbyCodecLabel(codec: String?): String? = when {
+            isAtmosCodec(codec) -> "DOLBY ATMOS"
+            isEac3Codec(codec) -> "DOLBY DIGITAL PLUS"
+            isAc3Codec(codec) -> "DOLBY DIGITAL"
+            else -> null
+        }
+
+        /** True only when a URL/manifest explicitly signals Atmos or JOC. */
         fun isAtmosStreamUrl(url: String): Boolean {
             if (url.startsWith("data:application/dash+xml")) {
-                return isAtmosCodec(manifestCodecOf(url))
+                val b64 = url.substringAfter("base64,", "").trim()
+                if (b64.isEmpty()) return false
+                val xml = runCatching {
+                    String(android.util.Base64.decode(b64, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                }.getOrNull() ?: return false
+                return isAtmosManifest(xml)
             }
-            val lower = url.lowercase()
-            return lower.contains("atmos") || lower.contains("eac3") || lower.contains("ec-3")
+            return ATMOS_CODEC.containsMatchIn(url)
         }
 
         /** True when the stream points to a known prank or decoy CDN stream. */
@@ -312,7 +335,7 @@ class LosslessMusicApi @Inject constructor(
             fun consider(raw: String?) {
                 val m = raw?.uppercase().orEmpty()
                 if (m.isBlank()) return
-                if (m.contains("DOLBY") || m.contains("ATMOS")) atmos = true
+                if (isAtmosCodec(m)) atmos = true
                 if (m.contains("360") || m.contains("SONY") || (m.contains("SPATIAL") && !m.contains("ATMOS"))) {
                     spatial = true
                 }
@@ -740,7 +763,7 @@ class LosslessMusicApi @Inject constructor(
                         albumArtistName = track.artist,
                         albumTitle = track.album,
                         performers = track.artist,
-                        isAtmos = track.isDolbyAtmos || track.atmos || track.audioModes.any { it.contains("DOLBY", ignoreCase = true) || it.contains("ATMOS", ignoreCase = true) },
+                        isAtmos = track.isDolbyAtmos || track.atmos,
                         isSpatial = track.audioModes.any { it.contains("360", ignoreCase = true) || it.contains("SPATIAL", ignoreCase = true) },
                         rawAddonId = track.id,
                         audioQuality = track.audioQuality,
@@ -852,13 +875,14 @@ class LosslessMusicApi @Inject constructor(
                 val isStreamAtmos = stream?.isDolbyAtmos == true ||
                     (stream?.audioMode?.contains("ATMOS", ignoreCase = true) == true) ||
                     isAtmosCodec(stream?.codec) ||
+                    (wantAtmos && candidate.isAtmos && isEac3Codec(stream?.codec)) ||
                     isAtmosStreamUrl(rawUrl)
 
                 // Atmos isolation: a hi-res/CD/320 request must never come home
                 // as Dolby (the URL check above misses manifests whose
                 // spatial-ness is only in the audioMode flag). Atmos plays
                 // only when explicitly selected (quality 28).
-                if (!isAtmosPreferred && isStreamAtmos) {
+                if (!wantAtmos && isStreamAtmos) {
                     Log.i(TAG, "resolveFromAddon: skipping spatial stream for track $trackId (stereo tier requested)")
                     continue
                 }

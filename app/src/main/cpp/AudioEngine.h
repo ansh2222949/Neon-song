@@ -96,6 +96,9 @@ public:
 
     void setStudioMasterClarity(bool enabled) noexcept;
     void setBitPerfect(bool enabled) noexcept;
+    void setBauerCrossfeedEnabled(bool enabled) noexcept;
+    void setAnalogTubeWarmthEnabled(bool enabled) noexcept;
+    void setMonoBassEnabled(bool enabled) noexcept;
     // Read-back for UI truthfulness: true only when both DSP instances
     // actually bypass. Lets the signal-path verdict distinguish
     // bitPerfectRequested from bitPerfectActuallyActive.

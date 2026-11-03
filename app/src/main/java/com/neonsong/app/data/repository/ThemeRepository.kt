@@ -212,7 +212,7 @@ class ThemeRepository @Inject constructor(
         settingsPreferences.settings,
     ) { prefs: ThemePrefs, dynamic: String?, nowPlaying: String?, misc: MiscSettings ->
         val isAmoled = prefs.amoled || prefs.themeMode == ThemeMode.AMOLED
-        val isGlass = prefs.liquidGlass
+        val isGlass = true
         val nowPlayingActive = misc.dynamicNowPlayingEnabled && nowPlaying != null
         val (darkScheme, lightScheme) = when {
             nowPlayingActive -> {
@@ -268,8 +268,8 @@ class ThemeRepository @Inject constructor(
         applicationScope,
         SharingStarted.Eagerly,
         ThemeUiState(
-            darkColorScheme = Md3SchemeBuilder.buildDarkScheme("#00E5FF", false),
-            lightColorScheme = Md3SchemeBuilder.buildLightScheme("#00E5FF", false),
+            darkColorScheme = Md3SchemeBuilder.buildDarkScheme("#00E5FF", false, liquidGlass = true),
+            lightColorScheme = Md3SchemeBuilder.buildLightScheme("#00E5FF", liquidGlass = true),
             themeMode = ThemeMode.SYSTEM,
             colorScheme = Md3SchemeBuilder.buildDarkScheme("#00E5FF", false),
             amoled = false,

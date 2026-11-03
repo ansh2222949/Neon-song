@@ -102,8 +102,14 @@ data class MiscSettings(
     /** Preferred quality preset for lossless streaming (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k).
      *  If a track does not support the requested quality, the worker automatically selects the highest available. */
     val losslessQuality: Int = 27,
+    /** Preferred quality preset for cellular streaming. */
+    val cellularStreamingQuality: Int = 27,
+    /** Preferred quality preset for Wi-Fi streaming. */
+    val wifiStreamingQuality: Int = 27,
     /** Preferred quality preset for downloads (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k, -1: YouTube Music). */
     val downloadQuality: Int = 27,
+    /** Dolby Atmos spatial audio mode: "Automatic", "Always On", "Off". */
+    val dolbyAtmosMode: String = "Automatic",
     /** Optional studio-clarity curve. On by default; Bit-Perfect disables it. */
     val isStudioMasterClarityEnabled: Boolean = true,
     /** Clarity output preset index (0 Reference, 1 Speaker, 2 Headphone, 3 DAC). */
@@ -182,6 +188,14 @@ data class MiscSettings(
     val canvasFullBleed: Boolean = true,
     /** When true, canvas video loops may be fetched over cellular data. */
     val canvasOverCellular: Boolean = true,
+    /** Audiophile Bauer / Meier acoustic crossfeed filter for headphone listening fatigue reduction. */
+    val bauerCrossfeedEnabled: Boolean = false,
+    /** Analog tube warmth & soft-clipping tape saturation harmonics. */
+    val analogTubeWarmthEnabled: Boolean = false,
+    /** Mono bass summing filter (<120 Hz) to eliminate low-frequency phase cancellation. */
+    val monoBassEnabled: Boolean = false,
+    /** AutoMix transition curve: 0 = Equal Power, 1 = Smooth S-Curve, 2 = Club Bass Swap, 3 = Fast Drop. */
+    val automixCurveType: Int = 0,
 )
 
 /** Toggleable sections of the Home tab (see FeedScreen). Hero greeting and
@@ -257,7 +271,10 @@ class SettingsPreferences @Inject constructor(
         val PREFER_LOSSLESS_STREAMING = booleanPreferencesKey("lw_prefer_lossless_streaming")
         val PREFER_PROVIDER_MODULES = booleanPreferencesKey("lw_prefer_provider_modules")
         val LOSSLESS_QUALITY = intPreferencesKey("lw_lossless_quality")
+        val CELLULAR_STREAMING_QUALITY = intPreferencesKey("lw_cellular_streaming_quality")
+        val WIFI_STREAMING_QUALITY = intPreferencesKey("lw_wifi_streaming_quality")
         val DOWNLOAD_QUALITY = intPreferencesKey("lw_download_quality")
+        val DOLBY_ATMOS_MODE = stringPreferencesKey("lw_dolby_atmos_mode")
         val MUSIC_ENHANCER = booleanPreferencesKey("lw_music_enhancer")
         val CLARITY_PRESET = intPreferencesKey("lw_clarity_preset")
         val CLARITY_ATMOS_BYPASS = booleanPreferencesKey("lw_clarity_atmos_bypass")
@@ -295,6 +312,10 @@ class SettingsPreferences @Inject constructor(
         val CANVAS_FULL_BLEED = booleanPreferencesKey("lw_canvas_full_bleed")
         val CANVAS_OVER_CELLULAR = booleanPreferencesKey("lw_canvas_over_cellular")
         val SUPPRESS_YOUTUBE_LOGIN_PROMPT = booleanPreferencesKey("lw_suppress_youtube_login_prompt")
+        val BAUER_CROSSFEED_ENABLED = booleanPreferencesKey("lw_bauer_crossfeed_enabled")
+        val ANALOG_TUBE_WARMTH_ENABLED = booleanPreferencesKey("lw_analog_tube_warmth_enabled")
+        val MONO_BASS_ENABLED = booleanPreferencesKey("lw_mono_bass_enabled")
+        val AUTOMIX_CURVE_TYPE = intPreferencesKey("lw_automix_curve_type")
     }
 
     val settings: Flow<MiscSettings> = dataStore.data
@@ -308,7 +329,12 @@ class SettingsPreferences @Inject constructor(
                 preferLosslessStreaming = p.readSafely(Keys.PREFER_LOSSLESS_STREAMING) ?: true,
                 preferProviderModules = p.readSafely(Keys.PREFER_PROVIDER_MODULES) ?: true,
                 losslessQuality = p.readSafely(Keys.LOSSLESS_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES } ?: 27,
+                cellularStreamingQuality = p.readSafely(Keys.CELLULAR_STREAMING_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES }
+                    ?: p.readSafely(Keys.LOSSLESS_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES } ?: 27,
+                wifiStreamingQuality = p.readSafely(Keys.WIFI_STREAMING_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES }
+                    ?: p.readSafely(Keys.LOSSLESS_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES } ?: 27,
                 downloadQuality = p.readSafely(Keys.DOWNLOAD_QUALITY)?.takeIf { it in DOWNLOAD_QUALITIES } ?: 27,
+                dolbyAtmosMode = p.readSafely(Keys.DOLBY_ATMOS_MODE) ?: "Automatic",
                 systemEffectsMode = p.readSafely(Keys.SYSTEM_EFFECTS_MODE) ?: false,
                 buttonNowPlayingEnabled = p.readSafely(Keys.BUTTON_NOW_PLAYING_ENABLED) ?: false,
                 musicVideoEnabled = p.readSafely(Keys.MUSIC_VIDEO_ENABLED) ?: false,
@@ -348,6 +374,10 @@ class SettingsPreferences @Inject constructor(
                 canvasFullBleed = p.readSafely(Keys.CANVAS_FULL_BLEED) ?: true,
                 canvasOverCellular = p.readSafely(Keys.CANVAS_OVER_CELLULAR) ?: true,
                 suppressYouTubeLoginPrompt = p.readSafely(Keys.SUPPRESS_YOUTUBE_LOGIN_PROMPT) ?: false,
+                bauerCrossfeedEnabled = p.readSafely(Keys.BAUER_CROSSFEED_ENABLED) ?: false,
+                analogTubeWarmthEnabled = p.readSafely(Keys.ANALOG_TUBE_WARMTH_ENABLED) ?: false,
+                monoBassEnabled = p.readSafely(Keys.MONO_BASS_ENABLED) ?: false,
+                automixCurveType = (p.readSafely(Keys.AUTOMIX_CURVE_TYPE) ?: 0).coerceIn(0, 3),
             )
         }
 
@@ -415,11 +445,30 @@ class SettingsPreferences @Inject constructor(
         }
     }
 
+    suspend fun setCellularStreamingQuality(quality: Int) {
+        dataStore.edit {
+            val q = quality.takeIf { it in LOSSLESS_QUALITIES } ?: 27
+            it[Keys.CELLULAR_STREAMING_QUALITY] = q
+        }
+    }
+
+    suspend fun setWifiStreamingQuality(quality: Int) {
+        dataStore.edit {
+            val q = quality.takeIf { it in LOSSLESS_QUALITIES } ?: 27
+            it[Keys.WIFI_STREAMING_QUALITY] = q
+            it[Keys.LOSSLESS_QUALITY] = q
+        }
+    }
+
     suspend fun setDownloadQuality(quality: Int) {
         dataStore.edit {
             val q = quality.takeIf { it in DOWNLOAD_QUALITIES } ?: 27
             it[Keys.DOWNLOAD_QUALITY] = q
         }
+    }
+
+    suspend fun setDolbyAtmosMode(mode: String) {
+        dataStore.edit { it[Keys.DOLBY_ATMOS_MODE] = mode }
     }
 
     suspend fun setSystemEffectsMode(enabled: Boolean) {
@@ -609,6 +658,22 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setCanvasOverCellular(enabled: Boolean) {
         dataStore.edit { it[Keys.CANVAS_OVER_CELLULAR] = enabled }
+    }
+
+    suspend fun setBauerCrossfeedEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.BAUER_CROSSFEED_ENABLED] = enabled }
+    }
+
+    suspend fun setAnalogTubeWarmthEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.ANALOG_TUBE_WARMTH_ENABLED] = enabled }
+    }
+
+    suspend fun setMonoBassEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.MONO_BASS_ENABLED] = enabled }
+    }
+
+    suspend fun setAutomixCurveType(curveType: Int) {
+        dataStore.edit { it[Keys.AUTOMIX_CURVE_TYPE] = curveType.coerceIn(0, 3) }
     }
 
     suspend fun setButtonNowPlayingEnabled(enabled: Boolean) {

@@ -25,14 +25,14 @@ object DspMath {
     const val CLIP_THRESHOLD_LINEAR = 1.0f
     const val MIN_DBFS = -120.0f
 
-    /** Q used by the 15-band equalizer stages. */
+    /** Q used by the 16-band equalizer stages. */
     const val EQ_Q = 1.4142135623730951
 
-    /** Center frequencies of the 15 equalizer bands in Hz. */
+    /** Center frequencies of the 16 equalizer bands in Hz. */
     val EQ_FREQUENCIES_HZ: List<Double> = listOf(
-        25.0, 40.0, 63.0, 100.0, 160.0,
+        20.0, 40.0, 63.0, 100.0, 160.0,
         250.0, 400.0, 630.0, 1000.0, 1600.0,
-        2500.0, 4000.0, 6300.0, 10000.0, 16000.0,
+        2500.0, 4000.0, 6300.0, 10000.0, 16000.0, 20000.0,
     )
 
     /** Converts a linear amplitude to dBFS, floored at [MIN_DBFS]. */

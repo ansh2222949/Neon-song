@@ -12,9 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,11 +22,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.neonsong.app.ui.theme.GlassCircularProgressIndicator
+import com.neonsong.app.ui.theme.liquidGlassSurface
 
 /**
  * The full-screen "this screen is loading" state, shared across Genres and
  * Search (and anywhere else a whole screen — not just one row or button —
- * is waiting on a first load). The outer tonal shape breathes and subtly
+ * is waiting on a first load). The outer glass shape breathes and subtly
  * tilts while the indicator runs. InfiniteTransition keeps it frame-driven,
  * lifecycle-aware and compatible with the system animation-duration scale.
  */
@@ -56,25 +56,27 @@ fun ExpressiveLoadingIndicator(message: String? = null, modifier: Modifier = Mod
 
     Box(modifier, contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                tonalElevation = 4.dp,
+            Box(
                 modifier = Modifier
                     .size(58.dp)
                     .graphicsLayer {
                         scaleX = breathe
                         scaleY = breathe
                         rotationZ = turn
-                    },
+                    }
+                    .liquidGlassSurface(
+                        shape = RoundedCornerShape(20.dp),
+                        borderWidth = 1.2.dp,
+                        accentTint = MaterialTheme.colorScheme.primary,
+                    ),
+                contentAlignment = Alignment.Center,
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(28.dp),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        strokeWidth = 3.dp,
-                    )
-                }
+                GlassCircularProgressIndicator(
+                    modifier = Modifier.size(28.dp),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.16f),
+                    strokeWidth = 3.dp,
+                )
             }
             if (!message.isNullOrBlank()) {
                 Spacer(Modifier.height(12.dp))
@@ -92,7 +94,7 @@ fun ExpressiveInlineLoadingIndicator(
     size: Dp = 22.dp,
     strokeWidth: Dp = 2.5.dp,
 ) {
-    CircularProgressIndicator(
+    GlassCircularProgressIndicator(
         modifier = modifier.size(size),
         color = color,
         strokeWidth = strokeWidth,

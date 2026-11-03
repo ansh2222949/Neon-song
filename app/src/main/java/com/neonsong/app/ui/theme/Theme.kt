@@ -105,7 +105,7 @@ fun NeonSongTheme(
             color = MaterialTheme.colorScheme.background,
         ) {
             CompositionLocalProvider(
-                LocalLiquidGlass provides themeState.liquidGlass,
+                LocalLiquidGlass provides true,
                 LocalIsDarkTheme provides isDark,
                 LocalHapticManager provides HapticManager.getInstance(LocalContext.current).also {
                     it.attachView(LocalView.current)

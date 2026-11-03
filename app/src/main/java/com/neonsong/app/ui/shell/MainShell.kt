@@ -32,6 +32,8 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -51,8 +53,11 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Leaderboard
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.neonsong.app.ui.theme.GlassIconActionButton as IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -217,10 +222,8 @@ fun MainShell(
     val context = LocalContext.current
     // Drive the dock selection from an explicit tab index instead of
     // pagerState.currentPage. currentPage flips mid-scroll (halfway through
-    // animateScrollToPage), which re-triggers the pill width animation + the
-    // generator FAB enter/exit while the pager is still moving — the two
-    // competing size animations clip the dock (rectangular, limited) and let
-    // the FAB draw over the pill. Updating immediately on tap and syncing from
+    // animateScrollToPage), which re-triggers the pill width animation while
+    // the pager is still moving. Updating immediately on tap and syncing from
     // settledPage on swipe keeps one clean transition.
     var selectedTabIndex by rememberSaveable { mutableIntStateOf(pagerState.currentPage) }
     LaunchedEffect(pagerState.settledPage) {
@@ -271,7 +274,10 @@ fun MainShell(
                         onOpenFriends = onOpenFriends,
                         onOpenDownloads = onOpenDownloads,
                     )
-                    MainTab.PLAYLISTS -> PlaylistScreen(onOpenPlaylist = onOpenPlaylist)
+                    MainTab.PLAYLISTS -> PlaylistScreen(
+                        onOpenPlaylist = onOpenPlaylist,
+                        onOpenGenerator = onOpenGenerator,
+                    )
                 }
             }
         }
@@ -302,7 +308,7 @@ fun MainShell(
             scope.launch { pagerState.animateScrollToPage(index) }
             Unit
         }
-        val currentOnOpenGenerator by androidx.compose.runtime.rememberUpdatedState(onOpenGenerator)
+        val currentOnOpenSearch by androidx.compose.runtime.rememberUpdatedState(onOpenSearch)
 
         androidx.compose.runtime.DisposableEffect(navigationBackdrop, tabs) {
             bottomNavSlot.value = {
@@ -312,7 +318,7 @@ fun MainShell(
                         tabs = tabs,
                         selectedIndex = currentSelectedIndex,
                         onSelect = currentOnSelect,
-                        onOpenGenerator = currentOnOpenGenerator,
+                        onOpenSearch = currentOnOpenSearch,
                         modifier = Modifier.align(Alignment.BottomCenter),
                     )
                 }
@@ -395,281 +401,165 @@ private fun FloatingNavBar(
     tabs: List<MainTab>,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
-    onOpenGenerator: () -> Unit,
+    onOpenSearch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val liquidGlass = LocalLiquidGlass.current
-    val fabInteraction = remember { MutableInteractionSource() }
     val isDark = LocalIsDarkTheme.current
     val isGlassActive = liquidGlass && backdrop != null && isLiquidGlassBackdropSupported()
     val primaryColor = MaterialTheme.colorScheme.primary
-
     Box(
         modifier = modifier
+            .fillMaxWidth()
             .windowInsetsPadding(
                 WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
             )
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
-        ) {
-            tabs.forEachIndexed { index, tab ->
-                val onClick = remember(index) { { onSelect(index) } }
-                CircularNavItem(
-                    label = androidx.compose.ui.res.stringResource(tab.labelRes),
-                    icon = tab.icon(),
-                    selected = selectedIndex == index,
-                    onClick = onClick,
+        // Apple Music Frosted Pill Navigation Dock
+        Surface(
+            shape = RoundedCornerShape(32.dp),
+            color = if (isGlassActive) {
+                liquidGlassContainerColor(
+                    (if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)).copy(alpha = 0.78f),
+                    enabled = true,
                     backdrop = backdrop,
                 )
-            }
-
-            // Satellite Companion Generator Button (only visible on Playlists tab).
-            AnimatedVisibility(
-                visible = selectedIndex == tabs.indexOf(MainTab.PLAYLISTS),
-                enter = fadeIn(animationSpec = tween(180)) +
-                    scaleIn(initialScale = 0.6f, animationSpec = navSpring()) +
-                    expandHorizontally(
-                        animationSpec = navSpring(),
-                        expandFrom = Alignment.End,
-                        clip = false,
-                    ),
-                exit = fadeOut(animationSpec = tween(120)) +
-                    scaleOut(targetScale = 0.6f, animationSpec = navSpring()) +
-                    shrinkHorizontally(
-                        animationSpec = navSpring(),
-                        shrinkTowards = Alignment.End,
-                        clip = false,
-                    ),
+            } else {
+                (if (isDark) Color(0xFF1C1C1E) else Color(0xFFFFFFFF)).copy(alpha = 0.94f)
+            },
+            tonalElevation = if (isGlassActive) 0.dp else 4.dp,
+            shadowElevation = if (isGlassActive) 0.dp else 12.dp,
+            border = BorderStroke(
+                1.dp,
+                Brush.verticalGradient(
+                    0.0f to Color.White.copy(alpha = if (isDark) 0.35f else 0.55f),
+                    0.45f to Color.White.copy(alpha = if (isDark) 0.08f else 0.15f),
+                    1.0f to Color.White.copy(alpha = if (isDark) 0.18f else 0.28f),
+                ),
+            ),
+            modifier = Modifier
+                .widthIn(max = 440.dp)
+                .fillMaxWidth()
+                .height(64.dp)
+                .then(
+                    if (isGlassActive && backdrop != null) {
+                        Modifier.liquidGlassChrome(
+                            RoundedCornerShape(32.dp),
+                            enabled = true,
+                            preset = LiquidGlassPreset.BottomNavigation,
+                            backdrop = backdrop,
+                        )
+                    } else Modifier
+                ),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                Surface(
-                    shape = CircleShape,
-                    color = if (isGlassActive) {
-                        liquidGlassContainerColor(MaterialTheme.colorScheme.primaryContainer, backdrop = backdrop)
-                    } else {
-                        MaterialTheme.colorScheme.primaryContainer
-                    },
-                    shadowElevation = if (liquidGlass) 0.dp else 8.dp,
-                    tonalElevation = if (liquidGlass) 0.dp else 4.dp,
-                    border = BorderStroke(
-                        1.5.dp,
-                        Brush.verticalGradient(
-                            0.0f to Color.White.copy(alpha = if (isDark) 0.40f else 0.55f),
-                            1.0f to primaryColor.copy(alpha = 0.35f),
-                        ),
-                    ),
-                    modifier = Modifier
-                        .size(56.dp)
-                        .then(
-                            if (isGlassActive) {
-                                Modifier.liquidGlassChrome(
-                                    CircleShape,
-                                    liquidGlass,
-                                    LiquidGlassPreset.FloatingControls,
-                                    backdrop,
-                                    interactionSource = fabInteraction,
-                                )
-                            } else Modifier
-                        )
-                        .clickable(interactionSource = fabInteraction, indication = null, onClick = onOpenGenerator),
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Icon(
-                            imageVector = Icons.Filled.AutoAwesome,
-                            contentDescription = androidx.compose.ui.res.stringResource(com.neonsong.app.R.string.nav_create_playlist),
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
-                }
+                ApplePillNavItem(
+                    label = "Home",
+                    icon = Icons.Filled.Home,
+                    selected = selectedIndex == 0,
+                    onClick = { onSelect(0) },
+                )
+                ApplePillNavItem(
+                    label = "Stats",
+                    icon = Icons.Filled.Leaderboard,
+                    selected = selectedIndex == 1,
+                    onClick = { onSelect(1) },
+                )
+                ApplePillNavItem(
+                    label = "Library",
+                    icon = Icons.AutoMirrored.Filled.QueueMusic,
+                    selected = selectedIndex == 2,
+                    onClick = { onSelect(2) },
+                )
+                ApplePillNavItem(
+                    label = "Search",
+                    icon = Icons.Filled.Search,
+                    selected = false,
+                    onClick = onOpenSearch,
+                )
             }
         }
+
+
     }
 }
 
 @Composable
-private fun CircularNavItem(
+private fun RowScope.ApplePillNavItem(
     label: String,
     icon: ImageVector,
     selected: Boolean,
     onClick: () -> Unit,
-    backdrop: LayerBackdrop?,
     modifier: Modifier = Modifier,
 ) {
     val hapticManager = LocalHapticManager.current
-    val liquidGlass = LocalLiquidGlass.current
     val isDark = LocalIsDarkTheme.current
-    val isGlassActive = liquidGlass && backdrop != null && isLiquidGlassBackdropSupported()
     val primaryColor = MaterialTheme.colorScheme.primary
-    val onPrimaryContainerColor = MaterialTheme.colorScheme.onPrimaryContainer
-
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
-    // Smooth spring animations for scale and selection transition
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.90f else (if (selected) 1.06f else 1.0f),
-        animationSpec = spring(dampingRatio = 0.75f, stiffness = 420f),
-        label = "circularNavPressScale",
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.90f else (if (selected) 1.04f else 1.0f),
+        animationSpec = spring(dampingRatio = 0.65f, stiffness = 420f),
+        label = "pillNavItemScale",
     )
 
-    val iconScale by animateFloatAsState(
-        targetValue = if (selected) 1.15f else 1.0f,
-        animationSpec = spring(dampingRatio = 0.70f, stiffness = 380f),
-        label = "circularNavIconScale",
+    val iconColor by animateColorAsState(
+        targetValue = if (selected) primaryColor else (if (isDark) Color(0xFF98989F) else Color(0xFF6E6E73)),
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 340f),
+        label = "pillNavIconColor",
     )
 
-    val fillAlpha by animateFloatAsState(
-        targetValue = if (selected) {
-            if (isGlassActive) 0.38f else 0.95f
-        } else {
-            if (isGlassActive) 0.12f else 0.40f
-        },
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 320f),
-        label = "circularNavFillAlpha",
+    val textColor by animateColorAsState(
+        targetValue = if (selected) primaryColor else (if (isDark) Color(0xFF8E8E93) else Color(0xFF6E6E73)),
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 340f),
+        label = "pillNavTextColor",
     )
 
-    val borderAlpha by animateFloatAsState(
-        targetValue = if (selected) {
-            if (isDark) 0.65f else 0.75f
-        } else {
-            if (isDark) 0.16f else 0.26f
-        },
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 320f),
-        label = "circularNavBorderAlpha",
-    )
-
-    val glowAlpha by animateFloatAsState(
-        targetValue = if (selected) 0.45f else 0.0f,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 320f),
-        label = "circularNavGlowAlpha",
-    )
-
-    val iconTint by animateColorAsState(
-        targetValue = if (selected) {
-            if (isGlassActive) primaryColor else onPrimaryContainerColor
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
-        },
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 320f),
-        label = "circularNavIconTint",
-    )
-
-    val baseFillColor = if (selected) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHigh
-    }
-
-    Box(
+    Column(
         modifier = modifier
-            .size(56.dp)
+            .weight(1f)
+            .fillMaxHeight()
             .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
+                scaleX = scale
+                scaleY = scale
             }
-            // Elegant subtle glow for active circular base
-            .drawBehind {
-                if (glowAlpha > 0f) {
-                    val radius = size.minDimension * 0.75f
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                primaryColor.copy(alpha = glowAlpha * 0.45f),
-                                primaryColor.copy(alpha = glowAlpha * 0.12f),
-                                Color.Transparent,
-                            ),
-                            center = center,
-                            radius = radius,
-                        ),
-                        radius = radius,
-                    )
-                }
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Surface(
-            shape = CircleShape,
-            color = if (isGlassActive) {
-                liquidGlassContainerColor(baseFillColor.copy(alpha = fillAlpha), enabled = true, backdrop = backdrop)
-            } else {
-                baseFillColor.copy(alpha = fillAlpha)
-            },
-            tonalElevation = if (isGlassActive) 0.dp else (if (selected) 4.dp else 1.dp),
-            shadowElevation = if (isGlassActive) 0.dp else (if (selected) 6.dp else 2.dp),
-            border = BorderStroke(
-                width = if (selected) 1.5.dp else 1.dp,
-                brush = if (selected) {
-                    Brush.verticalGradient(
-                        0.0f to Color.White.copy(alpha = (borderAlpha + 0.2f).coerceAtMost(1f)),
-                        0.45f to primaryColor.copy(alpha = borderAlpha),
-                        1.0f to primaryColor.copy(alpha = borderAlpha * 0.5f),
-                    )
-                } else {
-                    Brush.verticalGradient(
-                        0.0f to Color.White.copy(alpha = borderAlpha),
-                        1.0f to Color.White.copy(alpha = borderAlpha * 0.35f),
-                    )
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = {
+                    hapticManager.click()
+                    onClick()
                 },
             ),
-            modifier = Modifier
-                .fillMaxSize()
-                .then(
-                    if (isGlassActive && backdrop != null) {
-                        Modifier.liquidGlassChrome(
-                            CircleShape,
-                            enabled = true,
-                            preset = LiquidGlassPreset.BottomNavigation,
-                            backdrop = backdrop,
-                            interactionSource = interactionSource,
-                        )
-                    } else Modifier
-                )
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    onClick = {
-                        hapticManager.click()
-                        onClick()
-                    },
-                ),
-        ) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                // Subtle top specular highlight arc inside circle
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .drawBehind {
-                            drawCircle(
-                                brush = Brush.verticalGradient(
-                                    0.0f to Color.White.copy(alpha = if (selected) 0.24f else 0.10f),
-                                    0.45f to Color.White.copy(alpha = 0.02f),
-                                    1.0f to Color.Transparent,
-                                ),
-                                radius = size.minDimension / 2f,
-                            )
-                        }
-                )
-
-                Icon(
-                    imageVector = icon,
-                    contentDescription = label,
-                    tint = iconTint,
-                    modifier = Modifier
-                        .size(24.dp)
-                        .graphicsLayer {
-                            scaleX = iconScale
-                            scaleY = iconScale
-                        },
-                )
-            }
-        }
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = iconColor,
+            modifier = Modifier.size(22.dp),
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 11.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            ),
+            color = textColor,
+            maxLines = 1,
+        )
     }
 }
 

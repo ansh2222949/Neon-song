@@ -17,9 +17,11 @@ import com.neonsong.app.playback.resolve.playbackIdentity
 import com.neonsong.app.playback.toPlayerStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,13 +38,16 @@ interface AutoDJPlaybackHost {
     fun getTrackAt(index: Int): PlayableTrack?
     fun getQueueSize(): Int
     fun getCurrentIndex(): Int
+    fun getNextQueueIndex(): Int = getCurrentIndex() + 1
     fun isCurrentItem(index: Int): Boolean
+    suspend fun resolvePreferredStream(track: PlayableTrack): MusicPlayer.ResolvedStream? = null
     fun registerResolvedStream(index: Int, track: PlayableTrack, stream: MusicPlayer.ResolvedStream)
     fun armStandbyForNext(index: Int, track: PlayableTrack)
     fun triggerAutoTransition(overlapMs: Long)
     fun setLateTrackBuffering(isWaiting: Boolean)
     fun skipToNextPlayableItem(failedIndex: Int)
     fun requestQueueRefill()
+    fun isStandbyReady(index: Int): Boolean
 }
 
 sealed interface AutoDJStatus {
@@ -62,6 +67,7 @@ sealed interface AutoDJStatus {
 class AutoDJController @Inject constructor(
     private val nativeEngine: NativeAutoDJEngine,
     private val settingsPreferences: SettingsPreferences,
+    val autoDJEngine: AutoDJEngine = AutoDJEngine(),
 ) {
     private var host: AutoDJPlaybackHost? = null
     private var scope: CoroutineScope? = null
@@ -121,8 +127,13 @@ class AutoDJController @Inject constructor(
         this.streamResolver = null
     }
 
-    fun getTrackStage(trackId: String): TrackLifecycleStage {
-        return trackStages[trackId] ?: TrackLifecycleStage.QUEUED
+    fun getTrackStage(trackId: String, nextIndex: Int = -1): TrackLifecycleStage {
+        val base = trackStages[trackId] ?: TrackLifecycleStage.QUEUED
+        if (base == TrackLifecycleStage.PREPARING && nextIndex >= 0 && host?.isStandbyReady(nextIndex) == true) {
+            trackStages[trackId] = TrackLifecycleStage.READY
+            return TrackLifecycleStage.READY
+        }
+        return base
     }
 
     fun setTrackStage(trackId: String, stage: TrackLifecycleStage) {
@@ -146,6 +157,7 @@ class AutoDJController @Inject constructor(
                 retryCounts.remove(key)
             }
         }
+        prefetchUpcoming(h.getCurrentIndex())
     }
 
     fun onTrackTransition(newIndex: Int) {
@@ -156,6 +168,15 @@ class AutoDJController @Inject constructor(
             trackStages[newKey] = TrackLifecycleStage.PLAYING
         }
         _status.value = AutoDJStatus.Idle
+        prefetchUpcoming(newIndex)
+    }
+
+    fun getTransitionPlan(current: PlayableTrack, incoming: PlayableTrack): AutoDJTransitionPlan {
+        return autoDJEngine.planTransition(current, incoming)
+    }
+
+    fun optimizeQueue(current: PlayableTrack, upcoming: List<PlayableTrack>): List<PlayableTrack> {
+        return autoDJEngine.optimizeQueueHarmonically(current, upcoming)
     }
 
     fun cancelAllPrefetches(reason: String) {
@@ -179,11 +200,11 @@ class AutoDJController @Inject constructor(
         val queueSize = h.getQueueSize()
         if (currentIndex < 0 || queueSize <= 0) return
 
-        val nextIndex = currentIndex + 1
+        val nextIndex = h.getNextQueueIndex()
         val unplayedCount = maxOf(0, queueSize - currentIndex - 1)
         val nextTrack = if (nextIndex in 0 until queueSize) h.getTrackAt(nextIndex) else null
         val nextKey = nextTrack?.mediaIdKey() ?: ""
-        val nextStage = if (nextKey.isNotEmpty()) getTrackStage(nextKey) else TrackLifecycleStage.FINISHED
+        val nextStage = if (nextKey.isNotEmpty()) getTrackStage(nextKey, nextIndex) else TrackLifecycleStage.FINISHED
         val retryCount = if (nextKey.isNotEmpty()) retryCounts[nextKey] ?: 0 else 0
 
         val decision = nativeEngine.evaluate(
@@ -255,39 +276,84 @@ class AutoDJController @Inject constructor(
         }
     }
 
-    private fun prefetchTrack(index: Int, track: PlayableTrack) {
+    private fun prefetchUpcoming(currentIndex: Int) {
+        if (!isEnabled || currentIndex < 0) return
+        val h = host ?: return
+        val nextIndex = h.getNextQueueIndex()
+        if (nextIndex !in 0 until h.getQueueSize()) return
+        val nextTrack = h.getTrackAt(nextIndex) ?: return
+        when (getTrackStage(nextTrack.mediaIdKey(), nextIndex)) {
+            TrackLifecycleStage.QUEUED,
+            TrackLifecycleStage.FAILED,
+            TrackLifecycleStage.CANCELLED -> prefetchTrack(nextIndex, nextTrack)
+            else -> prefetchWarmUpcoming(nextIndex + 1, WARM_TRACKS_AHEAD)
+        }
+    }
+
+    private fun prefetchTrack(index: Int, track: PlayableTrack, warmTracksAhead: Int = WARM_TRACKS_AHEAD) {
         val key = track.mediaIdKey()
         if (inFlightJobs[key]?.isActive == true) return
         val currentStage = getTrackStage(key)
-        if (currentStage == TrackLifecycleStage.READY || currentStage == TrackLifecycleStage.PLAYING) return
+        if (currentStage == TrackLifecycleStage.READY ||
+            currentStage == TrackLifecycleStage.PLAYING ||
+            currentStage == TrackLifecycleStage.RESOLVED ||
+            currentStage == TrackLifecycleStage.RESOLVING ||
+            currentStage == TrackLifecycleStage.PREPARING
+        ) return
 
         val coroutineScope = scope ?: return
-        val identity = track.playbackIdentity() ?: return
         val attempt = (retryCounts[key] ?: 0) + 1
         trackStages[key] = TrackLifecycleStage.RESOLVING
         _status.value = AutoDJStatus.Resolving(track.title, index, attempt)
 
         val resolver = streamResolver ?: return
-        val job = coroutineScope.launch(Dispatchers.IO) {
+        val job = coroutineScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
             val startMs = SystemClock.elapsedRealtime()
+            var resolverJob: Job? = null
             try {
                 Log.d(TAG, "[PREFETCH_START] index=$index title='${track.title}' attempt=$attempt")
-                resolver.prefetchNext(identity, track.durationMs) { cacheEntry ->
-                    val elapsedMs = SystemClock.elapsedRealtime() - startMs
-                    nativeEngine.recordLatency(elapsedMs, wasSuccess = true)
-
-                    val resolvedStream = cacheEntry.toPlayerStream()
-                    trackStages[key] = TrackLifecycleStage.RESOLVED
-                    _status.value = AutoDJStatus.Ready(track.title, index)
-                    Log.i(TAG, "[PREFETCH_SUCCESS] index=$index title='${track.title}' in ${elapsedMs}ms")
-
-                    host?.registerResolvedStream(index, track, resolvedStream)
-
-                    // Opportunistically pre-resolve index + 1 (N+2) if queue allows
-                    prefetchWarmUpcoming(index + 1)
+                val playbackHost = host ?: return@launch
+                val resolvedStream = try {
+                    playbackHost.resolvePreferredStream(track)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    Log.w(TAG, "[PREFETCH_PREFERRED_FAILED] index=$index title='${track.title}': ${resolutionFailureDetail(error)}")
+                    null
                 }
+
+                val stream = resolvedStream ?: run {
+                    val identity = track.playbackIdentity()
+                        ?: throw java.io.IOException("No playable stream identity for '${track.title}'")
+                    val cached = resolver.getPreResolved(identity)
+                    if (cached != null) {
+                        cached.toPlayerStream()
+                    } else {
+                        var delivered: MusicPlayer.ResolvedStream? = null
+                        resolverJob = resolver.prefetchNext(identity, track.durationMs) { cacheEntry ->
+                            delivered = cacheEntry.toPlayerStream()
+                        }
+                        resolverJob?.join()
+                        delivered ?: resolver.getPreResolved(identity)?.toPlayerStream()
+                    }
+                } ?: throw java.io.IOException("No stream resolved for '${track.title}'")
+
+                val streamExpiry = stream.expiresAtEpochMs ?: stream.youtubeCandidate?.expiresAtEpochMs
+                if (streamExpiry != null &&
+                    streamExpiry - System.currentTimeMillis() <= MusicPlayer.RESOLVED_URL_EXPIRY_MARGIN_MS
+                ) {
+                    throw java.io.IOException("Prepared stream expired before queue handoff")
+                }
+                currentCoroutineContext().ensureActive()
+                nativeEngine.recordLatency(SystemClock.elapsedRealtime() - startMs, wasSuccess = true)
+                trackStages[key] = TrackLifecycleStage.RESOLVED
+                _status.value = AutoDJStatus.Ready(track.title, index)
+                Log.i(TAG, "[PREFETCH_SUCCESS] index=$index title='${track.title}' codec=${stream.audioCodec}")
+                playbackHost.registerResolvedStream(index, track, stream)
+                prefetchWarmUpcoming(index + 1, warmTracksAhead)
             } catch (error: Throwable) {
                 if (error.isCooperativeCancellation()) {
+                    resolverJob?.cancel()
                     trackStages[key] = TrackLifecycleStage.CANCELLED
                     throw error
                 }
@@ -302,34 +368,22 @@ class AutoDJController @Inject constructor(
             }
         }
         inFlightJobs[key] = job
+        job.start()
     }
 
-    private fun prefetchWarmUpcoming(upcomingIndex: Int) {
+    private fun prefetchWarmUpcoming(upcomingIndex: Int, remainingTracks: Int) {
+        if (remainingTracks <= 0) return
         val h = host ?: return
         if (upcomingIndex !in 0 until h.getQueueSize()) return
         val upcomingTrack = h.getTrackAt(upcomingIndex) ?: return
         val upcomingKey = upcomingTrack.mediaIdKey()
-        if (getTrackStage(upcomingKey) != TrackLifecycleStage.QUEUED || inFlightJobs[upcomingKey]?.isActive == true) return
-        val identity = upcomingTrack.playbackIdentity() ?: return
-        val resolver = streamResolver ?: return
-
-        val coroutineScope = scope ?: return
-        val job = coroutineScope.launch(Dispatchers.IO) {
-            try {
-                Log.d(TAG, "[WARM_PREFETCH_START] index=$upcomingIndex title='${upcomingTrack.title}'")
-                resolver.prefetchNext(identity, upcomingTrack.durationMs) { cacheEntry ->
-                    val resolvedStream = cacheEntry.toPlayerStream()
-                    trackStages[upcomingKey] = TrackLifecycleStage.RESOLVED
-                    host?.registerResolvedStream(upcomingIndex, upcomingTrack, resolvedStream)
-                    Log.i(TAG, "[WARM_PREFETCH_DONE] index=$upcomingIndex title='${upcomingTrack.title}'")
-                }
-            } catch (ignored: Throwable) {
-                // Secondary warm prefetch failure is non-fatal
-            } finally {
-                inFlightJobs.remove(upcomingKey)
-            }
+        val nextWarmTracks = remainingTracks - 1
+        when (getTrackStage(upcomingKey)) {
+            TrackLifecycleStage.QUEUED,
+            TrackLifecycleStage.FAILED,
+            TrackLifecycleStage.CANCELLED -> prefetchTrack(upcomingIndex, upcomingTrack, nextWarmTracks)
+            else -> prefetchWarmUpcoming(upcomingIndex + 1, nextWarmTracks)
         }
-        inFlightJobs[upcomingKey] = job
     }
 
     fun getLatencyStats(transitionDurationMs: Long): AutoDJLatencyStats {
@@ -338,5 +392,6 @@ class AutoDJController @Inject constructor(
 
     companion object {
         private const val TAG = "AutoDJController"
+        private const val WARM_TRACKS_AHEAD = 2
     }
 }

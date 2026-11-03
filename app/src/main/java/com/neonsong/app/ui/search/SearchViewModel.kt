@@ -76,9 +76,9 @@ class SearchViewModel @Inject constructor(
             return
         }
 
-        // Fast suggestions debounce (120ms)
+        // Fast suggestions debounce (60ms for instant feel)
         suggestionsJob = viewModelScope.launch {
-            delay(120)
+            delay(60)
             val suggestions = repository.getSuggestions(query)
             if (_uiState.value.query == query) {
                 _uiState.update { it.copy(suggestions = suggestions) }
@@ -153,7 +153,7 @@ class SearchViewModel @Inject constructor(
                     artist = item.artist.orEmpty(),
                     album = item.subtitle,
                     artworkUrl = item.artworkUrl,
-                    videoId = item.videoId,
+                    videoId = item.videoId?.takeIf { it.isNotBlank() } ?: item.entityId?.takeIf { it.isNotBlank() },
                 )
                 // Start immediately. Similar song radio queue loads and extends infinitely.
                 musicPlayer.play(selected, sourceLabel = "Search", startRadio = true)

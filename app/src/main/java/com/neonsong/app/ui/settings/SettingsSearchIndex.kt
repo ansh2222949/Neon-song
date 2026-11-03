@@ -456,23 +456,6 @@ object SettingsSearchIndex {
             )
             add(
                 SettingsEntry(
-                    id = "appearance.liquid_glass",
-                    title = "Liquid Glass",
-                    subtitle = "Dynamic translucent frosted glass backgrounds and blur effects",
-                    keywords = listOf(
-                        "liquid glass", "glassmorphism", "blur", "frosted glass", "translucent",
-                        "acrylic", "transparency", "visual effect"
-                    ),
-                    icon = Icons.Filled.BubbleChart,
-                    iconContainer = { MaterialTheme.colorScheme.primaryContainer },
-                    iconTint = { MaterialTheme.colorScheme.onPrimaryContainer },
-                    parentTab = SettingsTab.APPEARANCE,
-                    section = "Appearance",
-                    type = EntryType.TOGGLE,
-                )
-            )
-            add(
-                SettingsEntry(
                     id = "appearance.dynamic_now_playing",
                     title = "Dynamic Now Playing Screen",
                     subtitle = "Adaptive color background on the now playing screen driven by album art",

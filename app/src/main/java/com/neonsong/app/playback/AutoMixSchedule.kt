@@ -1,4 +1,4 @@
-﻿package com.neonsong.app.playback
+package com.neonsong.app.playback
 
 /**
  * Scheduling model for the Mixxx-style AutoDJ Automix dual-deck hand-off.
@@ -30,7 +30,11 @@ sealed interface AutoMixDecision {
     data object Arm : AutoMixDecision
     data object WaitingForReady : AutoMixDecision
     data object WaitingForWindow : AutoMixDecision
-    data class HandOff(val overlapMs: Long, val bars: Int) : AutoMixDecision
+    data class HandOff(
+        val overlapMs: Long,
+        val bars: Int,
+        val curve: AutoMixCurveType = AutoMixCurveType.EQUAL_POWER,
+    ) : AutoMixDecision
 }
 
 data class AutoMixPlanInput(
@@ -51,6 +55,7 @@ data class AutoMixPlanInput(
     val standbyBufferedMs: Long,
     val armLeadMs: Long = 15_000L,
     val refreshLeadMs: Long = 5_000L,
+    val curve: AutoMixCurveType = AutoMixCurveType.EQUAL_POWER,
 ) {
     /** 1 bar = 4 beats at current BPM */
     val barMs: Long
@@ -111,5 +116,5 @@ fun planAutoMix(input: AutoMixPlanInput): AutoMixDecision = with(input) {
         sustainableMs,
     ).coerceAtLeast(if (durationMs > 0L) minOf(1000L, durationMs / 3) else 1000L)
 
-    return AutoMixDecision.HandOff(overlapMs, barMode)
+    return AutoMixDecision.HandOff(overlapMs, barMode, curve = curve)
 }

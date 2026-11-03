@@ -74,6 +74,24 @@ class NativeAudioEngine @Inject constructor(
                     .collect { if (!systemFlattened) setClarityAtmosBypass(it) }
             }
             applicationScope.launch(Dispatchers.Default) {
+                settingsPreferences.settings
+                    .map { it.bauerCrossfeedEnabled }
+                    .distinctUntilChanged()
+                    .collect { setBauerCrossfeedEnabled(it) }
+            }
+            applicationScope.launch(Dispatchers.Default) {
+                settingsPreferences.settings
+                    .map { it.analogTubeWarmthEnabled }
+                    .distinctUntilChanged()
+                    .collect { setAnalogTubeWarmthEnabled(it) }
+            }
+            applicationScope.launch(Dispatchers.Default) {
+                settingsPreferences.settings
+                    .map { it.monoBassEnabled }
+                    .distinctUntilChanged()
+                    .collect { setMonoBassEnabled(it) }
+            }
+            applicationScope.launch(Dispatchers.Default) {
                 equalizerPreferences.settings.collect { settings ->
                     if (!systemFlattened) setEqualizer(settings.enabled, settings.gainsDb.toFloatArray())
                 }
@@ -117,6 +135,21 @@ class NativeAudioEngine @Inject constructor(
         withHandle(Unit) { nativeSetStudioMasterClarity(it, enabled) }
     }
 
+    fun setBauerCrossfeedEnabled(enabled: Boolean) {
+        if (systemFlattened) return
+        withHandle(Unit) { nativeSetBauerCrossfeedEnabled(it, enabled) }
+    }
+
+    fun setAnalogTubeWarmthEnabled(enabled: Boolean) {
+        if (systemFlattened) return
+        withHandle(Unit) { nativeSetAnalogTubeWarmthEnabled(it, enabled) }
+    }
+
+    fun setMonoBassEnabled(enabled: Boolean) {
+        if (systemFlattened) return
+        withHandle(Unit) { nativeSetMonoBassEnabled(it, enabled) }
+    }
+
     /** Thread-safe; completely bypasses all native DSP for bit-exact output. */
     fun setBitPerfect(enabled: Boolean) {
         withHandle(Unit) { nativeSetBitPerfect(it, enabled) }
@@ -130,11 +163,11 @@ class NativeAudioEngine @Inject constructor(
     fun isBitPerfectActive(): Boolean =
         withHandle(false, ::nativeIsBitPerfect)
 
-    /** Updates the native 15-band EQ; its gains are smoothed in C++.
+    /** Updates the native 16-band EQ; its gains are smoothed in C++.
      *  Dropped while [systemFlattened] — external effects own the feed. */
     fun setEqualizer(enabled: Boolean, gainsDb: FloatArray) {
         if (systemFlattened) return
-        require(gainsDb.size == EQUALIZER_BAND_COUNT) { "Expected 15 equalizer bands" }
+        require(gainsDb.size == EQUALIZER_BAND_COUNT) { "Expected 16 equalizer bands" }
         val safeGains = FloatArray(gainsDb.size) { index ->
             val gain = gainsDb[index]
             if (gain.isFinite()) gain.coerceIn(-EQ_MAX_GAIN_DB, EQ_MAX_GAIN_DB) else 0f
@@ -530,6 +563,9 @@ class NativeAudioEngine @Inject constructor(
     private external fun nativeSetPlaying(handle: Long, playing: Boolean)
     private external fun nativeSetOutputVolume(handle: Long, volume: Float)
     private external fun nativeSetStudioMasterClarity(handle: Long, enabled: Boolean)
+    private external fun nativeSetBauerCrossfeedEnabled(handle: Long, enabled: Boolean)
+    private external fun nativeSetAnalogTubeWarmthEnabled(handle: Long, enabled: Boolean)
+    private external fun nativeSetMonoBassEnabled(handle: Long, enabled: Boolean)
     private external fun nativeSetBitPerfect(handle: Long, enabled: Boolean)
     private external fun nativeIsBitPerfect(handle: Long): Boolean
     private external fun nativeSetEqualizer(handle: Long, enabled: Boolean, gainsDb: FloatArray)
@@ -616,7 +652,7 @@ class NativeAudioEngine @Inject constructor(
 
     companion object {
         const val TAG = "NativeAudioEngine"
-        const val EQUALIZER_BAND_COUNT = 15
+        const val EQUALIZER_BAND_COUNT = 16
         const val CLARITY_TRIM_MAX_DB = 12f
 
         val libraryLoaded = try {

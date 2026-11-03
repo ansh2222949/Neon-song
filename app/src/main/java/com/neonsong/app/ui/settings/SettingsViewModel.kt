@@ -473,7 +473,10 @@ class SettingsViewModel @Inject constructor(
     fun setUseCustomFont(enabled: Boolean) = launchSettingsAction("update the app font") { settingsPreferences.setUseCustomFont(enabled) }
     fun setPreferLosslessStreaming(enabled: Boolean) = launchSettingsAction("update streaming preference") { settingsPreferences.setPreferLosslessStreaming(enabled) }
     fun setLosslessQuality(quality: Int) = launchSettingsAction("update streaming quality") { settingsPreferences.setLosslessQuality(quality) }
+    fun setCellularStreamingQuality(quality: Int) = launchSettingsAction("update cellular streaming quality") { settingsPreferences.setCellularStreamingQuality(quality) }
+    fun setWifiStreamingQuality(quality: Int) = launchSettingsAction("update wifi streaming quality") { settingsPreferences.setWifiStreamingQuality(quality) }
     fun setDownloadQuality(quality: Int) = launchSettingsAction("update download quality") { settingsPreferences.setDownloadQuality(quality) }
+    fun setDolbyAtmosMode(mode: String) = launchSettingsAction("update dolby atmos mode") { settingsPreferences.setDolbyAtmosMode(mode) }
     fun setStudioMasterClarity(enabled: Boolean) {
         // Apply immediately; DataStore persists the same state for future engine instances.
         launchSettingsAction("update Studio Master Clarity") {
@@ -582,6 +585,10 @@ class SettingsViewModel @Inject constructor(
         settingsPreferences.setAutomixBars(bars)
     }
     fun setAutoDJEnabled(enabled: Boolean) = launchSettingsAction("update autodj") { settingsPreferences.setAutoDJEnabled(enabled) }
+    fun setBauerCrossfeedEnabled(enabled: Boolean) = launchSettingsAction("update Bauer crossfeed") { settingsPreferences.setBauerCrossfeedEnabled(enabled) }
+    fun setAnalogTubeWarmthEnabled(enabled: Boolean) = launchSettingsAction("update analog tube warmth") { settingsPreferences.setAnalogTubeWarmthEnabled(enabled) }
+    fun setMonoBassEnabled(enabled: Boolean) = launchSettingsAction("update mono bass") { settingsPreferences.setMonoBassEnabled(enabled) }
+    fun setAutomixCurveType(curveType: Int) = launchSettingsAction("update automix curve") { settingsPreferences.setAutomixCurveType(curveType) }
     fun saveYtMusicSections(order: List<String>, hidden: Set<String>) = launchSettingsAction("save YouTube Music sections") {
         settingsPreferences.setYtMusicSections(order, hidden)
     }

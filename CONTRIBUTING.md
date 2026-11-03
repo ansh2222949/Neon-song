@@ -8,7 +8,7 @@ Thank you for your interest in contributing to Neon Song. This document outlines
 ### Prerequisites
 * Android Studio Ladybug or newer
 * JDK 17 (Temurin recommended)
-* Android SDK (API 35) & NDK 26+
+* Android SDK 37 & NDK 28.2.13676358
 * Git
 
 ### Cloning the Repository
@@ -31,7 +31,7 @@ cp .env.example .env
 ## Architecture Overview
 
 Neon Song is built using modern Android architecture patterns:
-* **UI Layer:** Jetpack Compose, Material 3, Navigation Compose.
+* **UI Layer:** Jetpack Compose with app-owned Liquid Glass controls and Navigation Compose.
 * **Audio Engine:** ExoPlayer / Media3 with Jellyfin FFmpeg software decoders and custom C++ DSP processing (`AudioEngine.cpp`).
 * **Dependency Injection:** Dagger Hilt.
 * **Storage & Caching:** Room Database, DataStore Preferences.

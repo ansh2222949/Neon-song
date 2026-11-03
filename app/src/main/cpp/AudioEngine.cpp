@@ -641,6 +641,21 @@ void AudioEngine::setStudioMasterClarity(bool enabled) noexcept {
     mediaDsp_.setStudioMasterClarity(enabled);
 }
 
+void AudioEngine::setBauerCrossfeedEnabled(bool enabled) noexcept {
+    oboeDsp_.setBauerCrossfeedEnabled(enabled);
+    mediaDsp_.setBauerCrossfeedEnabled(enabled);
+}
+
+void AudioEngine::setAnalogTubeWarmthEnabled(bool enabled) noexcept {
+    oboeDsp_.setAnalogTubeWarmthEnabled(enabled);
+    mediaDsp_.setAnalogTubeWarmthEnabled(enabled);
+}
+
+void AudioEngine::setMonoBassEnabled(bool enabled) noexcept {
+    oboeDsp_.setMonoBassEnabled(enabled);
+    mediaDsp_.setMonoBassEnabled(enabled);
+}
+
 void AudioEngine::setBitPerfect(bool enabled) noexcept {
     oboeDsp_.setBitPerfect(enabled);
     mediaDsp_.setBitPerfect(enabled);

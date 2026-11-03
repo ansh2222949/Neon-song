@@ -57,6 +57,11 @@ class NativeAutoMixEngine @Inject constructor() : Closeable {
         withHandle(Unit) { nativeSetBarMode(it, bars) }
     }
 
+    /** 0 equal-power, 1 smooth S, 2 club bass swap, 3 fast drop. */
+    fun setCurveType(curveType: Int) {
+        withHandle(Unit) { nativeSetCurveType(it, curveType.coerceIn(0, 3)) }
+    }
+
     fun triggerFadeNow() {
         withHandle(Unit) { nativeTriggerFadeNow(it) }
     }
@@ -124,6 +129,7 @@ class NativeAutoMixEngine @Inject constructor() : Closeable {
         @JvmStatic private external fun nativeConfigure(handle: Long, sampleRate: Double)
         @JvmStatic private external fun nativeSetEnabled(handle: Long, enabled: Boolean)
         @JvmStatic private external fun nativeSetBarMode(handle: Long, bars: Int)
+        @JvmStatic private external fun nativeSetCurveType(handle: Long, curveType: Int)
         @JvmStatic private external fun nativeTriggerFadeNow(handle: Long)
         @JvmStatic private external fun nativeTriggerFadeBars(handle: Long, bars: Int)
         @JvmStatic private external fun nativeTriggerFadeDurationMs(handle: Long, durationMs: Long)

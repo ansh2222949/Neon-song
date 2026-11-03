@@ -134,24 +134,32 @@ class LyricsRepository @Inject constructor(
             // "Artist - Title" and "Title (feat. X)" variants must still hit the
             // same row, otherwise a correct offline copy is skipped and a
             // wrong online hit is served instead.
-            val localTrack = runCatching {
-                val dao = downloadedTrackDao.get()
-                dao.findByTitleAndArtist(title, artist)
-                    ?: dao.findByTrackKey("${artist.lowercase()}_${title.lowercase()}")
-                    ?: run {
-                        val ct = LrclibLyricsApi.cleanTrackTitle(title)
-                        val ca = LrclibLyricsApi.cleanArtistName(artist)
-                        if (ct != title || ca != artist) dao.findByTitleAndArtist(ct, ca) else null
+            val localTrack = withContext(Dispatchers.IO) {
+                runCatching {
+                    val dao = downloadedTrackDao.get()
+                    val track = dao.findByTitleAndArtist(title, artist)
+                        ?: dao.findByTrackKey("${artist.lowercase()}_${title.lowercase()}")
+                        ?: run {
+                            val ct = LrclibLyricsApi.cleanTrackTitle(title)
+                            val ca = LrclibLyricsApi.cleanArtistName(artist)
+                            if (ct != title || ca != artist) dao.findByTitleAndArtist(ct, ca) else null
+                        }
+                    track?.let { t ->
+                        if (t.syncedLyrics.isNullOrBlank() && !t.lrcFilePath.isNullOrBlank()) {
+                            val lrcFile = java.io.File(t.lrcFilePath)
+                            if (lrcFile.exists() && lrcFile.length() > 0) {
+                                val diskSynced = runCatching { lrcFile.readText() }.getOrNull()
+                                if (!diskSynced.isNullOrBlank()) {
+                                    return@let t.copy(syncedLyrics = diskSynced)
+                                }
+                            }
+                        }
+                        t
                     }
-            }.getOrNull()
+                }.getOrNull()
+            }
             if (localTrack != null && (localTrack.hasLyrics || !localTrack.plainLyrics.isNullOrBlank() || !localTrack.syncedLyrics.isNullOrBlank() || !localTrack.lrcFilePath.isNullOrBlank())) {
-                var synced = localTrack.syncedLyrics
-                if (synced.isNullOrBlank() && !localTrack.lrcFilePath.isNullOrBlank()) {
-                    val lrcFile = java.io.File(localTrack.lrcFilePath)
-                    if (lrcFile.exists() && lrcFile.length() > 0) {
-                        synced = runCatching { lrcFile.readText() }.getOrNull()
-                    }
-                }
+                val synced = localTrack.syncedLyrics
                 if (!synced.isNullOrBlank()) {
                     val lines = parseLrc(synced)
                     if (lines.isNotEmpty()) {

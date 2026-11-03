@@ -109,6 +109,8 @@ import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MoreVert
@@ -121,17 +123,17 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Whatshot
-import androidx.compose.material3.Button
+import com.neonsong.app.ui.theme.GlassActionButton as Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.neonsong.app.ui.theme.GlassIconActionButton as IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.neonsong.app.ui.theme.GlassTextActionButton as TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.runtime.DisposableEffect
@@ -255,6 +257,7 @@ fun FeedScreen(
     var menuTrack by remember { mutableStateOf<YouTubeMusicTrack?>(null) }
     // Long-press (deep press) mini tray — 3-dot buttons keep the full sheet.
     var miniTrayTrack by remember { mutableStateOf<TrackMiniTrayData?>(null) }
+    var showAccountSheet by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val hasFeedContent = with(state.feedData) {
         quickTiles.isNotEmpty() || mixes.isNotEmpty() || topArtists.isNotEmpty() ||
@@ -554,7 +557,7 @@ fun FeedScreen(
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
                             ) {
                                 Column(modifier = Modifier.padding(vertical = 12.dp)) {
-                            val title = if (state.feedData.hasYtRecommendations) "Picked for you" else "Quick picks"
+                            val title = "Top Picks for You"
                             val subtitle = if (state.feedData.hasYtRecommendations) {
                                 "From your listening - refreshed for you"
                             } else if (state.feedData.hasPersonalContent) {
@@ -741,7 +744,7 @@ fun FeedScreen(
                             ) {
                                 Column(modifier = Modifier.padding(vertical = 12.dp)) {
                             FeedSectionHeader(
-                                title = "Jump back in",
+                                title = "Recently Played",
                                 subtitle = "From your listening history",
                                 actionText = "Play all",
                                 actionIcon = Icons.Filled.PlayArrow,
@@ -996,7 +999,7 @@ fun FeedScreen(
                             ) {
                                 Column(modifier = Modifier.padding(vertical = 12.dp)) {
                             FeedSectionHeader(
-                                title = "New releases",
+                                title = "New Releases for You",
                                 subtitle = "Fresh drops and new albums",
                                 actionText = "See all",
                                 actionIcon = Icons.AutoMirrored.Filled.ArrowForwardIos,
@@ -1107,7 +1110,7 @@ fun FeedScreen(
 
         LiquidGlassHomeHeader(
             backdrop = if (isGlass) feedBackdrop else null,
-            title = NeonBrand.AppName,
+            title = "Home",
             avatarUrl = state.avatarUrl,
             customPhotoUri = state.customPhotoUri,
             chips = state.homeChips,
@@ -1116,6 +1119,7 @@ fun FeedScreen(
             onOpenDownloads = onOpenDownloads,
             onOpenSearch = onOpenSearch,
             onOpenSettings = onOpenSettings,
+            onOpenAccount = { showAccountSheet = true },
             modifier = Modifier
                 .fillMaxWidth()
                 .adaptiveContentWidth(maxWidth = 920.dp)
@@ -1125,6 +1129,27 @@ fun FeedScreen(
                     headerHeightPx = coords.size.height.toFloat()
                 },
         )
+        if (showAccountSheet) {
+            AppleAccountModalSheet(
+                avatarUrl = state.avatarUrl,
+                customPhotoUri = state.customPhotoUri,
+                onDismiss = { showAccountSheet = false },
+                onOpenSettings = onOpenSettings,
+                onOpenDownloads = onOpenDownloads,
+                onOpenLastFm = {
+                    showAccountSheet = false
+                    onOpenFriends()
+                },
+                onOpenAudioQuality = {
+                    showAccountSheet = false
+                    onOpenSettings()
+                },
+                onOpenEqualizer = {
+                    showAccountSheet = false
+                    onOpenSettings()
+                },
+            )
+        }
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -2955,6 +2980,7 @@ private fun LiquidGlassHomeHeader(
     onOpenDownloads: () -> Unit,
     onOpenSearch: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenAccount: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val liquidGlass = LocalLiquidGlass.current
@@ -3051,49 +3077,104 @@ private fun LiquidGlassHomeHeader(
                 )
                 .padding(bottom = if (chips.isNotEmpty()) 10.dp else 14.dp),
         ) {
-            // Row 1: Logo + Title + Glass Action Buttons
+            // Row 1: Apple Music 1:1 Large Title "Home" + Profile Button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                    .padding(horizontal = 20.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                NeonAppLogo(size = 36.dp)
-
-                Spacer(Modifier.width(12.dp))
-
                 Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = 20.sp,
+                    text = "Home",
+                    style = MaterialTheme.typography.headlineLarge.copy(
+                        fontSize = 32.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.25).sp,
+                        letterSpacing = (-0.5).sp,
                     ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+                    color = Color.White,
                 )
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    LiquidGlassActionIcon(
-                        icon = Icons.Filled.Download,
-                        contentDescription = "Downloads",
-                        onClick = onOpenDownloads,
-                    )
-                    LiquidGlassActionIcon(
-                        icon = Icons.Filled.Search,
-                        contentDescription = "Search",
-                        onClick = onOpenSearch,
-                    )
+                var showProfileMenu by remember { mutableStateOf(false) }
+                Box {
                     LiquidGlassProfileButton(
                         avatarUrl = avatarUrl,
                         customPhotoUri = customPhotoUri,
-                        onClick = onOpenSettings,
+                        onClick = { showProfileMenu = true },
                     )
+
+                    val profileMenuShape = RoundedCornerShape(20.dp)
+                    androidx.compose.material3.DropdownMenu(
+                        expanded = showProfileMenu,
+                        onDismissRequest = { showProfileMenu = false },
+                        shape = profileMenuShape,
+                        containerColor = Color(0xEE1E1E22),
+                        tonalElevation = 0.dp,
+                        shadowElevation = 18.dp,
+                        border = androidx.compose.foundation.BorderStroke(
+                            width = 1.dp,
+                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                listOf(
+                                    Color.White.copy(alpha = 0.35f),
+                                    Color.White.copy(alpha = 0.10f),
+                                    Color.White.copy(alpha = 0.20f),
+                                ),
+                            ),
+                        ),
+                        modifier = Modifier
+                            .width(200.dp)
+                            .clip(profileMenuShape),
+                    ) {
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = {
+                                Text(
+                                    "Settings",
+                                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                                    color = Color.White,
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.Settings,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            },
+                            onClick = {
+                                showProfileMenu = false
+                                onOpenSettings()
+                            },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                        )
+                        androidx.compose.material3.HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 14.dp),
+                            thickness = 0.5.dp,
+                            color = Color.White.copy(alpha = 0.12f),
+                        )
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = {
+                                Text(
+                                    "Account",
+                                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                                    color = Color.White,
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.Person,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            },
+                            onClick = {
+                                showProfileMenu = false
+                                onOpenAccount()
+                            },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                        )
+                    }
                 }
             }
 
@@ -3661,3 +3742,265 @@ private fun CommunityItemCard(
 
 @dagger.hilt.android.lifecycle.HiltViewModel
 class ArtistAlbumNavBridgeFeed @javax.inject.Inject constructor(val navigator: ArtistAlbumNavigator) : androidx.lifecycle.ViewModel()
+
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun AppleAccountModalSheet(
+    avatarUrl: String?,
+    customPhotoUri: String?,
+    onDismiss: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenDownloads: () -> Unit,
+    onOpenLastFm: () -> Unit,
+    onOpenAudioQuality: () -> Unit,
+    onOpenEqualizer: () -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        containerColor = Color(0xFF1C1C1E),
+        tonalElevation = 0.dp,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+        dragHandle = {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = Color.White.copy(alpha = 0.25f),
+                modifier = Modifier
+                    .padding(top = 10.dp, bottom = 6.dp)
+                    .size(width = 36.dp, height = 4.dp),
+            ) {}
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 36.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            // Top Bar: "Account" + Done button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "Account",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                )
+                TextButton(onClick = onDismiss) {
+                    Text(
+                        text = "Done",
+                        color = Color(0xFFFA2D48),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp,
+                    )
+                }
+            }
+
+            // User Info Inset Group
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF2C2C2E),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                            onDismiss()
+                            onOpenSettings()
+                        }
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF3A3A3C)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (!customPhotoUri.isNullOrBlank()) {
+                            AsyncImage(
+                                model = customPhotoUri,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else if (!avatarUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = avatarUrl,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            Icon(
+                                Icons.Filled.Person,
+                                contentDescription = null,
+                                tint = Color(0xFF8E8E93),
+                                modifier = Modifier.size(48.dp),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = "Neon Song Account",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                        )
+                        Text(
+                            text = "Manage Profile & Settings",
+                            fontSize = 13.sp,
+                            color = Color(0xFF8E8E93),
+                        )
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowForwardIos,
+                        contentDescription = null,
+                        tint = Color(0xFF545458),
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
+
+            // Inset Group 1: Subscriptions & Purchases
+            Text(
+                text = "SUBSCRIPTIONS & ACCOUNT",
+                color = Color(0xFF8E8E93),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.5.sp,
+                modifier = Modifier.padding(start = 12.dp),
+            )
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF2C2C2E),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column {
+                    AppleAccountRowItem(
+                        icon = Icons.Filled.History,
+                        title = "Manage Subscription / Last.fm",
+                        onClick = {
+                            onDismiss()
+                            onOpenLastFm()
+                        },
+                    )
+                    androidx.compose.material3.HorizontalDivider(thickness = 0.5.dp, color = Color(0x33545458), modifier = Modifier.padding(start = 48.dp))
+                    AppleAccountRowItem(
+                        icon = Icons.Filled.AutoAwesome,
+                        title = "Redeem Gift Card or Code",
+                        onClick = {
+                            onDismiss()
+                        },
+                    )
+                    androidx.compose.material3.HorizontalDivider(thickness = 0.5.dp, color = Color(0x33545458), modifier = Modifier.padding(start = 48.dp))
+                    AppleAccountRowItem(
+                        icon = Icons.Filled.Download,
+                        title = "Downloads & Offline Storage",
+                        onClick = {
+                            onDismiss()
+                            onOpenDownloads()
+                        },
+                    )
+                }
+            }
+
+            // Inset Group 2: Audio & Preferences
+            Text(
+                text = "AUDIO & SETTINGS",
+                color = Color(0xFF8E8E93),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.5.sp,
+                modifier = Modifier.padding(start = 12.dp),
+            )
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF2C2C2E),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column {
+                    AppleAccountRowItem(
+                        icon = Icons.Filled.Headphones,
+                        title = "Audio Quality & Dolby Atmos",
+                        onClick = {
+                            onDismiss()
+                            onOpenAudioQuality()
+                        },
+                    )
+                    androidx.compose.material3.HorizontalDivider(thickness = 0.5.dp, color = Color(0x33545458), modifier = Modifier.padding(start = 48.dp))
+                    AppleAccountRowItem(
+                        icon = Icons.Filled.GraphicEq,
+                        title = "Equalizer & AutoEQ Tuning",
+                        onClick = {
+                            onDismiss()
+                            onOpenEqualizer()
+                        },
+                    )
+                    androidx.compose.material3.HorizontalDivider(thickness = 0.5.dp, color = Color(0x33545458), modifier = Modifier.padding(start = 48.dp))
+                    AppleAccountRowItem(
+                        icon = Icons.Filled.Settings,
+                        title = "All App Settings",
+                        onClick = {
+                            onDismiss()
+                            onOpenSettings()
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppleAccountRowItem(
+    icon: ImageVector,
+    title: String,
+    onClick: () -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                onClick()
+            }
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = Color(0xFFFA2D48),
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(14.dp))
+        Text(
+            text = title,
+            fontSize = 15.sp,
+            color = Color.White,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            Icons.AutoMirrored.Filled.ArrowForwardIos,
+            contentDescription = null,
+            tint = Color(0xFF545458),
+            modifier = Modifier.size(13.dp),
+        )
+    }
+}

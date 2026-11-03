@@ -18,6 +18,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -43,13 +44,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Album
@@ -73,7 +77,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import com.neonsong.app.ui.player.LocalMiniPlayerScrollClearance
-import androidx.compose.material3.Button
+import com.neonsong.app.ui.theme.GlassActionButton as Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -85,7 +89,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.neonsong.app.ui.theme.GlassTextActionButton as TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -271,7 +275,7 @@ fun HomeScreen(
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Black,
     ) { scaffoldPadding ->
         if (uiState.isLoading && rows.isEmpty()) {
             Box(
@@ -300,6 +304,13 @@ fun HomeScreen(
                     .adaptiveContentWidth(maxWidth = 860.dp)
                     .safeHorizontalContentPadding(),
             ) {
+                val topPicksTracks = remember(rows) {
+                    rows.filterIsInstance<HomeRow.Track>().map { it.track }.take(6)
+                }
+                val recentlyPlayedTracks = remember(rows) {
+                    rows.filterIsInstance<HomeRow.Track>().map { it.track }.drop(2).take(10)
+                }
+
                 LazyColumn(
                     state = listState,
                     contentPadding = PaddingValues(
@@ -312,18 +323,12 @@ fun HomeScreen(
                         .fillMaxSize()
                         .statusBarsPadding(),
                 ) {
-                    // 1. Unified Profile & Live Timer Top Bar
-                    item(key = "top_profile_bar", contentType = "header") {
-                        RedesignedTopBar(
-                            displayName = activeUsername,
-                            isViewingFriend = uiState.isViewingFriend,
+                    // 1. 1:1 Apple Music Stats Header (Large 34sp Title + Top-Right Circular Avatar)
+                    item(key = "apple_home_header", contentType = "header") {
+                        AppleHomeHeader(
+                            title = "Stats",
                             avatarUrl = uiState.stats?.avatarUrl,
                             customPhotoUri = if (uiState.isViewingFriend) null else uiState.customPhotoUri,
-                            viewModel = viewModel,
-                            onSearchClick = {
-                                hapticManager.click()
-                                onOpenSearch()
-                            },
                             onAvatarClick = {
                                 hapticManager.click()
                                 if (uiState.isViewingFriend) {
@@ -332,9 +337,54 @@ fun HomeScreen(
                                     showProfileSheet = true
                                 }
                             },
-                            onSwitchProfileClick = onOpenFriends,
                         )
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(Modifier.height(16.dp))
+                    }
+
+                    // 2. Apple Music Section: Recently Played (156dp Square Cards)
+                    if (recentlyPlayedTracks.isNotEmpty()) {
+                        item(key = "apple_recently_played_section", contentType = "section") {
+                            AppleSectionHeader(
+                                title = "Recently Played",
+                                onChevronClick = {
+                                    if (latestPlaybackQueue.isNotEmpty()) {
+                                        musicPlayer.playQueue(
+                                            tracks = latestPlaybackQueue,
+                                            startIndex = 0,
+                                            sourceLabel = "Recently Played",
+                                        )
+                                    }
+                                },
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            AppleRecentlyPlayedCarousel(
+                                tracks = recentlyPlayedTracks,
+                                onTrackClick = { track ->
+                                    val targetIdx = latestPlaybackQueue.indexOfFirst {
+                                        (track.videoId != null && it.videoId == track.videoId) ||
+                                        (it.title == track.name && it.artist == track.artist)
+                                    }
+                                    if (targetIdx >= 0 && latestPlaybackQueue.isNotEmpty()) {
+                                        musicPlayer.playQueue(
+                                            tracks = latestPlaybackQueue,
+                                            startIndex = targetIdx,
+                                            sourceLabel = "Recently Played",
+                                        )
+                                    } else {
+                                        musicPlayer.play(
+                                            PlayableTrack(
+                                                title = track.name,
+                                                artist = track.artist,
+                                                artworkUrl = track.artworkUrl,
+                                                videoId = track.videoId,
+                                            ),
+                                            sourceLabel = "Recently Played",
+                                        )
+                                    }
+                                },
+                            )
+                            Spacer(Modifier.height(24.dp))
+                        }
                     }
 
                     // Optional Error Banner
@@ -757,6 +807,270 @@ private suspend fun snapshotFlowNearEnd(listState: LazyListState, onNearEnd: () 
         .distinctUntilChanged()
         .filter { it > 0 }
         .collect { onNearEnd() }
+}
+
+@Composable
+private fun AppleHomeHeader(
+    avatarUrl: String?,
+    customPhotoUri: String?,
+    onAvatarClick: () -> Unit,
+    title: String = "Stats",
+) {
+    val avatarInteraction = remember { MutableInteractionSource() }
+    val isAvatarPressed by avatarInteraction.collectIsPressedAsState()
+    val avatarScale by animateFloatAsState(
+        targetValue = if (isAvatarPressed) 0.94f else 1f,
+        animationSpec = spring(dampingRatio = 0.62f, stiffness = 700f),
+        label = "avatarScale",
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineLarge.copy(
+                fontSize = 34.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.6).sp,
+            ),
+            color = Color.White,
+        )
+
+        Box(
+            modifier = Modifier
+                .graphicsLayer {
+                    scaleX = avatarScale
+                    scaleY = avatarScale
+                }
+                .size(38.dp)
+                .clip(CircleShape)
+                .border(0.5.dp, Color(0x33FFFFFF), CircleShape)
+                .clickable(
+                    interactionSource = avatarInteraction,
+                    indication = null,
+                    onClick = onAvatarClick,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            ProfileAvatar(
+                avatarUrl = avatarUrl,
+                customPhotoUri = customPhotoUri,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AppleSectionHeader(
+    title: String,
+    onChevronClick: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 4.dp)
+            .then(if (onChevronClick != null) Modifier.clickable(onClick = onChevronClick) else Modifier),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge.copy(
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.4).sp,
+            ),
+            color = Color.White,
+        )
+        Spacer(Modifier.width(6.dp))
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+            contentDescription = null,
+            tint = Color(0xFF8E8E93),
+            modifier = Modifier.size(13.dp),
+        )
+    }
+}
+
+@Composable
+private fun AppleTopPicksCarousel(
+    tracks: List<HomeTrack>,
+    onTrackClick: (HomeTrack) -> Unit,
+) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp),
+    ) {
+        items(tracks, key = { "top_pick_${it.key}" }) { track ->
+            AppleTopPickCard(
+                track = track,
+                onClick = { onTrackClick(track) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun AppleTopPickCard(
+    track: HomeTrack,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.96f else 1f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 1200f),
+        label = "topPickCardScale",
+    )
+
+    Surface(
+        onClick = onClick,
+        interactionSource = interactionSource,
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF1C1C1E),
+        border = BorderStroke(0.5.dp, Color(0x26FFFFFF)),
+        modifier = Modifier
+            .width(260.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            },
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = "MADE FOR YOU",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp,
+                ),
+                color = Color(0xFF8E8E93),
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = track.name,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = track.artist,
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                color = Color(0xFF8E8E93),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(10.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(170.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF2C2C2E)),
+            ) {
+                ArtworkImage(
+                    name = track.name,
+                    artist = track.artist,
+                    embeddedUrl = track.artworkUrl,
+                    fallbackIcon = Icons.Filled.MusicNote,
+                    decodeSizePx = 250,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppleRecentlyPlayedCarousel(
+    tracks: List<HomeTrack>,
+    onTrackClick: (HomeTrack) -> Unit,
+) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp),
+    ) {
+        items(tracks, key = { "recent_${it.key}" }) { track ->
+            AppleRecentlyPlayedCard(
+                track = track,
+                onClick = { onTrackClick(track) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun AppleRecentlyPlayedCard(
+    track: HomeTrack,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 1200f),
+        label = "recentCardScale",
+    )
+
+    Column(
+        modifier = Modifier
+            .width(156.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(156.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .border(0.5.dp, Color(0x26FFFFFF), RoundedCornerShape(10.dp))
+                .background(Color(0xFF1C1C1E)),
+        ) {
+            ArtworkImage(
+                name = track.name,
+                artist = track.artist,
+                embeddedUrl = track.artworkUrl,
+                fallbackIcon = Icons.Filled.MusicNote,
+                decodeSizePx = 200,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = track.name,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = track.artist,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontSize = 13.sp,
+            ),
+            color = Color(0xFF8E8E93),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
 
 /**
@@ -1444,7 +1758,7 @@ private fun MixHeader(
     val haptics = LocalHapticFeedback.current
 
     Surface(
-        color = MaterialTheme.colorScheme.background,
+        color = Color.Black,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
@@ -1461,9 +1775,12 @@ private fun MixHeader(
             ) {
                 Text(
                     text = sortSectionHeading(sortMode),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.4).sp,
+                    ),
+                    color = Color.White,
                 )
 
                 if (onPlayAll != null) {
@@ -1473,8 +1790,8 @@ private fun MixHeader(
                             onPlayAll()
                         },
                         shape = BadgePillShape,
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        tonalElevation = 2.dp,
+                        color = Color(0xFFFA2D48),
+                        tonalElevation = 0.dp,
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -1485,13 +1802,14 @@ private fun MixHeader(
                                 Icons.Filled.PlayArrow,
                                 contentDescription = "Play all",
                                 modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                tint = Color.White,
                             )
                             Text(
                                 text = "Play All",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                ),
+                                color = Color.White,
                             )
                         }
                     }
@@ -1526,14 +1844,14 @@ private fun MixHeader(
                         interactionSource = interactionSource,
                         shape = BadgePillShape,
                         color = if (isSelected) {
-                            MaterialTheme.colorScheme.primaryContainer
+                            Color.White
                         } else {
-                            MaterialTheme.colorScheme.surfaceContainerHighest
+                            Color(0xFF1C1C1E)
                         },
                         border = if (isSelected) {
-                            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                            BorderStroke(1.dp, Color.White)
                         } else {
-                            BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+                            BorderStroke(0.5.dp, Color(0x33FFFFFF))
                         },
                         modifier = Modifier
                             .graphicsLayer {
@@ -1551,19 +1869,20 @@ private fun MixHeader(
                                 contentDescription = null,
                                 modifier = Modifier.size(15.dp),
                                 tint = if (isSelected) {
-                                    MaterialTheme.colorScheme.primary
+                                    Color.Black
                                 } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                    Color(0xFF8E8E93)
                                 },
                             )
                             Text(
                                 text = sortModeLabel(mode),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                ),
                                 color = if (isSelected) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                    Color.Black
                                 } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                    Color.White
                                 },
                             )
                         }
@@ -1573,7 +1892,7 @@ private fun MixHeader(
 
             Spacer(Modifier.height(8.dp))
             HorizontalDivider(
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                color = Color(0x33545458),
                 thickness = 0.5.dp,
             )
         }
@@ -1706,18 +2025,16 @@ private fun TrackRow(
 ) {
     val isNowPlaying = track.isNowPlaying
     val secondaryTextColor = if (isNowPlaying) {
-        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+        Color(0xFFFA2D48)
     } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
+        Color(0xFF8E8E93)
     }
 
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val outlineVariant = MaterialTheme.colorScheme.outlineVariant
-    val borderStroke = remember(primaryColor, outlineVariant, isNowPlaying) {
+    val borderStroke = remember(isNowPlaying) {
         if (isNowPlaying) {
-            BorderStroke(1.dp, primaryColor.copy(alpha = 0.50f))
+            BorderStroke(1.dp, Color(0xFFFA2D48).copy(alpha = 0.60f))
         } else {
-            BorderStroke(0.5.dp, outlineVariant.copy(alpha = 0.18f))
+            BorderStroke(0.5.dp, Color(0x26FFFFFF))
         }
     }
     val displayArtist = remember(track.artist) {
@@ -1725,32 +2042,32 @@ private fun TrackRow(
     }
 
     Surface(
-        shape = if (isNowPlaying) NowPlayingCardShape else TrackRowShape,
+        shape = RoundedCornerShape(10.dp),
         color = if (isNowPlaying) {
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+            Color(0xFFFA2D48).copy(alpha = 0.14f)
         } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
+            Color(0xFF1C1C1E)
         },
-        tonalElevation = if (isNowPlaying) 2.dp else 1.dp,
+        tonalElevation = 0.dp,
         border = borderStroke,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = if (isNowPlaying) 4.dp else 2.5.dp)
-            .clip(if (isNowPlaying) NowPlayingCardShape else TrackRowShape)
+            .padding(vertical = 3.dp)
+            .clip(RoundedCornerShape(10.dp))
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 64.dp)
-                .padding(vertical = 6.dp, horizontal = 8.dp),
+                .heightIn(min = 60.dp)
+                .padding(vertical = 6.dp, horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
                 modifier = Modifier
-                    .size(52.dp)
-                    .clip(TrackThumbnailShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF2C2C2E)),
             ) {
                 ArtworkImage(
                     name = track.name,
@@ -1766,16 +2083,21 @@ private fun TrackRow(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(2.dp)
-                            .size(24.dp, 18.dp),
+                            .size(22.dp, 16.dp),
+                        containerColor = Color.Transparent,
+                        waveColor = Color(0xFFFA2D48),
                     )
                 }
             }
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     track.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = Color.White,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -1783,7 +2105,9 @@ private fun TrackRow(
                     Spacer(Modifier.height(2.dp))
                     Text(
                         displayArtist,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 13.sp,
+                        ),
                         color = secondaryTextColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

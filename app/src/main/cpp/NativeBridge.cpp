@@ -124,6 +124,39 @@ Java_com_neonsong_app_playback_NativeAudioEngine_nativeSetStudioMasterClarity(
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeSetBauerCrossfeedEnabled(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jboolean enabled) {
+    if (auto* engine = fromHandle(handle); engine != nullptr) {
+        engine->setBauerCrossfeedEnabled(enabled == JNI_TRUE);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeSetAnalogTubeWarmthEnabled(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jboolean enabled) {
+    if (auto* engine = fromHandle(handle); engine != nullptr) {
+        engine->setAnalogTubeWarmthEnabled(enabled == JNI_TRUE);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_neonsong_app_playback_NativeAudioEngine_nativeSetMonoBassEnabled(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jboolean enabled) {
+    if (auto* engine = fromHandle(handle); engine != nullptr) {
+        engine->setMonoBassEnabled(enabled == JNI_TRUE);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_neonsong_app_playback_NativeAudioEngine_nativeSetClarityWet(
     JNIEnv*,
     jobject,

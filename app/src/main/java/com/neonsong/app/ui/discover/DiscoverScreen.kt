@@ -38,11 +38,10 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.neonsong.app.ui.theme.GlassIconActionButton as IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -78,6 +77,7 @@ import com.neonsong.app.ui.common.groupShape
 import com.neonsong.app.ui.player.LocalMiniPlayerScrollClearance
 import com.neonsong.app.ui.player.LocalMusicPlayer
 import com.neonsong.app.ui.theme.ExpressivePillShape
+import com.neonsong.app.ui.theme.LiquidGlassButton
 import com.neonsong.app.ui.theme.liquidGlassSource
 
 @Composable
@@ -129,7 +129,9 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
     val shouldLoadMore by remember(listState, state.tracks.size) {
         derivedStateOf {
             val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= state.tracks.size - 3
+            // The hero and section title occupy the first two lazy-list
+            // positions before the track rows.
+            last >= state.tracks.size
         }
     }
     LaunchedEffect(shouldLoadMore, state.tracks.size) {
@@ -147,10 +149,15 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
         ) {
             ExpressiveHeader(
             title = "Discover",
-            subtitle = if (state.isYtConnected) "Discover frash tracks" else "Discover frash tracks",
+            subtitle = if (state.isYtConnected) {
+                "YouTube Music picks shaped around your taste"
+            } else {
+                "Fresh music shaped around your listening taste"
+            },
             onBack = onBack,
             backdrop = headerBackdrop,
             actions = {
+                HeaderActionIcon(Icons.Filled.Refresh, "Refresh recommendations", viewModel::refresh)
                 HeaderActionIcon(Icons.Filled.BookmarkAdd, "Save as playlist", viewModel::saveAsPlaylist)
                 HeaderActionIcon(Icons.Filled.Shuffle, "Shuffle Recommendations", viewModel::surpriseMe)
             },
@@ -196,13 +203,16 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("Something went wrong", style = MaterialTheme.typography.titleMedium)
                             Text(state.error.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            TextButton(onClick = viewModel::loadInitial) { Text("Retry") }
+                            LiquidGlassButton(
+                                onClick = viewModel::loadInitial,
+                                shape = ExpressivePillShape,
+                            ) { Text("Retry") }
                         }
                     }
                     state.tracks.isEmpty() -> Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("No recommendations yet", style = MaterialTheme.typography.titleMedium)
-                            Text("Listen to more music on Last.fm, then pull to refresh.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Listen to more music, then pull to refresh.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                     else -> LazyColumn(
@@ -216,12 +226,37 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
                         verticalArrangement = Arrangement.spacedBy(GroupGap),
                         modifier = Modifier,
                     ) {
+                        item(key = "discover_hero", contentType = "discover_hero") {
+                            DiscoverHeroCard(
+                                isYtConnected = state.isYtConnected,
+                                trackCount = state.tracks.size,
+                            )
+                        }
+                        item(key = "discover_section_title", contentType = "section_title") {
+                            Column(Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
+                                Text(
+                                    "Your next favorites",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                )
+                                Text(
+                                    if (state.isYtConnected) "Selected from your connected music taste" else "Picked from your listening history",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                         itemsIndexed(
                             state.tracks,
                             key = { _, t -> t.key },
                             contentType = { _, _ -> "discover_track" },
                         ) { index, track ->
-                            val position = if (index == 0) GroupPosition.TOP else GroupPosition.MIDDLE
+                            val position = when {
+                                state.tracks.size == 1 -> GroupPosition.SINGLE
+                                index == 0 -> GroupPosition.TOP
+                                index == state.tracks.lastIndex -> GroupPosition.BOTTOM
+                                else -> GroupPosition.MIDDLE
+                            }
                             val isPlayingThisSong = playbackState.isPlaying &&
                                 playbackState.current?.title.equals(track.name, ignoreCase = true) &&
                                 playbackState.current?.artist.equals(track.artist, ignoreCase = true)
@@ -266,6 +301,76 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
             onPlayInNeonSong = { playFromDiscover(track) },
             onDismiss = { menuTrack = null },
         )
+    }
+}
+
+@Composable
+private fun DiscoverHeroCard(isYtConnected: Boolean, trackCount: Int) {
+    Card(
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Box {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.24f),
+                                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.10f),
+                                MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ),
+                        ),
+                    ),
+            )
+            Row(
+                Modifier.padding(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(56.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Filled.GraphicEq,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "A little more you",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (isYtConnected) "New YouTube Music finds, alongside familiar favorites." else "Discover tracks that fit the music you already love.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                    ) {
+                        Text(
+                            text = if (trackCount > 0) "$trackCount tracks ready" else "Building your recommendations",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

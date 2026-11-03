@@ -1,7 +1,7 @@
 {
   "version": "4.2.5",
   "versionCode": 25,
-  "changelog": "• Fluid AGSL background with smoothstep radial feathering\n• Expressive Bento Grid Settings page\n• High-Precision C++ DSP 16KB alignment\n• In-app update support",
+  "changelog": "• High-quality next-track preloading in normal playback and AutoDJ\n• More reliable track handoffs and fallback playback\n• Liquid Glass search, loading, controls, and upcoming-track panel\n• Fluid AGSL backgrounds and expressive settings",
   "downloadUrl": "https://github.com/ansh2222949/Neon-song/releases/latest/download/NeonSong.apk",
   "releaseUrl": "https://github.com/ansh2222949/Neon-song/releases/latest",
   "isMandatory": false

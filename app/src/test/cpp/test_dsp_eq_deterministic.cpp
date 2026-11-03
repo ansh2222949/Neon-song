@@ -26,10 +26,10 @@ using namespace neonsong::audio;
 
 namespace {
 
-constexpr std::array<double, 15> kIsoFrequenciesHz{
-    25.0, 40.0, 63.0, 100.0, 160.0,
+constexpr std::array<double, 16> kIsoFrequenciesHz{
+    20.0, 40.0, 63.0, 100.0, 160.0,
     250.0, 400.0, 630.0, 1000.0, 1600.0,
-    2500.0, 4000.0, 6300.0, 10000.0, 16000.0
+    2500.0, 4000.0, 6300.0, 10000.0, 16000.0, 20000.0
 };
 
 // Generates stereo interleaved pure sine wave
@@ -65,10 +65,10 @@ double linearToDb(double linearRatio) {
 } // namespace
 
 // ============================================================================
-// TEST 1: Deterministic 15-Band ISO Peaking Filter Gain Accuracy (+6dB & -6dB)
+// TEST 1: Deterministic 16-Band ISO Peaking Filter Gain Accuracy (+6dB & -6dB)
 // ============================================================================
 void test15BandGainAccuracy() {
-    std::printf("[EQ Test 1] 15-band ISO peaking biquad response at 48kHz...\n");
+    std::printf("[EQ Test 1] 16-band ISO peaking biquad response at 48kHz...\n");
     const double sampleRate = 48000.0;
 
     for (std::size_t band = 0; band < kIsoFrequenciesHz.size(); ++band) {
@@ -83,7 +83,7 @@ void test15BandGainAccuracy() {
             dsp.setStudioMasterClarity(false);
             dsp.setBitPerfect(false);
 
-            std::array<float, 15> gains{};
+            std::array<float, 16> gains{};
             gains[band] = 6.0F;
             dsp.setEqualizer(true, gains.data(), gains.size());
 
@@ -101,9 +101,9 @@ void test15BandGainAccuracy() {
 
             // Dynamic Headroom Compensation applies -5.0 dB preamp on +6.0 dB boost (kEqualizerPreLimiterBoostDb = 1.0 dB).
             // DC blocker (fc ~7.6 Hz) adds subtle sub-bass rolloff for bands 0 (25Hz) and 1 (40Hz).
-            const double expectedNetGain = (band == 0) ? +0.365 :
-                                           (band == 1) ? +0.746 :
-                                           (band == 2) ? +0.901 : +1.009;
+            const double expectedNetGain = (band == 0) ? +0.421 :
+                                           (band == 1) ? +0.858 :
+                                           (band == 2) ? +0.950 : +1.009;
             TEST_ASSERT(std::abs(measuredGainDb - expectedNetGain) < 0.15, "Band +6dB net gain mismatch");
             std::printf(" +6dB net: %+.3f dB (expected %+.3f dB)", measuredGainDb, expectedNetGain);
         }
@@ -115,7 +115,7 @@ void test15BandGainAccuracy() {
             dsp.setStudioMasterClarity(false);
             dsp.setBitPerfect(false);
 
-            std::array<float, 15> gains{};
+            std::array<float, 16> gains{};
             gains[band] = -6.0F;
             dsp.setEqualizer(true, gains.data(), gains.size());
 
@@ -153,7 +153,7 @@ void testBypassModes() {
         dsp.setStudioMasterClarity(false);
         dsp.setBitPerfect(false);
 
-        std::array<float, 15> hotGains;
+        std::array<float, 16> hotGains;
         hotGains.fill(6.0F);
         dsp.setEqualizer(false, hotGains.data(), hotGains.size()); // Disabled!
 
@@ -176,7 +176,7 @@ void testBypassModes() {
         dsp.setStudioMasterClarity(true); // even with clarity enabled
         dsp.setBitPerfect(true); // Bit-perfect takes absolute precedence
 
-        std::array<float, 15> hotGains;
+        std::array<float, 16> hotGains;
         hotGains.fill(8.0F);
         dsp.setEqualizer(true, hotGains.data(), hotGains.size());
 
@@ -207,7 +207,7 @@ void testPeakLimiterCeiling() {
     dsp.setPeakProtectionEnabled(true);
 
     // Boost 1kHz by +8 dB
-    std::array<float, 15> gains{};
+    std::array<float, 16> gains{};
     gains[8] = 8.0F; // 1000 Hz band
     dsp.setEqualizer(true, gains.data(), gains.size());
 
@@ -360,7 +360,7 @@ void testParametricEqPcmFormats() {
         std::printf(" PASSED\n");
     }
 
-    // Reset PEQ so subsequent tests evaluate pure 15-band EQ
+    // Reset PEQ so subsequent tests evaluate pure 16-band EQ
     ParametricEq::publish(false, 0.0F, nullptr, nullptr, nullptr, nullptr, nullptr, 0);
 }
 
@@ -380,7 +380,7 @@ void testSampleRates() {
         dsp.setBitPerfect(false);
 
         // Boost 1000 Hz by +6 dB
-        std::array<float, 15> gains{};
+        std::array<float, 16> gains{};
         gains[8] = 6.0F;
         dsp.setEqualizer(true, gains.data(), gains.size());
 

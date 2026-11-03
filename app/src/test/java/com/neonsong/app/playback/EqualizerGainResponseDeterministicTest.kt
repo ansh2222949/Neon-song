@@ -10,14 +10,14 @@ import kotlin.math.sqrt
 import org.junit.Test
 
 /**
- * Deterministic gain response tests for all 15 EQ bands and dual-deck crossfade curves.
+ * Deterministic gain response tests for all 16 EQ bands and dual-deck crossfade curves.
  */
 class EqualizerGainResponseDeterministicTest {
 
     private val sampleRateHz = 48_000.0
 
     @Test
-    fun all15BandsProduceAccurateGainOnSineWave() {
+    fun all16BandsProduceAccurateGainOnSineWave() {
         for (freq in DspMath.EQ_FREQUENCIES_HZ) {
             // Test +6.0 dB boost
             val boostBand = DspMath.eqBand(sampleRateHz, freq, 6.0)

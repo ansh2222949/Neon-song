@@ -4,6 +4,7 @@ import android.content.Context
 import com.neonsong.app.BuildConfig
 import com.neonsong.app.data.network.LastFmApiService
 import com.neonsong.app.data.network.LastFmRateGuard
+import com.neonsong.app.data.network.RateLimitedLastFmApiService
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -16,10 +17,8 @@ import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
-import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
-import okhttp3.ResponseBody
 import okhttp3.logging.HttpLoggingInterceptor
 import android.util.Log
 import android.os.SystemClock
@@ -52,12 +51,11 @@ object NetworkModule {
             }
         }
 
-        // Keep enough parallelism for Home's batched metadata calls without
-        // allowing a slow network to retain dozens of response buffers and
-        // coroutines on low-memory devices. Artwork uses its own dispatcher.
+        // Parallelism tuned for mobile multi-host streaming: allows concurrent
+        // metadata and stream queries without stalling audio playback chunks.
         val dispatcher = Dispatcher().apply {
-            maxRequests = 24
-            maxRequestsPerHost = 8
+            maxRequests = 48
+            maxRequestsPerHost = 12
         }
 
         val cacheDir = File(context.cacheDir, "lfm_http_cache")
@@ -66,7 +64,7 @@ object NetworkModule {
         return OkHttpClient.Builder()
             .dispatcher(dispatcher)
             .cache(cache)
-            .connectionPool(ConnectionPool(10, 5, TimeUnit.MINUTES))
+            .connectionPool(ConnectionPool(32, 5, TimeUnit.MINUTES))
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
@@ -90,22 +88,18 @@ object NetworkModule {
                 } else {
                     val response = chain.proceed(request)
                     if (response.code == 429 || response.code == 503) {
-                        response.closeQuietly()
+                        // Mark cooldown in shared rate guard without blocking OkHttp's dispatcher threadpool.
+                        // Callers needing reliable retries (e.g. ScrobbleRepository or callers using
+                        // LastFmRateGuard.executeWithRetry) suspend non-blockingly at the coroutine layer.
                         rateGuard.onRequestLimited()
-                        runCatching { Thread.sleep(1500L) }
-                        chain.proceed(request)
-                    } else {
-                        if (response.isSuccessful) rateGuard.onRequestSucceeded()
-                        response
+                    } else if (response.isSuccessful) {
+                        rateGuard.onRequestSucceeded()
                     }
+                    response
                 }
             }
             .addInterceptor(logging)
             .build()
-    }
-
-    private fun Response.closeQuietly() {
-        runCatching { close() }
     }
 
     /**
@@ -163,6 +157,12 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideLastFmApiService(retrofit: Retrofit): LastFmApiService =
-        retrofit.create(LastFmApiService::class.java)
+    fun provideLastFmApiService(
+        retrofit: Retrofit,
+        rateGuard: LastFmRateGuard,
+    ): LastFmApiService =
+        RateLimitedLastFmApiService(
+            delegate = retrofit.create(LastFmApiService::class.java),
+            rateGuard = rateGuard,
+        )
 }

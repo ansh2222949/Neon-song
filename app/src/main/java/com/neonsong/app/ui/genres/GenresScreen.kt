@@ -24,14 +24,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.ExperimentalMaterial3Api
+import com.neonsong.app.ui.theme.GlassActionButton as GlassButton
+import com.neonsong.app.ui.theme.GlassOutlinedActionButton as GlassOutlinedButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.neonsong.app.ui.theme.GlassIconActionButton as IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.neonsong.app.ui.theme.GlassTextActionButton as TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -241,15 +243,15 @@ private fun GenreDetailSheet(
             }
 
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                androidx.compose.material3.Button(onClick = onStartMix, modifier = Modifier.weight(1f)) {
+                GlassButton(onClick = onStartMix, modifier = Modifier.weight(1f)) {
                     Text("Start Mix")
                 }
                 if (state.isDiscoverMode) {
-                    androidx.compose.material3.OutlinedButton(onClick = onShowYourTracks, modifier = Modifier.weight(1f)) {
+                    GlassOutlinedButton(onClick = onShowYourTracks, modifier = Modifier.weight(1f)) {
                         Text("Your Tracks")
                     }
                 } else {
-                    androidx.compose.material3.OutlinedButton(onClick = onDiscoverMore, modifier = Modifier.weight(1f)) {
+                    GlassOutlinedButton(onClick = onDiscoverMore, modifier = Modifier.weight(1f)) {
                         Text("Discover More")
                     }
                 }

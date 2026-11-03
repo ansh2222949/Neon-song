@@ -34,6 +34,7 @@ public:
 
     void setBarMode(int bars) noexcept; // 8 or 16 bars
     [[nodiscard]] int getBarMode() const noexcept;
+    void setCurveType(int curveType) noexcept;
 
     void triggerFadeNow() noexcept; // 4 bars fast blend
     void triggerFadeBars(int bars) noexcept;
@@ -56,6 +57,7 @@ private:
     double sampleRate_{48000.0};
     std::atomic<bool> enabled_{false};
     std::atomic<int> barMode_{8};
+    std::atomic<int> curveType_{0}; // 0 equal-power, 1 smooth S, 2 bass swap, 3 fast drop
     std::atomic<AutoMixState> state_{AutoMixState::Idle};
 
     LinkwitzRileyFilter deckAFilter_;

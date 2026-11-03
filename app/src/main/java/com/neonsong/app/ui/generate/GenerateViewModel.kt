@@ -34,7 +34,7 @@ enum class GenerateMode(val label: String, val description: String, val storageV
     SIMILAR_ARTISTS("Similar Artists", "YouTube-first artist discovery", "similar-artists"),
     TAG("By Tag / Genre", "YouTube-first genre picks", "tag"),
     MIX("My Mix", "Your taste, mixes & local favorites", "mix"),
-    RECOMMENDATIONS("My Recommendation", "35 YouTube-first discoveries", "recommendations"),
+    RECOMMENDATIONS("YouTube Picks", "Fresh tracks from your music taste", "recommendations"),
     NEVER_HEARD("Never Heard", "Fresh discoveries you've never listened to before", "never-heard"),
     LIBRARY("My Library", "Re-discover the sounds of your past", "library"),
 }

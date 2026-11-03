@@ -19,6 +19,18 @@
 
 ---
 
+## 📥 Download
+
+**Android 10 and newer:** [Download NeonSong.apk](https://github.com/ansh2222949/Neon-song/releases/latest/download/NeonSong.apk) · [Browse all releases](https://github.com/ansh2222949/Neon-song/releases/latest)
+
+On your phone, open the download link, download the APK, then tap it in the Downloads app to install. Android may ask you to allow APK installs for the browser or file manager you used. For Android 7–9, choose the legacy APK from the release assets.
+
+For development, run `./gradlew :app:assembleDebug`; the debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Debug builds use a development signing key and are not suitable for updating a separately signed release installation. APKs and local build outputs are intentionally excluded from Git.
+
+Project documentation is indexed in [docs/README.md](docs/README.md).
+
+---
+
 ## 📱 Visual Showcase
 
 <div align="center">
@@ -48,7 +60,7 @@
 
 ### ⚡ Liquid Glass UI & Theming
 - **Translucent Glass Tiles**: Frosted acrylic materials (`18dp` backdrop blur, subtle inner stroke, elevated press feedback).
-- **Material 3 Expressive**: Dynamic color theming dynamically extracted from track artwork.
+- **Apple-inspired Liquid Glass**: Translucent controls, responsive glass surfaces, and fluid touch feedback across player, search, and loading states.
 - **Haptic Feedback**: Multi-tier tactile vibrations for button presses, scrubbing, and gesture triggers.
 
 ### 🌐 YouTube Music Streaming & Sync
@@ -71,7 +83,7 @@
 | Component | Technology |
 |---|---|
 | **Architecture** | Clean Architecture + MVVM + Unidirectional Data Flow |
-| **Language & UI** | 100% Kotlin + Jetpack Compose (Material 3 Expressive) |
+| **Language & UI** | Kotlin + Jetpack Compose with app-owned Liquid Glass controls |
 | **Audio Engine** | AndroidX Media3 ExoPlayer with native audio pipelines |
 | **Local Database** | Room Database + Jetpack DataStore |
 | **Dependency Injection** | Dagger Hilt |
@@ -85,7 +97,7 @@
 ### Prerequisites
 - Android Studio Ladybug / Meerkat (or newer)
 - JDK 17 or higher
-- Android SDK 35 (Target API 35, Min API 26)
+- Android SDK 37 and NDK 28.2.13676358 (Target API 35, Min API 29)
 
 ### Build & Run
 ```bash
@@ -99,6 +111,8 @@ cd Neon-song
 # Install directly to a connected device
 ./gradlew installDebug
 ```
+
+See [Builds and releases](builds/README.md) for local APK builds, phone downloads, and the signing requirements for GitHub releases.
 
 ---
 

@@ -91,8 +91,8 @@ int main(int argc, char** argv) {
             }
         }
 
-        // Subtest 1B: 15-band EQ Boost (+6 dB at 1kHz) with Dynamic Headroom Compensation
-        std::array<float, 15> gains{};
+        // Subtest 1B: 16-band EQ Boost (+6 dB at 1kHz) with Dynamic Headroom Compensation
+        std::array<float, 16> gains{};
         gains[8] = 6.0f; // Band 8 = 1000 Hz
         engine.setEqualizer(true, gains.data(), gains.size());
 
@@ -338,9 +338,9 @@ int main(int argc, char** argv) {
     // -------------------------------------------------------------
     std::cout << "[TEST 5] EQ Settings Persistence & Engine Recreation Integrity...\n";
     {
-        std::array<float, 15> originalGains = {
+        std::array<float, 16> originalGains = {
             2.5f, 3.0f, 1.5f, 0.0f, -1.0f, -2.0f, -1.5f, 0.0f,
-            1.0f, 2.0f, 3.5f, 4.0f, 3.0f, 2.0f, 1.0f
+            1.0f, 2.0f, 3.5f, 4.0f, 3.0f, 2.0f, 1.0f, 0.5f
         };
 
         double originalRms = 0.0;

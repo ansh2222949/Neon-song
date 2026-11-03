@@ -37,21 +37,21 @@ class PrefetchResolver(
         activePlayback: () -> TrackIdentity?,
         extract: suspend (youtubeVideoId: String) -> YouTubeAudioStream,
         onReady: suspend (StreamCache) -> Unit,
-    ) {
+    ): Job? {
         val videoId = identity.youtubeVideoId
-        if (activePlayback()?.youtubeVideoId == videoId) return
+        if (activePlayback()?.youtubeVideoId == videoId) return null
         if (job?.isActive == true && activeVideoId == videoId) {
             Log.i(TAG, "[PREFETCH_SKIPPED_ALREADY_ACTIVE] youtubeVideoId=$videoId")
-            return
+            return job
         }
         if (videoId in delivered && cache.get(identity) != null) {
             Log.i(TAG, "[PREFETCH_SKIPPED_CACHED] youtubeVideoId=$videoId")
-            return
+            return null
         }
         cancel()
         activeVideoId = videoId
         Log.i(TAG, "[PREFETCH_SCHEDULED] youtubeVideoId=$videoId")
-        job = scope.launch(Dispatchers.IO) {
+        val launched = scope.launch(Dispatchers.IO) {
             val started = System.nanoTime()
             try {
                 logger.event(ResolveEvent.START, identity, 0L, durationMs, "prefetch")
@@ -131,6 +131,8 @@ class PrefetchResolver(
                 if (!error.isExpectedAudioResolutionFailure()) throw error
             }
         }
+        job = launched
+        return launched
     }
 
     private companion object {

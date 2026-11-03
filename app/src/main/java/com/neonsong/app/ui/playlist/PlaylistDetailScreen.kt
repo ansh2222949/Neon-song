@@ -78,20 +78,16 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.neonsong.app.ui.theme.GlassIconActionButton as IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.neonsong.app.ui.theme.GlassTextActionButton as TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -131,6 +127,7 @@ import com.neonsong.app.data.playlist.isYouTubeOnly
 import com.neonsong.app.playback.toPlayableTrack
 import com.neonsong.app.ui.common.ArtworkImage
 import com.neonsong.app.ui.common.ExpressiveLoadingIndicator
+import com.neonsong.app.ui.theme.LiquidGlassButton
 import com.neonsong.app.ui.theme.LiquidGlassIconButton
 import com.neonsong.app.ui.theme.liquidGlassSurface
 import com.neonsong.app.ui.common.PlaylistCover
@@ -430,7 +427,7 @@ fun PlaylistDetailScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         // Circular Shuffle Button
-                        FilledTonalIconButton(
+                        LiquidGlassIconButton(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 if (isThisPlaylistPlaying) {
@@ -446,33 +443,27 @@ fun PlaylistDetailScreen(
                                     )
                                 }
                             },
-                            shape = CircleShape,
-                            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                containerColor = if (isThisPlaylistPlaying && playbackState.shuffleEnabled) {
+                            modifier = Modifier.size(50.dp),
+                            accentTint = if (isThisPlaylistPlaying && playbackState.shuffleEnabled) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.secondary
+                            },
+                            contentDescription = "Shuffle playlist",
+                        ) {
+                            Icon(
+                                Icons.Filled.Shuffle,
+                                contentDescription = null,
+                                tint = if (isThisPlaylistPlaying && playbackState.shuffleEnabled) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
-                                    MaterialTheme.colorScheme.secondaryContainer
+                                    MaterialTheme.colorScheme.onSurface
                                 },
-                                contentColor = if (isThisPlaylistPlaying && playbackState.shuffleEnabled) {
-                                    MaterialTheme.colorScheme.onPrimary
-                                } else {
-                                    MaterialTheme.colorScheme.onSecondaryContainer
-                                },
-                            ),
-                            modifier = Modifier.size(50.dp),
-                        ) {
-                            Icon(Icons.Filled.Shuffle, contentDescription = "Shuffle", modifier = Modifier.size(22.dp))
+                                modifier = Modifier.size(22.dp),
+                            )
                         }
                         // Prominent Center Play / Playing Pill Button with Spring Physics
-                        val playInteractionSource = remember { MutableInteractionSource() }
-                        val isPlayPressed by playInteractionSource.collectIsPressedAsState()
-                        val playScale by animateFloatAsState(
-                            targetValue = if (isPlayPressed) 0.92f else 1f,
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-                            label = "heroPlayScale",
-                        )
-
-                        Button(
+                        LiquidGlassButton(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 if (playlist.tracks.isNotEmpty()) {
@@ -483,24 +474,18 @@ fun PlaylistDetailScreen(
                                     )
                                 }
                             },
-                            interactionSource = playInteractionSource,
-                            shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                            ),
-                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp, pressedElevation = 8.dp),
+                            enabled = playlist.tracks.isNotEmpty(),
+                            shape = ExpressivePillShape,
                             modifier = Modifier
                                 .height(50.dp)
                                 .padding(horizontal = 4.dp)
-                                .graphicsLayer {
-                                    scaleX = playScale
-                                    scaleY = playScale
-                                },
+                                .widthIn(min = 124.dp),
+                            contentPadding = PaddingValues(horizontal = 22.dp, vertical = 10.dp),
                         ) {
                             Icon(
                                 if (isThisPlaylistPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                                 contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(26.dp),
                             )
                             Spacer(Modifier.width(8.dp))
@@ -508,10 +493,11 @@ fun PlaylistDetailScreen(
                                 if (isThisPlaylistPlaying) "Playing" else "Play",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
                         }
                         // Locate current song
-                        FilledTonalIconButton(
+                        LiquidGlassIconButton(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 val playingTrack = playbackState.current
@@ -522,13 +508,11 @@ fun PlaylistDetailScreen(
                                     }
                                 }
                             },
-                            shape = CircleShape,
-                            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            ),
                             modifier = Modifier.size(50.dp),
+                            accentTint = MaterialTheme.colorScheme.secondary,
+                            contentDescription = "Locate playing song",
                         ) {
-                            Icon(Icons.Rounded.MyLocation, contentDescription = "Locate playing song", modifier = Modifier.size(22.dp))
+                            Icon(Icons.Rounded.MyLocation, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(22.dp))
                         }
                     }
 
@@ -543,18 +527,15 @@ fun PlaylistDetailScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box {
-                            Surface(
+                            LiquidGlassButton(
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     sortMenuOpen = true
                                 },
-                                shape = RoundedCornerShape(50),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
-                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                tonalElevation = 2.dp,
+                                shape = ExpressivePillShape,
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 9.dp),
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 ) {
@@ -562,11 +543,13 @@ fun PlaylistDetailScreen(
                                         text = currentSort.label,
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                     )
                                     Icon(
                                         imageVector = if (sortAscending) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward,
                                         contentDescription = null,
                                         modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSurface,
                                     )
                                 }
                             }
@@ -647,16 +630,18 @@ fun PlaylistDetailScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontWeight = FontWeight.Medium,
                             )
-                            IconButton(
+                            LiquidGlassIconButton(
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     isReorderLocked = !isReorderLocked
                                 },
                                 modifier = Modifier.size(36.dp),
+                                accentTint = MaterialTheme.colorScheme.secondary,
+                                contentDescription = if (isReorderLocked) "Reorder locked" else "Reorder unlocked",
                             ) {
                                 Icon(
                                     imageVector = if (isReorderLocked) Icons.Filled.Lock else Icons.Filled.LockOpen,
-                                    contentDescription = if (isReorderLocked) "Reorder locked" else "Reorder unlocked",
+                                    contentDescription = null,
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(20.dp),
                                 )
@@ -676,8 +661,12 @@ fun PlaylistDetailScreen(
                             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                             trailingIcon = {
                                 if (searchQuery.isNotEmpty()) {
-                                    IconButton(onClick = { searchQuery = "" }) {
-                                        Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                                    LiquidGlassIconButton(
+                                        onClick = { searchQuery = "" },
+                                        modifier = Modifier.size(36.dp),
+                                        contentDescription = "Clear search",
+                                    ) {
+                                        Icon(Icons.Filled.Close, contentDescription = null)
                                     }
                                 }
                             },
@@ -972,7 +961,7 @@ fun PlaylistDetailScreen(
                     enter = fadeIn() + scaleIn(),
                     exit = fadeOut() + scaleOut(),
                 ) {
-                    FilledTonalIconButton(
+                    LiquidGlassIconButton(
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             val playingTrack = playbackState.current
@@ -983,49 +972,47 @@ fun PlaylistDetailScreen(
                                 }
                             }
                         },
-                        shape = CircleShape,
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        ),
-                        modifier = Modifier.size(38.dp),
+                        modifier = Modifier.size(42.dp),
+                        accentTint = MaterialTheme.colorScheme.secondary,
+                        contentDescription = "Locate playing song",
                     ) {
-                        Icon(Icons.Rounded.MyLocation, contentDescription = "Locate playing song", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.MyLocation, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(18.dp))
                     }
                 }
 
                 Spacer(Modifier.width(6.dp))
 
-                // Translucent Actions Pill (Search / More Menu)
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = if (showScrolledHeader) Color.Transparent else Color.Black.copy(alpha = 0.38f),
-                ) {
-                    Row {
-                        IconButton(
+                // Circular glass actions stay legible over both the cover and scrolled header.
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        LiquidGlassIconButton(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 isSearchActive = !isSearchActive
                                 if (!isSearchActive) searchQuery = ""
                             },
                             modifier = Modifier.size(42.dp),
+                            accentTint = if (isSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                            contentDescription = "Search in playlist",
                         ) {
                             Icon(
                                 Icons.Filled.Search,
-                                contentDescription = "Search in playlist",
+                                contentDescription = null,
                                 tint = if (isSearchActive) MaterialTheme.colorScheme.primary else if (showScrolledHeader) MaterialTheme.colorScheme.onSurface else Color.White,
                             )
                         }
                         Box {
-                            IconButton(
+                            LiquidGlassIconButton(
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     overflowMenuOpen = true
                                 },
                                 modifier = Modifier.size(42.dp),
+                                accentTint = MaterialTheme.colorScheme.secondary,
+                                contentDescription = "Playlist options",
                             ) {
                                 Icon(
                                     Icons.Filled.MoreVert,
-                                    contentDescription = "Playlist options",
+                                    contentDescription = null,
                                     tint = if (showScrolledHeader) MaterialTheme.colorScheme.onSurface else Color.White,
                                 )
                             }
@@ -1153,7 +1140,6 @@ fun PlaylistDetailScreen(
                                     },
                                 )
                         }
-                    }
                     }
                 }
             }

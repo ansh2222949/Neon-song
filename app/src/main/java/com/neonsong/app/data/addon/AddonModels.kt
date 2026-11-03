@@ -178,7 +178,10 @@ data class AddonMetadata(
             ?: extractSampleRateFromElement(bitDepthRate)
 }
 
-private val ATMOS_HINT = Regex("""atmos|dolby|eac3[_-]?joc|ec-?3""", RegexOption.IGNORE_CASE)
+private val ATMOS_HINT = Regex(
+    """(?:\batmos\b|\bec\+3\b|\beac3[-_ ]?joc\b|\bjoc\b)""",
+    RegexOption.IGNORE_CASE,
+)
 
 @Serializable
 data class AddonTrack(

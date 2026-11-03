@@ -1,6 +1,12 @@
 package com.neonsong.app.ui.search
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
@@ -46,18 +52,13 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledIconButton
+import com.neonsong.app.ui.theme.GlassFilledIconActionButton as FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.neonsong.app.ui.theme.GlassIconActionButton as IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.neonsong.app.ui.theme.GlassTextActionButton as TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -88,6 +89,7 @@ import com.neonsong.app.ui.common.ExpressiveMotion
 import com.neonsong.app.ui.common.HeaderActionIcon
 import com.neonsong.app.ui.theme.LiquidGlassChip
 import com.neonsong.app.ui.theme.liquidGlassSurface
+import com.neonsong.app.ui.theme.rememberLiquidTouchInteraction
 import com.neonsong.app.ui.common.TrackContextMenuSheet
 import com.neonsong.app.ui.common.TrackMenuCapabilities
 import com.neonsong.app.ui.common.TrackMenuTarget
@@ -101,7 +103,6 @@ import com.neonsong.app.ui.player.LocalMiniPlayerScrollClearance
 import androidx.compose.foundation.background
 
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.Brush
@@ -118,7 +119,7 @@ private val EXPLORE_GENRES = listOf(
 )
 
 /**
- * YouTube Music styled search experience with live auto-complete suggestions,
+ * Apple-inspired Liquid Glass search experience with live auto-complete suggestions,
  * persistent search history, top result card, explore tags, and 4 tabs.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -140,7 +141,9 @@ fun SearchScreen(
     val focusManager = LocalFocusManager.current
 
     Box(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
         contentAlignment = Alignment.TopCenter,
     ) {
         Column(
@@ -148,119 +151,45 @@ fun SearchScreen(
                 .fillMaxSize()
                 .adaptiveContentWidth(maxWidth = 860.dp),
         ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .liquidGlassSurface(
-                    shape = SearchHeaderShape,
-                    borderWidth = 1.dp,
-                ),
-        ) {
+            // Top Header: Page Title "Search", Back Button, and Apple Music Style Filter Pills
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .windowInsetsPadding(
                         WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
                     )
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 6.dp, bottom = 10.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
             ) {
-                // Top Search Input Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     HeaderActionIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", onBack)
-                    Spacer(Modifier.width(10.dp))
-
-                    val pillBg = MaterialTheme.colorScheme.surfaceContainerHighest
-
-
-                    BasicTextField(
-                        value = state.query,
-                        onValueChange = viewModel::setQuery,
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(
-                            color = MaterialTheme.colorScheme.onSurface,
-                        ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(
-                            onSearch = {
-                                focusManager.clearFocus()
-                                viewModel.searchNow()
-                            },
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(46.dp),
-                        decorationBox = { innerTextField ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .liquidGlassSurface(
-                                        shape = CircleShape,
-                                        borderWidth = 1.dp,
-                                    )
-                                    .padding(horizontal = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Search,
-                                    contentDescription = null,
-                                    tint = if (state.query.isNotEmpty()) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.70f)
-                                    },
-                                    modifier = Modifier.size(20.dp),
-                                )
-                                Spacer(Modifier.width(10.dp))
-                                Box(
-                                    modifier = Modifier.weight(1f),
-                                    contentAlignment = Alignment.CenterStart,
-                                ) {
-                                    if (state.query.isEmpty()) {
-                                        Text(
-                                            text = if (state.tab == SearchTab.USERS) "Search Last.fm users\u2026"
-                                            else "Search YouTube Music\u2026",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.74f),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                    innerTextField()
-                                }
-                                if (state.query.isNotEmpty()) {
-                                    IconButton(
-                                        onClick = viewModel::clearQuery,
-                                        modifier = Modifier.size(28.dp),
-                                    ) {
-                                        Icon(
-                                            Icons.Filled.Clear,
-                                            contentDescription = "Clear",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
-                                }
-                            }
-                        },
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text = "Search",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground,
                     )
                 }
 
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
 
-                // Modern Segmented Filter Pills
+                // Apple Music styled Segmented Category Pills
                 SearchFilterPills(
                     selectedTab = state.tab,
                     onTabSelected = viewModel::setTab,
                 )
             }
-        }
 
-        Box(Modifier.fillMaxSize().safeHorizontalContentPadding()) {
+            // Middle Content Area
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .safeHorizontalContentPadding(),
+            ) {
             when {
                 // 1. Live Auto-Complete Suggestions (while actively typing)
                 state.isShowingSuggestions && state.suggestions.isNotEmpty() -> {
@@ -381,16 +310,13 @@ fun SearchScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
                                     EXPLORE_GENRES.forEach { genre ->
-                                        AssistChip(
+                                        LiquidGlassChip(
+                                            selected = false,
                                             onClick = {
                                                 focusManager.clearFocus()
                                                 viewModel.executeSearch(genre)
                                             },
                                             label = { Text(genre, style = MaterialTheme.typography.labelLarge) },
-                                            colors = AssistChipDefaults.assistChipColors(
-                                                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                                labelColor = MaterialTheme.colorScheme.onSurface,
-                                            ),
                                             shape = RoundedCornerShape(12.dp),
                                         )
                                     }
@@ -511,7 +437,37 @@ fun SearchScreen(
                 }
             }
         }
-    }
+
+            // Ergonomic Bottom Search Bar: smoothly floats right above the keyboard when open
+            val density = LocalDensity.current
+            val imeBottom = WindowInsets.ime.getBottom(density)
+            val isImeOpen = WindowInsets.isImeVisible || imeBottom > 0
+            val targetBottomPadding = if (isImeOpen) 8.dp else (12.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding())
+            val bottomPadding by animateDpAsState(
+                targetValue = targetBottomPadding,
+                animationSpec = tween(durationMillis = 150),
+                label = "searchBarImePadding",
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .imePadding()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = bottomPadding),
+            ) {
+                BottomSearchBar(
+                    query = state.query,
+                    onQueryChange = viewModel::setQuery,
+                    onSearch = {
+                        focusManager.clearFocus()
+                        viewModel.searchNow()
+                    },
+                    onClear = viewModel::clearQuery,
+                    tab = state.tab,
+                )
+            }
+        }
     }
 
     menuTarget?.let { target ->
@@ -539,7 +495,7 @@ fun SearchScreen(
     }
 }
 
-/** Featured Top Result Card styled after YouTube Music hero cards. */
+/** Featured top result with a responsive Liquid Glass hero surface. */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun TopResultCard(
@@ -551,22 +507,18 @@ private fun TopResultCard(
     onLongClick: (() -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(20.dp)
-    val containerColor = if (isPlaying) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.65f)
-    }
-    val cardContentColor = MaterialTheme.colorScheme.onSurface
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
-    Card(
-        shape = shape,
-        colors = CardDefaults.cardColors(
-            containerColor = containerColor,
-            contentColor = cardContentColor,
-        ),
+    val glassTouch = rememberLiquidTouchInteraction()
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp)
+            .liquidGlassSurface(
+                shape = shape,
+                accentTint = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                interactive = true,
+                interaction = glassTouch,
+            )
             .combinedClickable(
                 onClick = onPlay,
                 onLongClick = onLongClick?.let { action ->
@@ -612,10 +564,11 @@ private fun TopResultCard(
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                    modifier = Modifier.padding(bottom = 4.dp),
+                Box(
+                    modifier = Modifier
+                        .padding(bottom = 4.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
                 ) {
                     Text(
                         when (tab) {
@@ -841,7 +794,8 @@ private fun SearchResultRow(
             SearchTab.PLAYLISTS -> Icons.AutoMirrored.Filled.QueueMusic
             SearchTab.USERS -> Icons.Filled.Person
         }
-        Box(modifier = Modifier.size(44.dp)) {
+        val avatarSize = if (tab == SearchTab.ARTISTS || tab == SearchTab.USERS) 56.dp else 46.dp
+        Box(modifier = Modifier.size(avatarSize)) {
             ArtworkImage(
                 name = item.name,
                 artist = item.artist.orEmpty(),
@@ -865,11 +819,11 @@ private fun SearchResultRow(
                 overflow = TextOverflow.Ellipsis,
             )
             val subtitle = when (tab) {
-                SearchTab.TRACKS -> listOfNotNull(item.artist, item.subtitle).joinToString(" \u00b7 ")
-                SearchTab.ALBUMS -> item.subtitle ?: item.artist.orEmpty()
-                SearchTab.PLAYLISTS -> item.subtitle.orEmpty()
-                SearchTab.ARTISTS -> item.subtitle.orEmpty()
-                SearchTab.USERS -> listOfNotNull(item.artist, item.listeners?.let { "$it scrobbles" }).joinToString(" \u00b7 ")
+                SearchTab.TRACKS -> if (!item.artist.isNullOrBlank()) "Song \u2022 ${item.artist}" else "Song"
+                SearchTab.ALBUMS -> if (!item.artist.isNullOrBlank()) "Album \u2022 ${item.artist}" else "Album"
+                SearchTab.PLAYLISTS -> item.subtitle.orEmpty().ifBlank { "Playlist" }
+                SearchTab.ARTISTS -> "Artist"
+                SearchTab.USERS -> listOfNotNull(item.artist, item.listeners?.let { "$it scrobbles" }).joinToString(" \u2022 ")
             }
             if (subtitle.isNotBlank()) {
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -895,11 +849,11 @@ private fun SearchFilterPills(
     modifier: Modifier = Modifier,
 ) {
     val tabs = listOf(
-        SearchTab.TRACKS to "Tracks",
-        SearchTab.ARTISTS to "Artists",
-        SearchTab.ALBUMS to "Albums",
-        SearchTab.PLAYLISTS to "Playlists",
-        SearchTab.USERS to "Users",
+        SearchTab.TRACKS to "SONGS",
+        SearchTab.ARTISTS to "ARTISTS",
+        SearchTab.ALBUMS to "ALBUMS",
+        SearchTab.PLAYLISTS to "PLAYLISTS",
+        SearchTab.USERS to "USERS",
     )
     Row(
         modifier = modifier
@@ -910,39 +864,116 @@ private fun SearchFilterPills(
     ) {
         tabs.forEach { (tab, label) ->
             val selected = selectedTab == tab
-            val interactionSource = remember { MutableInteractionSource() }
-
-            val pillBg = when {
-                selected -> MaterialTheme.colorScheme.primary
-                else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f)
-            }
-
             val contentColor = when {
                 selected -> MaterialTheme.colorScheme.onPrimary
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             }
-
-            Surface(
+            LiquidGlassChip(
+                selected = selected,
+                onClick = { onTabSelected(tab) },
                 shape = CircleShape,
-                color = pillBg,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .clickable(
-                        interactionSource = interactionSource,
-                        indication = null,
-                        onClick = { onTabSelected(tab) },
-                    ),
-            ) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    ),
-                    color = contentColor,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp),
-                )
-            }
+                label = {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        ),
+                        color = contentColor,
+                    )
+                },
+            )
         }
     }
 }
 
+
+
+/**
+ * Ergonomic Bottom Search Bar designed after Apple Music & modern mobile ergonomics.
+ * Positioned at the bottom of the screen with automatic IME padding for thumb reachability.
+ */
+@Composable
+private fun BottomSearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+    onClear: () -> Unit,
+    tab: SearchTab,
+    modifier: Modifier = Modifier,
+) {
+    val focusManager = LocalFocusManager.current
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .liquidGlassSurface(
+                shape = RoundedCornerShape(28.dp),
+                borderWidth = 1.dp,
+                accentTint = MaterialTheme.colorScheme.primary,
+                interactive = true,
+            ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Search,
+                contentDescription = "Search",
+                tint = if (query.isNotEmpty()) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.70f)
+                },
+                modifier = Modifier.size(22.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                if (query.isEmpty()) {
+                    Text(
+                        text = if (tab == SearchTab.USERS) "Search Last.fm users\u2026" else "Search songs, albums, artists\u2026",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            focusManager.clearFocus()
+                            onSearch()
+                        },
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (query.isNotEmpty()) {
+                IconButton(
+                    onClick = onClear,
+                    modifier = Modifier.size(30.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Clear,
+                        contentDescription = "Clear search",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+}

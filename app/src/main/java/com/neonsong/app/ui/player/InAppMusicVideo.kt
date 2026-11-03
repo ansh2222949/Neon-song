@@ -18,16 +18,9 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -36,16 +29,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import kotlinx.coroutines.delay
 
 internal fun extractYouTubeVideoId(input: String): String {
     val trimmed = input.trim()
@@ -270,8 +260,8 @@ internal object MusicVideoHolder {
                   'enablejsapi': 1,
                   'fs': 0,
                   'disablekb': 1,
+                  'cc_load_policy': 0,
                   'rel': 0,
-                  'modestbranding': 1,
                   'iv_load_policy': 3,
                   'autohide': 1,
                   'start': Math.floor(startTime),
@@ -287,6 +277,10 @@ internal object MusicVideoHolder {
 
             function onPlayerReady(event) {
               isPlayerReady = true;
+              // The app's audio engine remains the only audible track source.
+              if (typeof event.target.mute === 'function') {
+                event.target.mute();
+              }
               if (startSec > 0 && typeof event.target.seekTo === 'function') {
                 event.target.seekTo(startSec, true);
               }
@@ -408,7 +402,6 @@ internal fun InAppMusicVideo(
     val cleanVideoId = remember(videoId) { extractYouTubeVideoId(videoId) }
 
     var isJsApiReady by remember { mutableStateOf(MusicVideoHolder.isJsReady) }
-    var isUiReady by remember { mutableStateOf(MusicVideoHolder.isJsReady) }
 
     val currentIsPlaying by rememberUpdatedState(isPlaying)
     val currentOnError by rememberUpdatedState(onError)
@@ -430,10 +423,6 @@ internal fun InAppMusicVideo(
         bridge.onReady = {
             isJsApiReady = true
             MusicVideoHolder.isJsReady = true
-            isUiReady = true
-        }
-        bridge.onPlaying = {
-            isUiReady = true
         }
         bridge.onProgress = { curMs, durMs ->
             currentOnProgress?.invoke(curMs.toLong(), durMs.toLong())
@@ -457,7 +446,6 @@ internal fun InAppMusicVideo(
     LaunchedEffect(cleanVideoId, isJsApiReady) {
         if (cleanVideoId.isNotBlank() && cleanVideoId != MusicVideoHolder.activeVideoId) {
             MusicVideoHolder.activeVideoId = cleanVideoId
-            isUiReady = false
             if (isJsApiReady) {
                 webView.evaluateJavascript("loadNewVideo('$cleanVideoId', $initialPositionSeconds);", null)
             } else {
@@ -479,12 +467,6 @@ internal fun InAppMusicVideo(
         if (isJsApiReady) {
             webView.evaluateJavascript("setPlayback($isPlaying);", null)
         }
-    }
-
-    // UI safety fallback: fade out spinner after 3.5s if not already ready
-    LaunchedEffect(cleanVideoId) {
-        delay(3500)
-        isUiReady = true
     }
 
     DisposableEffect(lifecycleOwner, webView) {
@@ -513,7 +495,6 @@ internal fun InAppMusicVideo(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black),
-        contentAlignment = Alignment.Center,
     ) {
         AndroidView(
             factory = { ctx ->
@@ -549,23 +530,5 @@ internal fun InAppMusicVideo(
             modifier = Modifier.fillMaxSize(),
         )
 
-        AnimatedVisibility(
-            visible = !isUiReady,
-            enter = fadeIn(animationSpec = tween(200)),
-            exit = fadeOut(animationSpec = tween(400)),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator(
-                    color = MaterialTheme.colorScheme.primary,
-                    strokeWidth = 3.dp,
-                    modifier = Modifier.size(36.dp),
-                )
-            }
-        }
     }
 }

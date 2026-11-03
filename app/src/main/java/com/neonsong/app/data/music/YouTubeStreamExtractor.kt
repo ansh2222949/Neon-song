@@ -17,6 +17,8 @@ import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
+private const val AUTO_MAX_VIDEO_HEIGHT = 720
+
 /**
  * Resolves the signed/ciphered YouTube media URLs that raw InnerTube player
  * responses no longer reliably expose. Extraction happens locally; no proxy
@@ -92,19 +94,26 @@ class YouTubeStreamExtractor @Inject constructor(
             throw IOException("YouTube returned no playable video streams for $videoId")
         }
 
-        // Group by resolution height (supports up to 2160p, 1440p, 1080p, 720p, 480p, 360p, 240p, 144p)
+        // Keep streams through 4K available. Prefer a hardware friendly MP4,
+        // then 30 fps over 60 fps so Auto favors smooth playback at full detail.
         val streamsByHeight = validStreams
             .map { stream ->
                 val h = parseResolutionHeight(stream.resolution, stream.height)
                 h to stream
             }
-            .filter { it.first > 0 }
+            .filter { it.first in 1..2160 }
             .groupBy({ it.first }, { it.second })
             .mapValues { (_, streams) ->
                 streams.maxWithOrNull(
                     compareBy<org.schabi.newpipe.extractor.stream.VideoStream> {
                         // Prefer MP4 container for broad hardware decoding compatibility
                         if (it.format?.mimeType?.contains("mp4", ignoreCase = true) == true) 1 else 0
+                    }.thenBy {
+                        // Auto favors the lighter 30 FPS stream; 60 FPS variants
+                        // remain available when they are the only option at a height.
+                        val is60 = runCatching { it.fps >= 50 }.getOrDefault(false) ||
+                            it.resolution.orEmpty().contains("60")
+                        if (is60) 0 else 1
                     }.thenBy { it.bitrate }
                 )!!
             }
@@ -116,27 +125,10 @@ class YouTubeStreamExtractor @Inject constructor(
             throw IOException("YouTube returned no valid video stream resolutions for $videoId")
         }
 
-        // For default (Auto), prefer 720p or 1080p for instant playback without buffer stalls
-        val autoCandidates = availableStreams.sortedWith(
-            compareByDescending { stream ->
-                val h = stream.height ?: 0
-                when (h) {
-                    720 -> 100
-                    1080 -> 95
-                    480 -> 80
-                    1440 -> 75
-                    2160 -> 70
-                    360 -> 60
-                    else -> 40
-                }
-            }
-        )
-        val playableDefault = selectProbedCandidate(
-            candidates = autoCandidates,
-            urlOf = { it.url },
-            probe = ::probePlayableVideo,
-            limit = MAX_PROBED_AUDIO_STREAMS,
-        ) ?: availableStreams.first()
+        // Auto balances sharpness with reliable decoding on phones. Higher
+        // resolutions remain available in the quality picker for manual use.
+        val playableDefault = availableStreams.firstOrNull { (it.height ?: 0) <= AUTO_MAX_VIDEO_HEIGHT }
+            ?: availableStreams.last()
 
         SyncedVideoStreamBundle(
             videoId = videoId,
@@ -184,6 +176,7 @@ class YouTubeStreamExtractor @Inject constructor(
             resolution = resolution,
             width = width.takeIf { it > 0 },
             height = height.takeIf { it > 0 },
+            fps = runCatching { fps }.getOrNull()?.takeIf { it > 0 },
             bitrate = bitrate.takeIf { it > 0 },
             durationMs = itagItem?.approxDurationMs?.takeIf { it > 0 }
                 ?: durationSeconds.takeIf { it > 0 }?.times(1_000L),

@@ -384,6 +384,7 @@ class MusicPlayer @Inject constructor(
     private var queueEnrichmentJob: Job? = null
     private var recommendationJob: Job? = null
     private var preloadJob: Job? = null
+    private var autoDJStandbyFallbackJob: Job? = null
     private var currentTrackCacheJob: Job? = null
     private val resolutionRequests = ConcurrentHashMap<List<Any?>, Pair<Long, Deferred<ResolvedStream>>>()
     private var discoverQueueLoadJob: Job? = null
@@ -482,6 +483,9 @@ class MusicPlayer @Inject constructor(
     private fun currentAutoMixState(): AutoMixState =
         if (nativeAutoMixEngine.get().isAvailable) nativeAutoMixEngine.get().state else AutoMixState.IDLE
 
+    private val isAutoDJActive: Boolean
+        get() = runCatching { autoDJController.get().isEnabled }.getOrDefault(false)
+
     private fun currentAutoDJStatusString(): String? =
         when (val s = autoDJController.get().status.value) {
             is AutoDJStatus.Resolving -> "Resolving ${s.title}"
@@ -498,37 +502,89 @@ class MusicPlayer @Inject constructor(
             return _state.value.queue.size
         }
         override fun getCurrentIndex(): Int {
+            if (Looper.myLooper() == Looper.getMainLooper() && playerDelegate.isInitialized()) {
+                return player.currentMediaItemIndex
+            }
             return _state.value.currentIndex
         }
+        override fun getNextQueueIndex(): Int {
+            if (Looper.myLooper() == Looper.getMainLooper() && playerDelegate.isInitialized()) {
+                return player.nextMediaItemIndex
+            }
+            return _state.value.currentIndex + 1
+        }
         override fun isCurrentItem(index: Int): Boolean {
+            if (Looper.myLooper() == Looper.getMainLooper() && playerDelegate.isInitialized()) {
+                return player.currentMediaItemIndex == index
+            }
             return _state.value.currentIndex == index
         }
+        override suspend fun resolvePreferredStream(track: PlayableTrack): ResolvedStream? =
+            resolvePreferredQueueStream(track)
+
         override fun registerResolvedStream(index: Int, track: PlayableTrack, stream: ResolvedStream) {
             onMain {
+                if (!playerDelegate.isInitialized() || index !in 0 until player.mediaItemCount ||
+                    index == player.currentMediaItemIndex
+                ) return@onMain
+                val queuedItem = player.getMediaItemAt(index)
+                if (queuedItem.mediaId != track.mediaIdKey()) {
+                    android.util.Log.d(
+                        "MusicPlayer",
+                        "Ignoring stale AutoDJ stream for ${track.mediaIdKey()} at index=$index; queue contains ${queuedItem.mediaId}",
+                    )
+                    return@onMain
+                }
+                val existing = queuedItem.localConfiguration?.customCacheKey?.let(preparedStreams::get)
+                    ?: preparedStreams.values.firstOrNull {
+                        it.url == queuedItem.localConfiguration?.uri?.toString()
+                    }
+                if (existing != null && !existing.isExpired() && !isWorthSwapping(existing, stream)) {
+                    return@onMain
+                }
                 registerPreparedStream(stream)
                 stagePendingQuality(track.mediaIdKey(), stream)
                 track.videoId?.let { stagePendingQuality(it, stream) }
-                if (index in 0 until player.mediaItemCount) {
-                    replaceMediaItemPreservingShuffle(index, track.toMediaItem(stream))
-                }
+                replaceMediaItemPreservingShuffle(index, track.toMediaItem(stream))
             }
         }
         override fun armStandbyForNext(index: Int, track: PlayableTrack) {
             onMain {
-                if (index in 0 until player.mediaItemCount) {
-                    val nextItem = player.getMediaItemAt(index)
-                    armCrossfadeStandby(index, nextItem)
-                }
+                if (index !in 0 until player.mediaItemCount || index == player.currentMediaItemIndex) return@onMain
+                val nextItem = player.getMediaItemAt(index)
+                if (nextItem.mediaId != track.mediaIdKey()) return@onMain
+                armCrossfadeStandby(index, nextItem)
             }
+        }
+        override fun isStandbyReady(index: Int): Boolean {
+            val standby = currentStandby()
+            if (Looper.myLooper() != Looper.getMainLooper() || !playerDelegate.isInitialized()) return false
+            if (index != player.nextMediaItemIndex || index != standbyIndex || index !in 0 until player.mediaItemCount) return false
+            val expectedMediaId = player.getMediaItemAt(index).mediaId
+            return standby != null && crossfadeStandbyArmed &&
+                standby.currentMediaItem?.mediaId == expectedMediaId &&
+                standby.playbackState == Player.STATE_READY
         }
         override fun triggerAutoTransition(overlapMs: Long) {
             onMain {
-                runCatching { nativeAutoMixEngine.get().triggerFadeNow() }
                 val standby = currentStandby()
                 val nextIndex = player.nextMediaItemIndex
-                if (standby != null && crossfadeStandbyArmed && standby.playbackState == Player.STATE_READY) {
+                val expectedMediaId = nextIndex.takeIf { it in 0 until player.mediaItemCount }
+                    ?.let { player.getMediaItemAt(it).mediaId }
+                val standbyMatchesNext = standby != null && crossfadeStandbyArmed &&
+                    standbyIndex == nextIndex && expectedMediaId != null &&
+                    standby.currentMediaItem?.mediaId == expectedMediaId
+                if (standby != null && standbyMatchesNext && standby.playbackState == Player.STATE_READY) {
+                    autoDJStandbyFallbackJob?.cancel()
+                    autoDJStandbyFallbackJob = null
+                    if (automixEnabled || autoDJController.get().isEnabled) {
+                        runCatching { nativeAutoMixEngine.get().triggerFadeDurationMs(overlapMs) }
+                    }
                     handOffCrossfade(standby, overlapMs)
+                } else if (standby != null && standbyMatchesNext && standby.playbackState == Player.STATE_BUFFERING) {
+                    scheduleAutoDJStandbyFallback(nextIndex, player.currentMediaItemIndex, overlapMs)
                 } else if (nextIndex != C.INDEX_UNSET && nextIndex in 0 until player.mediaItemCount) {
+                    android.util.Log.w("MusicPlayer", "AutoDJ standby did not match the queued next item; starting queue item directly")
                     resolveAndPlayQueueItem(nextIndex)
                 }
             }
@@ -1437,8 +1493,9 @@ class MusicPlayer @Inject constructor(
                         val rateHz = format.sampleRate
                         val sampleMime = format.sampleMimeType?.lowercase().orEmpty()
                         val detectedCodec = when {
-                            sampleMime.contains("eac3") || sampleMime.contains("ec-3") ||
-                                sampleMime.contains("ac-3") || sampleMime.contains("ac3") -> "DOLBY ATMOS"
+                            LosslessMusicApi.isAtmosCodec(sampleMime) -> "DOLBY ATMOS"
+                            LosslessMusicApi.isEac3Codec(sampleMime) -> "DOLBY DIGITAL PLUS"
+                            LosslessMusicApi.isAc3Codec(sampleMime) -> "DOLBY DIGITAL"
                             sampleMime.contains("mha1") || sampleMime.contains("mhm1") -> "SPATIAL AUDIO"
                             sampleMime.contains("opus") -> "OPUS"
                             sampleMime.contains("flac") -> "FLAC"
@@ -1862,6 +1919,7 @@ class MusicPlayer @Inject constructor(
                 runCatching {
                     nativeAutoMixEngine.get().setEnabled(settings.automixEnabled)
                     nativeAutoMixEngine.get().setBarMode(settings.automixBars)
+                    nativeAutoMixEngine.get().setCurveType(settings.automixCurveType)
                 }
                 audioSinks.forEach { sink -> sink.setAutoMixEnabled(settings.automixEnabled) }
                 val wasBitPerfect = bitPerfectEnabled
@@ -1962,7 +2020,7 @@ class MusicPlayer @Inject constructor(
         )
         if (startRadio) {
             _state.update { it.copy(isEndlessQueue = true) }
-            startRadioQueue(track)
+            // Deferred to startup follow-up to prevent race conditions with initial stream resolution
         }
     }
 
@@ -2027,7 +2085,7 @@ class MusicPlayer @Inject constructor(
         )
         if (enableRadioContinuation) {
             _state.update { it.copy(isEndlessQueue = true) }
-            startRadioQueue(tracks[selectedIndex])
+            // Deferred to startup follow-up to prevent race conditions with initial stream resolution
         }
     }
 
@@ -2176,6 +2234,9 @@ class MusicPlayer @Inject constructor(
                     scheduleStartupFollowUp {
                         preloadNextQueueItem(selectedIndex)
                         scheduleDeferredRecommendations()
+                        if (radioQueueActive) {
+                            startRadioQueue(playbackTrack)
+                        }
                     }
                 }
             } catch (cancellation: CancellationException) {
@@ -2692,6 +2753,8 @@ class MusicPlayer @Inject constructor(
 
     @MainThread
     private fun cancelCrossfade() {
+        autoDJStandbyFallbackJob?.cancel()
+        autoDJStandbyFallbackJob = null
         crossfadeStandbyArmed = false
         crossfadeStandbyPreparing = false
         lastCrossfadeLogKey = null
@@ -2705,14 +2768,17 @@ class MusicPlayer @Inject constructor(
             )
         }
         if (!playerDelegate.isInitialized()) return
+        val outgoing = outgoingPlayer
         outgoingPlayer = null
+        outgoing?.stop()
+        outgoing?.clearMediaItems()
         val standby = if (player === secondaryPlayer) playerDelegate.value else secondaryPlayer
         standby?.stop()
         standby?.clearMediaItems()
         standbyQueue = emptyList()
         standbyIndex = C.INDEX_UNSET
         player.volume = 1f
-        setAutoMixRoles(player, standby)
+        setAutoMixRoles(player, null)
     }
 
     /**
@@ -2764,6 +2830,45 @@ class MusicPlayer @Inject constructor(
         )
     }
 
+    @MainThread
+    private fun scheduleAutoDJStandbyFallback(nextIndex: Int, currentIndex: Int, overlapMs: Long) {
+        if (autoDJStandbyFallbackJob?.isActive == true) return
+        if (nextIndex !in 0 until player.mediaItemCount || currentIndex != player.currentMediaItemIndex) return
+        val currentMediaId = player.currentMediaItem?.mediaId ?: return
+        val nextMediaId = player.getMediaItemAt(nextIndex).mediaId
+        autoDJStandbyFallbackJob = applicationScope.launch {
+            delay(AUTO_DJ_STANDBY_GRACE_MS)
+            withContext(Dispatchers.Main.immediate) {
+                if (!playerDelegate.isInitialized() ||
+                    player.currentMediaItemIndex != currentIndex ||
+                    player.currentMediaItem?.mediaId != currentMediaId ||
+                    player.nextMediaItemIndex != nextIndex ||
+                    nextIndex !in 0 until player.mediaItemCount ||
+                    player.getMediaItemAt(nextIndex).mediaId != nextMediaId
+                ) return@withContext
+
+                val standby = currentStandby()
+                val standbyReadyForNext = standby != null && crossfadeStandbyArmed &&
+                    standbyIndex == nextIndex &&
+                    standby.currentMediaItem?.mediaId == nextMediaId &&
+                    standby.playbackState == Player.STATE_READY
+                if (standby != null && standbyReadyForNext) {
+                    if (automixEnabled || autoDJController.get().isEnabled) {
+                        runCatching { nativeAutoMixEngine.get().triggerFadeDurationMs(overlapMs) }
+                    }
+                    handOffCrossfade(standby, overlapMs)
+                } else {
+                    logCrossfadeDecision(
+                        "standby-timeout",
+                        "index=$nextIndex state=${standby?.playbackState} -> direct queue start",
+                    )
+                    _state.update { it.copy(isBuffering = false) }
+                    resolveAndPlayQueueItem(nextIndex)
+                }
+            }
+        }
+    }
+
     /**
      * One line per crossfade decision, rate-limited per key. Only the hand-off
      * used to log, which is why a missed fade was indistinguishable from a
@@ -2781,12 +2886,14 @@ class MusicPlayer @Inject constructor(
 
     @MainThread
     private fun updateCrossfade(positionMs: Long): Boolean {
-        if ((!crossfadeEnabled && !automixEnabled) || bitPerfectEnabled) return false
+        val isAutoDJ = runCatching { autoDJController.get().isEnabled }.getOrDefault(false)
+        if ((!crossfadeEnabled && !automixEnabled && !isAutoDJ) || bitPerfectEnabled) return false
         outgoingPlayer?.let { outgoing ->
             // Drive the blend off the incoming (active) player position so a
             // pause parks the fade instead of counting down underneath it.
             val incomingPos = runCatching { player.currentPosition.coerceAtLeast(0L) }.getOrDefault(0L)
-            val progress = if (automixEnabled && autoMixHandoffStartedAtMs > 0L) {
+            val isEngineFading = automixEnabled || isAutoDJ
+            val progress = if (isEngineFading && autoMixHandoffStartedAtMs > 0L) {
                 ((SystemClock.elapsedRealtime() - autoMixHandoffStartedAtMs).toFloat() /
                     overlapDurationMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
             } else {
@@ -2794,21 +2901,23 @@ class MusicPlayer @Inject constructor(
             }
             if (progress >= 1f || outgoing.playbackState == Player.STATE_ENDED || outgoing.playerError != null) {
                 cancelCrossfade()
-            } else if (automixEnabled) {
-                // The outgoing native sink owns the audible blend. The
-                // incoming deck is only kept running to feed/align PCM.
-                player.volume = 0f
-                outgoing.volume = 1f
-                outgoing.playWhenReady = true
             } else {
-                // Perceptual fade: outgoing ramps down, incoming ramps up.
-                // Equal-power sin/cos kept both near full level for most of
-                // the window, which sounded like two songs mixed together.
-                val outGain = (1f - progress) * (1f - progress)
-                val inGain = progress * progress
-                player.volume = inGain
-                outgoing.volume = outGain
-                outgoing.playWhenReady = player.isPlaying
+                val isNativeSinkBlending = automixEnabled && nativeAutoMixEngine.get().isAvailable &&
+                    nativeAutoMixEngine.get().state != AutoMixState.IDLE
+
+                if (isNativeSinkBlending) {
+                    // The outgoing native sink owns the audible blend in C++.
+                    player.volume = 0f
+                    outgoing.volume = 1f
+                    outgoing.playWhenReady = true
+                } else {
+                    // Smooth perceptual fade: outgoing ramps down, incoming ramps up seamlessly
+                    val outGain = (1f - progress) * (1f - progress)
+                    val inGain = progress * progress
+                    player.volume = inGain
+                    outgoing.volume = outGain
+                    outgoing.playWhenReady = true
+                }
             }
             return false
         }
@@ -3006,10 +3115,10 @@ class MusicPlayer @Inject constructor(
         outgoing.removeMediaItems(outgoing.currentMediaItemIndex + 1, outgoing.mediaItemCount)
         outgoingPlayer = outgoing
         activePlayer = standby
-        if (automixEnabled) {
-            // Keep the outgoing deck as the native audible master. The new
-            // deck is decoded into the native ring while its platform output
-            // remains suppressed until the blend completes.
+        val isNativeSinkBlending = automixEnabled && nativeAutoMixEngine.get().isAvailable &&
+            nativeAutoMixEngine.get().state != AutoMixState.IDLE
+        if (isNativeSinkBlending) {
+            // Keep the outgoing deck as the native audible master.
             setAutoMixRoles(outgoing, standby)
         }
         standby.addListener(listener)
@@ -3020,6 +3129,26 @@ class MusicPlayer @Inject constructor(
         crossfadeStandbyArmed = false
         crossfadeStandbyPreparing = false
         lastCrossfadeLogKey = null
+
+        // Immediately update player state to the new track so the UI never freezes on the previous song
+        val nextTrack = standby.currentMediaItem?.toPlayableTrack()
+            ?: _state.value.queue.getOrNull(standby.currentMediaItemIndex)
+        if (nextTrack != null) {
+            _state.update {
+                it.copy(
+                    current = nextTrack,
+                    currentIndex = standby.currentMediaItemIndex,
+                    durationMs = standby.duration.takeIf { d -> d > 0 } ?: nextTrack.durationMs ?: 0L,
+                    positionMs = 0L,
+                    isPlaying = true,
+                    isBuffering = false,
+                )
+            }
+        }
+        playheadKey = nextTrack?.mediaIdKey()
+        playheadPosMs = 0L
+        playheadWallMs = SystemClock.elapsedRealtime()
+        playheadMoving = true
         android.util.Log.i(
             "MusicPlayer",
             "Crossfade: handing off '${outgoing.currentMediaItem?.mediaMetadata?.title}' -> " +
@@ -3081,6 +3210,9 @@ class MusicPlayer @Inject constructor(
             engines.forEach { engine ->
                 runCatching { engine.setEqualizer(false, zeros) }
                 runCatching { engine.setStudioMasterClarity(false) }
+                runCatching { engine.setBauerCrossfeedEnabled(false) }
+                runCatching { engine.setAnalogTubeWarmthEnabled(false) }
+                runCatching { engine.setMonoBassEnabled(false) }
                 engine.systemFlattened = true
             }
         } else {
@@ -3098,6 +3230,9 @@ class MusicPlayer @Inject constructor(
                         runCatching { engine.setStudioMasterClarity(misc.isStudioMasterClarityEnabled) }
                         runCatching { engine.setClarityPreset(ClarityPresets.fromIndex(misc.clarityPreset)) }
                         runCatching { engine.setClarityAtmosBypass(misc.clarityAtmosBypass) }
+                        runCatching { engine.setBauerCrossfeedEnabled(misc.bauerCrossfeedEnabled) }
+                        runCatching { engine.setAnalogTubeWarmthEnabled(misc.analogTubeWarmthEnabled) }
+                        runCatching { engine.setMonoBassEnabled(misc.monoBassEnabled) }
                     }
                 }
             }
@@ -3934,7 +4069,7 @@ class MusicPlayer @Inject constructor(
         if (!alreadyAudible) {
             player.seekToDefaultPosition(index)
         }
-        if (player.playbackState == Player.STATE_IDLE) {
+        if (player.playbackState == Player.STATE_IDLE || player.playbackState == Player.STATE_ENDED) {
             PlaybackStartupLog.prepareStart()
             player.prepare()
         }
@@ -4551,14 +4686,55 @@ class MusicPlayer @Inject constructor(
         warmArtwork(nextTrack)
         preloadJob?.cancel()
         preloadJob = null
-        streamResolver.prefetchNext(identity, nextTrack.durationMs) { entry ->
-            if (entry.youtubeVideoId != identity.youtubeVideoId) {
-                streamResolver.cache.invalidate(identity)
-                return@prefetchNext
+        val preferLossless = cachedMiscSettings.preferLosslessStreaming &&
+            cachedMiscSettings.losslessQuality != LosslessMusicApi.QUALITY_YOUTUBE
+
+        if (preferLossless) {
+            // Resolve the configured premium source before starting the lossy
+            // extraction. The next queue item is installed only after this
+            // finishes, so ordinary (non-DJ) playback also starts lossless.
+            preloadJob = applicationScope.launch(Dispatchers.IO) {
+                val preferred = resolvePreferredQueueStream(nextTrack)
+                if (preferred != null && installPrefetchedQueueStream(identity, nextIndex, nextTrack, preferred)) {
+                    return@launch
+                }
+
+                var fallbackJob: Job? = null
+                try {
+                    fallbackJob = streamResolver.prefetchNext(identity, nextTrack.durationMs) { entry ->
+                        if (entry.youtubeVideoId != identity.youtubeVideoId) {
+                            streamResolver.cache.invalidate(identity)
+                            return@prefetchNext
+                        }
+                        installPrefetchedQueueStream(identity, nextIndex, nextTrack, entry.toPlayerStream())
+                    }
+                    fallbackJob?.join()
+                } finally {
+                    if (!currentCoroutineContext().isActive) fallbackJob?.cancel()
+                }
             }
-            val resolved = entry.toPlayerStream()
+        } else {
+            preloadJob = streamResolver.prefetchNext(identity, nextTrack.durationMs) { entry ->
+                if (entry.youtubeVideoId != identity.youtubeVideoId) {
+                    streamResolver.cache.invalidate(identity)
+                    return@prefetchNext
+                }
+                installPrefetchedQueueStream(identity, nextIndex, nextTrack, entry.toPlayerStream())
+            }
+        }
+    }
+
+    private suspend fun installPrefetchedQueueStream(
+        identity: TrackIdentity,
+        nextIndex: Int,
+        requestedTrack: PlayableTrack,
+        resolved: ResolvedStream,
+    ): Boolean {
+        if (resolved.isExpired()) return false
+        val uri = Uri.parse(resolved.url)
+        if (uri.scheme == "http" || uri.scheme == "https") {
             val dataSpec = DataSpec.Builder()
-                .setUri(Uri.parse(resolved.url))
+                .setUri(uri)
                 .setPosition(0)
                 .setLength(NEXT_TRACK_PREFETCH_BYTES)
                 .setKey(resolved.cacheKey)
@@ -4582,30 +4758,42 @@ class MusicPlayer @Inject constructor(
             }.exceptionOrNull()
             if (rejected is CancellationException) throw rejected
             if (rejected != null) {
-                logResolutionFailure(nextTrack, "next-cache", 0, rejected)
+                logResolutionFailure(requestedTrack, "next-cache", 0, rejected)
                 val status = rejected.httpStatusCodeOrNull()
                 if (status == 403 || status == 410) {
-                    streamResolver.cache.invalidate(identity)
-                    innerTube.reportPlaybackFailure(identity.youtubeVideoId)
-                    return@prefetchNext
+                    if (!resolved.isLossless) {
+                        streamResolver.cache.invalidate(identity)
+                        innerTube.reportPlaybackFailure(identity.youtubeVideoId)
+                    }
+                    return false
                 }
             }
-            withContext(Dispatchers.Main.immediate) {
-                if (streamResolver.playback.requested == identity) return@withContext
-                val queuedTrack = if (nextIndex in 0 until player.mediaItemCount) {
-                    player.getMediaItemAt(nextIndex).toPlayableTrack()
-                } else {
-                    null
-                } ?: return@withContext
-                if (queuedTrack.videoId != identity.youtubeVideoId || nextIndex == player.currentMediaItemIndex) {
-                    return@withContext
-                }
-                registerPreparedStream(resolved)
-                stagePendingQuality(queuedTrack.mediaIdKey(), resolved)
-                queuedTrack.videoId?.let { stagePendingQuality(it, resolved) }
-                replaceMediaItemPreservingShuffle(nextIndex, queuedTrack.toMediaItem(resolved))
-                logStreamEvent("next-prepared", resolved, retry = 0)
+        }
+
+        return withContext(Dispatchers.Main.immediate) {
+            if (!playerDelegate.isInitialized() || streamResolver.playback.requested == identity) {
+                return@withContext true
             }
+            if (nextIndex !in 0 until player.mediaItemCount || nextIndex == player.currentMediaItemIndex) {
+                return@withContext true
+            }
+            val queuedItem = player.getMediaItemAt(nextIndex)
+            val queuedTrack = queuedItem.toPlayableTrack()
+            if (queuedTrack.videoId != identity.youtubeVideoId ||
+                queuedTrack.mediaIdKey() != requestedTrack.mediaIdKey()
+            ) return@withContext true
+
+            val existing = queuedItem.localConfiguration?.customCacheKey?.let(preparedStreams::get)
+                ?: preparedStreams.values.firstOrNull { it.url == queuedItem.localConfiguration?.uri?.toString() }
+            if (existing != null && !existing.isExpired() && !isWorthSwapping(existing, resolved)) {
+                return@withContext true
+            }
+            registerPreparedStream(resolved)
+            stagePendingQuality(queuedTrack.mediaIdKey(), resolved)
+            queuedTrack.videoId?.let { stagePendingQuality(it, resolved) }
+            replaceMediaItemPreservingShuffle(nextIndex, queuedTrack.toMediaItem(resolved))
+            logStreamEvent("next-prepared", resolved, retry = 0)
+            true
         }
     }
 
@@ -5079,6 +5267,7 @@ class MusicPlayer @Inject constructor(
 
                 withContext(Dispatchers.Main.immediate) {
                     if (!radioQueueActive || !playerDelegate.isInitialized()) return@withContext
+                    if (playRequest?.isActive == true || player.mediaItemCount == 0) return@withContext
                     val current = player.currentMediaItem?.toPlayableTrack() ?: _state.value.current
                     val stillCurrentSeed = resumePlaybackImmediately ||
                         (seed.videoId != null && current?.videoId == seed.videoId) ||
@@ -5097,8 +5286,9 @@ class MusicPlayer @Inject constructor(
                         enrichUpcomingQueue(player.currentMediaItemIndex)
 
                         val isPlayerStoppedAtEnd = player.playbackState == Player.STATE_ENDED &&
+                            previousCount > 0 &&
                             player.currentMediaItemIndex >= previousCount - 1
-                        if (isPlayerStoppedAtEnd || resumePlaybackImmediately) {
+                        if ((isPlayerStoppedAtEnd || resumePlaybackImmediately) && playRequest?.isActive != true) {
                             val nextToPlay = previousCount.coerceIn(0, player.mediaItemCount - 1)
                             android.util.Log.i("MusicPlayer", "Queue expired/started: auto-resuming endless playback at index $nextToPlay")
                             resolveAndPlayQueueItem(nextToPlay)
@@ -5228,8 +5418,13 @@ class MusicPlayer @Inject constructor(
         val currentUriScheme = currentMediaItem?.localConfiguration?.uri?.scheme
         val mediaId = currentMediaItem?.mediaId
         // If this track is actively resolving or is a neonsong placeholder, it has NOT played yet;
-        // never auto-advance or skip past it.
-        if (currentUriScheme == "neonsong") return
+        // resolve and start it immediately if the engine stopped on it.
+        if (currentUriScheme == "neonsong") {
+            if (player.playbackState == Player.STATE_ENDED || player.playbackState == Player.STATE_IDLE) {
+                resolveAndPlayQueueItem(currentIndex)
+            }
+            return
+        }
         if (mediaId != null && resolvingMediaIds.containsKey(mediaId)) return
 
         // REPEAT_ONE loops the same track: always replay the current item, never advance
@@ -5249,10 +5444,10 @@ class MusicPlayer @Inject constructor(
         val pos = runCatching { player.currentPosition }.getOrDefault(0L)
 
         // If the current track is near the start (just transitioned / resolving),
-        // do not auto-advance past it.
-        if (pos < 2_000L && (trueDurMs > 5_000L || currentUriScheme == "neonsong")) return
+        // do not auto-advance past it unless the engine explicitly ended playback.
+        if (pos < 2_000L && player.playbackState != Player.STATE_ENDED && (trueDurMs > 5_000L || currentUriScheme == "neonsong")) return
 
-        val stuckAtEnd = (player.playbackState == Player.STATE_ENDED && (pos >= trueDurMs - END_OF_TRACK_STALL_THRESHOLD_MS || trueDurMs <= 0L || pos > 2_000L)) ||
+        val stuckAtEnd = player.playbackState == Player.STATE_ENDED ||
             (
                 trueDurMs > 0L &&
                     pos >= trueDurMs - END_OF_TRACK_STALL_THRESHOLD_MS &&
@@ -5867,11 +6062,15 @@ class MusicPlayer @Inject constructor(
                     ?: dao.getAllList().firstOrNull { entity ->
                         val eTitle = entity.title.trim()
                         val eArtist = entity.artist.trim()
-                        eTitle.equals(title, ignoreCase = true) && eArtist.equals(artist, ignoreCase = true) ||
-                            cleanTrackTitle(eTitle).equals(cleanTitle, ignoreCase = true) &&
-                            (cleanTrackArtist(eArtist).equals(cleanArtist, ignoreCase = true) ||
-                             eArtist.contains(cleanArtist, ignoreCase = true) ||
-                             cleanArtist.contains(eArtist, ignoreCase = true))
+                        val titleMatches = eTitle.equals(title, ignoreCase = true) ||
+                            cleanTrackTitle(eTitle).equals(cleanTitle, ignoreCase = true)
+                        val artistMatches = when {
+                            cleanArtist.isBlank() -> eArtist.isBlank()
+                            cleanArtist.length < 3 -> eArtist.equals(cleanArtist, ignoreCase = true)
+                            else -> cleanTrackArtist(eArtist).equals(cleanArtist, ignoreCase = true) ||
+                                (eArtist.isNotBlank() && (eArtist.contains(cleanArtist, ignoreCase = true) || cleanArtist.contains(eArtist, ignoreCase = true)))
+                        }
+                        titleMatches && artistMatches
                     }
             }.getOrNull()
         }
@@ -6103,6 +6302,7 @@ class MusicPlayer @Inject constructor(
         excludedLosslessUrls: Set<String> = emptySet(),
         expectedDurationSeconds: Int? = null,
     ): ResolvedStream? {
+        if (!misc.preferLosslessStreaming) return null
         val atmosSupported = isSpatialAudioSupportedOnDevice()
         // Atmos plays only when explicitly selected (quality 28) AND the device
         // can render it. No toggle, no auto-upgrade: any other tier never becomes Atmos.
@@ -6124,13 +6324,12 @@ class MusicPlayer @Inject constructor(
         if (stream.url.isBlank() || stream.url in excludedLosslessUrls) return null
 
         val manifestCodec = LosslessMusicApi.manifestCodecOf(stream.url)?.lowercase()
+        val codecEvidence = manifestCodec ?: stream.mimeType
         val manifestIsLossy = manifestCodec?.let {
-            it.contains("opus") || it.contains("mp4a") || it.contains("aac") || it.contains("mp3")
-        } == true
-        val manifestIsSpatial = manifestCodec?.let {
-            it.contains("ec-3") || it.contains("eac3") || it.contains("ac-3") ||
-                it.contains("mha1") || it.contains("mhm1")
-        } == true
+            it.contains("opus") || it.contains("mp4a") || it.contains("aac") || it.contains("mp3") ||
+                LosslessMusicApi.isLossyDolbyCodec(it)
+        } == true || LosslessMusicApi.isLossyDolbyCodec(stream.mimeType)
+        val manifestIsSpatial = LosslessMusicApi.isSpatialAudioCodec(codecEvidence)
         // Immersive mixes are premium but never bit-exact: exclude them
         // from the lossless flag even though their carrier is not lossy.
         val isLossless = !manifestIsLossy && !manifestIsSpatial &&
@@ -6140,15 +6339,15 @@ class MusicPlayer @Inject constructor(
             !stream.mimeType.contains("mp3", ignoreCase = true) &&
             !stream.mimeType.contains("aac", ignoreCase = true)
 
+        val dolbyCodecBadge = LosslessMusicApi.dolbyCodecLabel(codecEvidence)
         val manifestCodecBadge = when {
-            manifestCodec?.contains("ec-3") == true || manifestCodec?.contains("eac3") == true ||
-                manifestCodec?.contains("ac-3") == true -> "DOLBY ATMOS"
-            manifestCodec?.contains("mha1") == true || manifestCodec?.contains("mhm1") == true -> "SPATIAL AUDIO"
-            manifestCodec?.contains("flac") == true ->
+            dolbyCodecBadge != null -> dolbyCodecBadge
+            codecEvidence.contains("mha1", ignoreCase = true) || codecEvidence.contains("mhm1", ignoreCase = true) -> "SPATIAL AUDIO"
+            codecEvidence.contains("flac", ignoreCase = true) ->
                 if (stream.bitDepth > 16 || stream.samplingRate > 48.0) "HI-RES FLAC" else "FLAC"
-            manifestCodec?.contains("opus") == true -> "OPUS"
-            manifestCodec?.contains("mp4a") == true || manifestCodec?.contains("aac") == true -> "AAC"
-            manifestCodec?.contains("mp3") == true -> "MP3"
+            codecEvidence.contains("opus", ignoreCase = true) -> "OPUS"
+            codecEvidence.contains("mp4a", ignoreCase = true) || codecEvidence.contains("aac", ignoreCase = true) -> "AAC"
+            codecEvidence.contains("mp3", ignoreCase = true) -> "MP3"
             else -> null
         }
         val effectiveRate = if (stream.samplingRate > 1000.0) stream.samplingRate / 1000.0 else stream.samplingRate
@@ -6207,10 +6406,8 @@ class MusicPlayer @Inject constructor(
             }
             // Verify the stereo fallback isn't spatial too
             val stereoManifestCodec = LosslessMusicApi.manifestCodecOf(stereoStream.url)?.lowercase()
-            val stereoIsSpatial = stereoManifestCodec?.let {
-                it.contains("ec-3") || it.contains("eac3") || it.contains("ac-3") ||
-                    it.contains("mha1") || it.contains("mhm1")
-            } == true || stereoStream.audioCodecOverride == "DOLBY ATMOS"
+            val stereoIsSpatial = LosslessMusicApi.isSpatialAudioCodec(stereoManifestCodec) ||
+                stereoStream.audioCodecOverride == "DOLBY ATMOS"
             if (stereoIsSpatial) {
                 android.util.Log.w("MusicPlayer", "[LOSSLESS] stereo fallback still spatial for '${track.title}'; giving up")
                 return null
@@ -6282,6 +6479,36 @@ class MusicPlayer @Inject constructor(
                 ?: findKnownDuration(track),
             expiresAtEpochMs = addonUrlExpiryMs(playUrl),
         )
+    }
+
+    /** Resolve the configured premium stream for an upcoming DJ deck before
+     * the YouTube-only extraction fallback is considered. */
+    private suspend fun resolvePreferredQueueStream(track: PlayableTrack): ResolvedStream? {
+        val misc = cachedMiscSettings
+        if (!misc.preferLosslessStreaming ||
+            misc.losslessQuality == LosslessMusicApi.QUALITY_YOUTUBE ||
+            losslessMusicApi.isCoolingDown
+        ) return null
+
+        val expectedSeconds = (track.durationMs?.takeIf { it > 0L } ?: findKnownDuration(track))
+            ?.div(1_000L)
+            ?.toInt()
+            ?.takeIf { it > 0 }
+        return try {
+            resolveLosslessTrackAudioStream(
+                track = track,
+                misc = misc,
+                expectedDurationSeconds = expectedSeconds,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            android.util.Log.w(
+                "MusicPlayer",
+                "[DJ PREFETCH] preferred stream failed for '${track.title}': ${error.message}",
+            )
+            null
+        }
     }
 
     private suspend fun resolveYoutubeTrackAudioStream(
@@ -6447,12 +6674,10 @@ class MusicPlayer @Inject constructor(
     }
 
     private fun isWorthSwapping(current: ResolvedStream, candidate: ResolvedStream): Boolean {
-        // Dolby Atmos candidate beats a lossy non-Atmos stream (Dolby
-        // selected => play Dolby), but NEVER a lossless / hi-res stream: a
-        // spatial remix must not replace stereo lossless via background
-        // upgrade. Dolby plays only when chosen up front.
+        // Dolby Atmos candidate beats a lossy stream, or upgrades stereo lossless when user specifically configured Dolby Atmos
         if (candidate.audioCodec == "DOLBY ATMOS") {
-            return current.audioCodec != "DOLBY ATMOS" && !current.isLossless
+            return current.audioCodec != "DOLBY ATMOS" &&
+                (!current.isLossless || cachedMiscSettings.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS)
         }
         // Lossless candidate beats lossy stream
         if (candidate.isLossless && !current.isLossless) {
@@ -6475,6 +6700,31 @@ class MusicPlayer @Inject constructor(
         return false
     }
 
+    /**
+     * DJ mode keeps quality upgrades open early in the song, then freezes
+     * source replacement near its outgoing cue or once the standby deck is
+     * preparing. This follows LastWave's handoff lock and avoids changing a
+     * decoder underneath an active blend.
+     */
+    private fun isStreamSwapLocked(): Boolean {
+        if (!playerDelegate.isInitialized()) return true
+        if (outgoingPlayer != null || crossfadeStandbyPreparing || crossfadeStandbyArmed ||
+            currentAutoMixState() != AutoMixState.IDLE
+        ) return true
+
+        val active = player
+        val durationMs = active.duration.takeIf { it > 0L }
+            ?: effectiveDuration(active.duration, active, _state.value.durationMs).takeIf { it > 0L }
+            ?: return false
+        val remainingMs = (durationMs - active.currentPosition.coerceAtLeast(0L)).coerceAtLeast(0L)
+        val lockWindowMs = when {
+            isAutoDJActive || _state.value.isAutoDJActive -> AUTO_DJ_STREAM_SWAP_LOCK_MS
+            automixEnabled || crossfadeEnabled -> CROSSFADE_STREAM_SWAP_LOCK_MS
+            else -> 0L
+        }
+        return lockWindowMs > 0L && remainingMs <= lockWindowMs
+    }
+
     private fun scheduleQualityUpgrade(
         track: PlayableTrack,
         expectedMediaId: String,
@@ -6495,7 +6745,13 @@ class MusicPlayer @Inject constructor(
             )
             return
         }
-        if (currentStream.isLossless || currentStream.audioCodec == "DOLBY ATMOS") return
+        val wantsAtmos = misc.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS
+        if (currentStream.audioCodec == "DOLBY ATMOS") return
+        if (currentStream.isLossless && !wantsAtmos) return
+        if (isStreamSwapLocked()) {
+            android.util.Log.d("MusicPlayer", "[STREAM UPGRADE] DJ/crossfade lock is active; deferring the source swap")
+            return
+        }
 
         val inFlightLossless = activeUpgradeDeferred
         activeUpgradeDeferred = null
@@ -6589,8 +6845,8 @@ class MusicPlayer @Inject constructor(
                         android.util.Log.d("MusicPlayer", "[STREAM UPGRADE] Near end of track (${pos}/${dur}ms), omitting swap")
                         return@withContext -1L
                     }
-                    if (outgoingPlayer != null || crossfadeStandbyPreparing || crossfadeStandbyArmed) {
-                        android.util.Log.d("MusicPlayer", "[STREAM UPGRADE] Crossfade in flight, omitting swap")
+                    if (isStreamSwapLocked()) {
+                        android.util.Log.d("MusicPlayer", "[STREAM UPGRADE] DJ/crossfade lock became active; omitting source swap")
                         return@withContext -1L
                     }
                     pos
@@ -6670,11 +6926,10 @@ class MusicPlayer @Inject constructor(
                         android.util.Log.d("MusicPlayer", "[STREAM UPGRADE] Near end of track (${swapPos}/${dur}ms), omitting swap")
                         return@withContext
                     }
-                    if (outgoingPlayer != null || crossfadeStandbyPreparing || crossfadeStandbyArmed) {
-                        android.util.Log.d("MusicPlayer", "[STREAM UPGRADE] Crossfade in flight, omitting swap")
+                    if (isStreamSwapLocked()) {
+                        android.util.Log.d("MusicPlayer", "[STREAM UPGRADE] DJ/crossfade lock became active; omitting source swap")
                         return@withContext
                     }
-
                     val playWhenReady = player.playWhenReady
                     val updatedMediaItem = track.toMediaItem(swapCandidate)
 
@@ -6761,9 +7016,14 @@ class MusicPlayer @Inject constructor(
                             format: androidx.media3.common.Format,
                         ): Int {
                             val mime = format.sampleMimeType?.lowercase().orEmpty()
-                            val isImmersive = mime.contains("eac3") || mime.contains("ec-3") ||
-                                mime.contains("ac-3") || mime.contains("ac3") || mime.contains("ac4") ||
-                                mime.contains("mha1") || mime.contains("mhm1")
+                            val codecs = format.codecs?.lowercase().orEmpty()
+                            val containerMime = format.containerMimeType?.lowercase().orEmpty()
+                            val combined = "$mime $codecs $containerMime"
+                            val isImmersive = combined.contains("eac3") || combined.contains("ec-3") ||
+                                combined.contains("ec+3") || combined.contains("ac-3") ||
+                                combined.contains("ac3") || combined.contains("ac4") ||
+                                combined.contains("mha1") || combined.contains("mhm1") ||
+                                combined.contains("joc")
                             if (!isImmersive) {
                                 return RendererCapabilities.create(C.FORMAT_UNSUPPORTED_TYPE)
                             }
@@ -6854,16 +7114,23 @@ class MusicPlayer @Inject constructor(
                     // Codec truth: a lossless claim arriving as lossy bytes, or
                     // a spatial claim arriving as plain stereo bytes, is a
                     // transcode/mislabeled rendition — reject before the swap.
-                    val decodedMime = runCatching { auditionPlayer.audioFormat?.sampleMimeType?.lowercase().orEmpty() }.getOrDefault("")
-                    if (decodedMime.isNotBlank()) {
+                    val audioFormat = auditionPlayer.audioFormat
+                    val decodedMime = runCatching { audioFormat?.sampleMimeType?.lowercase().orEmpty() }.getOrDefault("")
+                    val containerMime = runCatching { audioFormat?.containerMimeType?.lowercase().orEmpty() }.getOrDefault("")
+                    val codecs = runCatching { audioFormat?.codecs?.lowercase().orEmpty() }.getOrDefault("")
+                    val combinedCodecInfo = "$decodedMime $containerMime $codecs"
+                    if (decodedMime.isNotBlank() || codecs.isNotBlank()) {
                         val claimsSpatial = upgraded.audioCodec == "DOLBY ATMOS" || upgraded.audioCodec == "SPATIAL AUDIO"
-                        val isSpatialMime = decodedMime.contains("eac3") || decodedMime.contains("ec-3") ||
-                            decodedMime.contains("ac-3") || decodedMime.contains("ac3") ||
-                            decodedMime.contains("mha1") || decodedMime.contains("mhm1")
+                        val isSpatialMime = combinedCodecInfo.contains("eac3") || combinedCodecInfo.contains("ec-3") ||
+                            combinedCodecInfo.contains("ec+3") || combinedCodecInfo.contains("ac-3") ||
+                            combinedCodecInfo.contains("ac3") || combinedCodecInfo.contains("mha1") ||
+                            combinedCodecInfo.contains("mhm1") || combinedCodecInfo.contains("joc") ||
+                            combinedCodecInfo.contains("atmos") ||
+                            (decodedMime == "audio/mp4" && (codecs.contains("ec") || codecs.isBlank()))
                         if (claimsSpatial && !isSpatialMime) {
                             android.util.Log.w(
                                 "MusicPlayer",
-                                "[STREAM AUDITION] Codec mismatch: claimed ${upgraded.audioCodec} but decoded $decodedMime",
+                                "[STREAM AUDITION] Codec mismatch: claimed ${upgraded.audioCodec} but decoded mime=$decodedMime container=$containerMime codecs=$codecs",
                             )
                             return@withContext false
                         }
@@ -7714,6 +7981,11 @@ class MusicPlayer @Inject constructor(
         const val CROSSFADE_LOG_THROTTLE_MS = 5_000L
         /** Minimum gap between next-track resolve kicks for the same item. */
         const val CROSSFADE_RESOLVE_RETRY_MS = 8_000L
+        /** DJ mode resolves quality upgrades early and freezes swaps for the final 35s. */
+        const val AUTO_DJ_STREAM_SWAP_LOCK_MS = 35_000L
+        const val CROSSFADE_STREAM_SWAP_LOCK_MS = 15_000L
+        /** Briefly wait for a stale-but-armed standby before starting the queue item directly. */
+        const val AUTO_DJ_STANDBY_GRACE_MS = 300L
         /** Poll cadence used while the downloader yields to an armed standby. */
         const val CURRENT_TRACK_CACHE_STANDBY_YIELD_MS = 500L
         /** UI-playing but ExoPlayer frozen (pos + buffer) this long means a

@@ -72,6 +72,10 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
@@ -97,8 +101,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import com.kyant.backdrop.backdrops.layerBackdrop as nativeBackdrop
 
 
-/** Shared opt-in flag for Settings > Experimental > Liquid Glass. */
-val LocalLiquidGlass = staticCompositionLocalOf { false }
+/** App-wide design flag; liquid-glass controls and surfaces stay enabled. */
+val LocalLiquidGlass = staticCompositionLocalOf { true }
 
 /** Background-only source for surfaces inside the captured scrolling content. */
 val LocalLiquidGlassBackdrop = staticCompositionLocalOf<Backdrop?> { null }
@@ -733,7 +737,12 @@ fun LiquidGlassIconButton(
                 interactive = enabled,
                 onClick = if (enabled) onClick else null,
                 interaction = interaction,
-            ),
+            )
+            .semantics(mergeDescendants = true) {
+                if (!contentDescription.isNullOrBlank()) this.contentDescription = contentDescription
+                role = Role.Button
+                if (!enabled) disabled()
+            },
         contentAlignment = Alignment.Center,
     ) {
         content()

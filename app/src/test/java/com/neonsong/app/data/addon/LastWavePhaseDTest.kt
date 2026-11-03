@@ -63,6 +63,17 @@ class LastWavePhaseDTest {
     }
 
     @Test
+    fun ordinaryDolbyCodecNamesDoNotImplyAtmos() {
+        val ac3Track = json.decodeFromString<AddonTrack>("""{"format":"AC-3"}""")
+        val eac3Track = json.decodeFromString<AddonTrack>("""{"format":"E-AC-3","audioMode":"Dolby Digital Plus"}""")
+        val atmosTrack = json.decodeFromString<AddonTrack>("""{"audioMode":"Dolby Atmos"}""")
+
+        assertFalse(ac3Track.isDolbyAtmos)
+        assertFalse(eac3Track.isDolbyAtmos)
+        assertTrue(atmosTrack.isDolbyAtmos)
+    }
+
+    @Test
     fun manifestResourcesLenientDeserialization() {
         val arrayManifest = """{"id": "test", "name": "Test Module", "resources": ["stream", "search"]}"""
         val parsed1 = json.decodeFromString<AddonManifest>(arrayManifest)

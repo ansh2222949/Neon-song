@@ -79,6 +79,10 @@ int AutoMixEngine::getBarMode() const noexcept {
     return barMode_.load(std::memory_order_acquire);
 }
 
+void AutoMixEngine::setCurveType(int curveType) noexcept {
+    curveType_.store(std::clamp(curveType, 0, 3), std::memory_order_release);
+}
+
 void AutoMixEngine::reset() noexcept {
     state_.store(AutoMixState::Idle, std::memory_order_release);
     transitionProgress_.store(0.0F, std::memory_order_release);
@@ -300,11 +304,9 @@ void AutoMixEngine::processBlock(float* deckAStereo, std::size_t frames) noexcep
             energyHistoryFrames_ += frames;
         }
 
-        if (energyHistoryFrames_ >= static_cast<std::size_t>(sampleRate_ * 3.0) &&
-            baselineEnergy_ > 0.02F && shortTermEnergy_ < baselineEnergy_ * 0.35F) {
-            startTransition(AutoMixState::FadingAuto, barMode_.load(std::memory_order_acquire));
-            currState = state_.load(std::memory_order_acquire);
-        }
+        // Host (Kotlin AutoDJController / MusicPlayer) drives transitions explicitly.
+        // We track energy metrics but do not unilaterally jump into FadingAuto to prevent
+        // desynchronizing audio from UI player state.
     }
 
     // If fading (FadingAuto or FadingFast)
@@ -314,14 +316,37 @@ void AutoMixEngine::processBlock(float* deckAStereo, std::size_t frames) noexcep
             : 1.0F;
         transitionProgress_.store(std::clamp(p, 0.0F, 1.0F), std::memory_order_release);
 
-        // Midpoint bass-swap: occurs at 50% downbeat
         const float progress = transitionProgress_.load(std::memory_order_relaxed);
-        if (progress >= 0.5F && !bassSwapped_) {
+        const int curveType = curveType_.load(std::memory_order_acquire);
+        if (curveType == 2 && progress >= 0.5F && !bassSwapped_) {
             bassSwapped_ = true;
         }
 
-        const float deckAGain = static_cast<float>(std::cos(progress * (M_PI * 0.5)));
-        const float deckBGain = static_cast<float>(std::sin(progress * (M_PI * 0.5)));
+        float deckAGain = 1.0F;
+        float deckBGain = 0.0F;
+        switch (curveType) {
+            case 1: {
+                const float smooth = progress * progress * (3.0F - 2.0F * progress);
+                deckAGain = 1.0F - smooth;
+                deckBGain = smooth;
+                break;
+            }
+            case 3: {
+                deckAGain = progress >= 0.8F
+                    ? std::clamp(1.0F - (progress - 0.8F) / 0.2F, 0.0F, 1.0F)
+                    : 1.0F;
+                deckBGain = progress >= 0.8F
+                    ? 1.0F
+                    : std::clamp(progress / 0.8F, 0.0F, 1.0F);
+                break;
+            }
+            case 0:
+            case 2:
+            default:
+                deckAGain = static_cast<float>(std::cos(progress * (M_PI * 0.5)));
+                deckBGain = static_cast<float>(std::sin(progress * (M_PI * 0.5)));
+                break;
+        }
 
         // Read Deck B frames from prebuffer ring
         std::size_t actualDeckBFrames = 0;
@@ -353,11 +378,14 @@ void AutoMixEngine::processBlock(float* deckAStereo, std::size_t frames) noexcep
                       deckBStretchedScratch_.begin() + stretchedFrames * 2);
         }
 
-        // Linkwitz-Riley Bass-Swap
-        if (!bassSwapped_) {
-            deckBFilter_.processHighPass(deckBStretchedScratch_.data(), frames);
-        } else {
-            deckAFilter_.processHighPass(deckAStereo, frames);
+        // The selected Club Bass Swap profile hands the low end over at the
+        // midpoint. Other curves remain full-band and keep their own fade law.
+        if (curveType == 2) {
+            if (!bassSwapped_) {
+                deckBFilter_.processHighPass(deckBStretchedScratch_.data(), frames);
+            } else {
+                deckAFilter_.processHighPass(deckAStereo, frames);
+            }
         }
 
         // Deck A Echo tail

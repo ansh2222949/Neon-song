@@ -77,6 +77,8 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -99,6 +101,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
@@ -138,16 +141,18 @@ import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import com.neonsong.app.ui.theme.GlassActionButton as Button
 import androidx.compose.material3.ButtonDefaults
+import com.neonsong.app.ui.theme.GlassIconActionButton as GlassIconButton
+import com.neonsong.app.ui.theme.GlassTonalActionButton as GlassTonalButton
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
+import com.neonsong.app.ui.theme.GlassCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
+import com.neonsong.app.ui.theme.GlassIconActionButton as IconButton
+import com.neonsong.app.ui.theme.GlassLinearProgressIndicator as LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -159,7 +164,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.neonsong.app.ui.theme.GlassTextActionButton as TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import kotlin.math.roundToInt
 import com.neonsong.app.playback.AutoMixState
@@ -378,7 +383,6 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val mvId = searchRepository.get().findMusicVideo(track.title, track.artist, targetDurationMs = track.durationMs)
-                    ?: track.videoId
                 val cleanId = mvId?.takeIf { it.isNotBlank() }?.let { extractYouTubeVideoId(it) }
                 if (!cleanId.isNullOrBlank()) {
                     _resolvedMusicVideoIds.update { it + (key to cleanId) }
@@ -771,6 +775,7 @@ val LocalBottomNavSlot = androidx.compose.runtime.staticCompositionLocalOf<andro
 }
 
 /** App-wide collapsed + maximized player layered over every navigation route. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PlayerHost(
     viewModel: PlayerViewModel = hiltViewModel(),
@@ -822,7 +827,10 @@ fun PlayerHost(
             }
         }
     }
-    val miniPlayerVisible = state.current != null && !expanded && !settings.buttonNowPlayingEnabled
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    val isImeOpen = WindowInsets.isImeVisible || imeBottom > 0
+    val miniPlayerVisible = state.current != null && !expanded && !settings.buttonNowPlayingEnabled && !isImeOpen
 
     // Sibling pattern: ONE backdrop capturing feed content,
     // consumed by the sibling MiniPlayer. Unconditional remember keeps composition stable.
@@ -842,37 +850,45 @@ fun PlayerHost(
     CompositionLocalProvider(
         LocalMusicPlayer provides viewModel.player,
         LocalAddToPlaylist provides requestAddToPlaylist,
-        LocalMiniPlayerScrollClearance provides if (state.current != null && !settings.buttonNowPlayingEnabled) 88.dp else 0.dp,
+        LocalMiniPlayerScrollClearance provides if (state.current != null && !settings.buttonNowPlayingEnabled && !isImeOpen) 88.dp else 0.dp,
         LocalBottomNavSlot provides bottomNavSlot,
     ) {
         Box(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().liquidGlassSource(if (miniGlass) miniBackdrop else null)) {
                 content()
             }
-            if (miniPlayerVisible) {
-                MiniPlayer(
-                    state = state,
-                    progressState = viewModel.progressState,
-                    isLossless = state.isLossless,
-                    audioCodec = state.audioCodec,
-                    onExpand = { expanded = true },
-                    onToggle = viewModel.player::togglePlayPause,
-                    onPrevious = viewModel.player::previous,
-                    onNext = viewModel.player::next,
-                    onClose = viewModel.player::stopAndClear,
-                    bottomPadding = if (hasBottomNavigation) 92.dp else 12.dp,
-                    edgeToEdge = !hasBottomNavigation,
-                    backdrop = if (miniGlass) miniBackdrop else null,
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                )
-                
-                // Sleep Timer Button
-                if (!expanded) {
-                    DraggableSleepTimerOverlay(
-                        sleepTimerRemainingMs = state.sleepTimerRemainingMs,
-                        onCycleTimer = { viewModel.player.cycleSleepTimer() },
-                        onCloseTimer = { viewModel.player.setSleepTimerMinutes(0) },
+            androidx.compose.animation.AnimatedVisibility(
+                visible = miniPlayerVisible,
+                enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(150)) +
+                    androidx.compose.animation.slideInVertically(androidx.compose.animation.core.tween(150)) { it / 2 },
+                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(120)) +
+                    androidx.compose.animation.slideOutVertically(androidx.compose.animation.core.tween(120)) { it / 2 },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            ) {
+                Box {
+                    MiniPlayer(
+                        state = state,
+                        progressState = viewModel.progressState,
+                        isLossless = state.isLossless,
+                        audioCodec = state.audioCodec,
+                        onExpand = { expanded = true },
+                        onToggle = viewModel.player::togglePlayPause,
+                        onPrevious = viewModel.player::previous,
+                        onNext = viewModel.player::next,
+                        onClose = viewModel.player::stopAndClear,
+                        bottomPadding = if (hasBottomNavigation) 88.dp else 14.dp,
+                        edgeToEdge = false,
+                        backdrop = if (miniGlass) miniBackdrop else null,
                     )
+
+                    // Sleep Timer Button
+                    if (!expanded) {
+                        DraggableSleepTimerOverlay(
+                            sleepTimerRemainingMs = state.sleepTimerRemainingMs,
+                            onCycleTimer = { viewModel.player.cycleSleepTimer() },
+                            onCloseTimer = { viewModel.player.setSleepTimerMinutes(0) },
+                        )
+                    }
                 }
             }
             val currentTrack = state.current
@@ -983,7 +999,6 @@ private fun ExpandedPlayer(
     val resolvedMusicVideoIds by viewModel.resolvedMusicVideoIds.collectAsStateWithLifecycle()
     val currentTrack = state.current
     val activeVideoId = currentTrack?.let { resolvedMusicVideoIds["${it.title}|${it.artist}"] }
-        ?: currentTrack?.videoId?.takeIf { it.isNotBlank() }
     LaunchedEffect(currentTrack?.title, currentTrack?.artist) {
         if (currentTrack != null) {
             viewModel.resolveMusicVideoForTrack(currentTrack)
@@ -1046,7 +1061,11 @@ private fun AddToPlaylistDialogHost(
 }
 
 @Composable
-internal fun AnimatedPlayPauseIcon(isPlaying: Boolean, modifier: Modifier = Modifier) {
+internal fun AnimatedPlayPauseIcon(
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+    tint: Color = androidx.compose.material3.LocalContentColor.current,
+) {
     AnimatedContent(
         targetState = isPlaying,
         transitionSpec = {
@@ -1062,6 +1081,7 @@ internal fun AnimatedPlayPauseIcon(isPlaying: Boolean, modifier: Modifier = Modi
             if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
             contentDescription = "Play or pause",
             modifier = Modifier.fillMaxSize(),
+            tint = tint,
         )
     }
 }
@@ -1117,23 +1137,15 @@ private fun MiniPlayer(
     val shownY by animateFloatAsState(dragY, dragSettleSpec, label = "miniPlayerY")
     val threshold = with(LocalDensity.current) { 56.dp.toPx() }
     val isTablet = isTabletOrWideScreen()
-    val shape = if (edgeToEdge && !isTablet) {
-        RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
-    } else {
-        RoundedCornerShape(28.dp)
-    }
-    val positionedModifier = if (edgeToEdge && !isTablet) {
-        modifier.fillMaxWidth()
-    } else {
-        modifier
-            .windowInsetsPadding(
-                WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
-            )
-            .padding(horizontal = 12.dp)
-            .padding(bottom = if (isTablet && edgeToEdge) 14.dp else bottomPadding)
-            .widthIn(max = 680.dp)
-            .fillMaxWidth()
-    }
+    val shape = RoundedCornerShape(26.dp)
+    val positionedModifier = modifier
+        .windowInsetsPadding(
+            WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
+        )
+        .padding(horizontal = 14.dp)
+        .padding(bottom = bottomPadding)
+        .widthIn(max = 680.dp)
+        .fillMaxWidth()
     Box(
         modifier = positionedModifier
             .graphicsLayer {
@@ -1254,7 +1266,7 @@ private fun MiniPlayer(
             color = if (isGlass) {
                 Color.Transparent
             } else {
-                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f)
+                Color(0xFF1F1F1F)
             },
             tonalElevation = if (edgeToEdge || isGlass) 0.dp else 6.dp,
             shadowElevation = if (edgeToEdge || isGlass) 0.dp else 16.dp,
@@ -1331,18 +1343,18 @@ private fun MiniPlayer(
                 ) {
                     // Artwork with subtle elevation & playing badge
                     Box(
-                        modifier = Modifier.size(52.dp),
+                        modifier = Modifier.size(46.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            tonalElevation = 4.dp,
-                            shadowElevation = 6.dp,
-                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.18f)),
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF2C2C2E),
+                            tonalElevation = 2.dp,
+                            shadowElevation = 4.dp,
+                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)),
                             modifier = Modifier.fillMaxSize(),
                         ) {
-                            PlayerArtwork(track, Modifier.fillMaxSize(), 14.dp)
+                            PlayerArtwork(track, Modifier.fillMaxSize(), 8.dp)
                         }
                     }
 
@@ -1420,6 +1432,10 @@ private fun MiniPlayer(
                         }
                     }
 
+                    val controlColor = if (isGlass) {
+                        if (isDark) Color.White else Color.Black
+                    } else Color.White
+
                     val playPauseInteraction = remember { MutableInteractionSource() }
                     val isPlayPausePressed by playPauseInteraction.collectIsPressedAsState()
                     val playPauseScale by animateFloatAsState(
@@ -1427,33 +1443,35 @@ private fun MiniPlayer(
                         animationSpec = ExpressiveMotion.appleTactileSpring(),
                         label = "miniPlayPauseScale",
                     )
-                    Surface(
-                        onClick = {
-                            hapticManager.click()
-                            onToggle()
-                        },
-                        interactionSource = playPauseInteraction,
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        shadowElevation = 4.dp,
+                    Box(
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(42.dp)
                             .graphicsLayer {
                                 scaleX = playPauseScale
                                 scaleY = playPauseScale
-                            },
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            if (state.isBuffering) {
-                                ExpressiveInlineLoadingIndicator(
-                                    size = 22.dp,
-                                    color = androidx.compose.material3.LocalContentColor.current,
-                                    strokeWidth = 2.4.dp,
-                                )
-                            } else {
-                                AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(24.dp))
                             }
+                            .clickable(
+                                interactionSource = playPauseInteraction,
+                                indication = null,
+                                onClick = {
+                                    hapticManager.click()
+                                    onToggle()
+                                },
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (state.isBuffering) {
+                            ExpressiveInlineLoadingIndicator(
+                                size = 22.dp,
+                                color = controlColor,
+                                strokeWidth = 2.4.dp,
+                            )
+                        } else {
+                            AnimatedPlayPauseIcon(
+                                isPlaying = state.isPlaying,
+                                modifier = Modifier.size(26.dp),
+                                tint = controlColor,
+                            )
                         }
                     }
 
@@ -1464,30 +1482,32 @@ private fun MiniPlayer(
                         animationSpec = ExpressiveMotion.appleTactileSpring(),
                         label = "miniNextScale",
                     )
-                    IconButton(
-                        onClick = {
-                            hapticManager.click()
-                            onNext()
-                        },
-                        interactionSource = nextInteraction,
-                        enabled = state.queueSize > 1,
+                    Box(
                         modifier = Modifier
                             .padding(start = 2.dp)
-                            .size(40.dp)
+                            .size(42.dp)
                             .graphicsLayer {
                                 scaleX = nextScale
                                 scaleY = nextScale
-                            },
+                            }
+                            .clickable(
+                                interactionSource = nextInteraction,
+                                indication = null,
+                                enabled = state.queueSize > 1,
+                                onClick = {
+                                    hapticManager.click()
+                                    onNext()
+                                },
+                            ),
+                        contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             Icons.Filled.SkipNext,
                             contentDescription = "Next",
                             modifier = Modifier.size(26.dp),
                             tint = if (state.queueSize > 1) {
-                                if (isGlass) {
-                                    if (isDark) Color.White else Color.Black
-                                } else MaterialTheme.colorScheme.onSurface
-                            } else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.32f),
+                                controlColor
+                            } else controlColor.copy(alpha = 0.32f),
                         )
                     }
                 }
@@ -1928,7 +1948,7 @@ private fun AddToPlaylistDialog(
                         color = MaterialTheme.colorScheme.primary,
                     )
                 }
-                androidx.compose.material3.IconButton(
+                GlassIconButton(
                     onClick = { showCreateDialog = true },
                     modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
                 ) {
@@ -2243,43 +2263,26 @@ private fun FullPlayer(
 ) {
     val track = state.current ?: return
     val hapticManager = LocalHapticManager.current
-    // Video sessions are deliberately opt-in: the dedicated video WebView owns
-    // audio only while it is visible, then hands the user back to their exact
-    // music-player state without restarting the track.
-    val effectiveVideoId = activeVideoId?.takeIf { it.isNotBlank() } ?: track.videoId?.takeIf { it.isNotBlank() }
+    // Video is opt-in; its muted renderer follows the uninterrupted music clock.
+    val effectiveVideoId = activeVideoId?.takeIf { it.isNotBlank() }
     val hasVideo = !effectiveVideoId.isNullOrBlank()
     val trackIdentity = remember(track.videoId, track.title, track.artist) { "${track.videoId}_${track.title}_${track.artist}" }
     var isVideoMode by rememberSaveable(trackIdentity) { mutableStateOf(false) }
     var isVideoFullscreen by rememberSaveable(trackIdentity) { mutableStateOf(false) }
-    var resumeAudioAfterVideo by rememberSaveable(trackIdentity) { mutableStateOf(false) }
-    var videoPositionMs by rememberSaveable(trackIdentity) { mutableLongStateOf(0L) }
-    var videoDurationMs by rememberSaveable(trackIdentity) { mutableLongStateOf(0L) }
-    var isVideoPlaying by rememberSaveable(trackIdentity) { mutableStateOf(true) }
-    var videoSeekCommandSeconds by remember(trackIdentity) { mutableStateOf<Float?>(null) }
-
     val view = LocalView.current
     val enterVideoMode = {
         if (hasVideo && !isVideoMode) {
-            resumeAudioAfterVideo = state.isPlaying || state.isBuffering
-            videoPositionMs = progressState.value.positionMs.coerceAtLeast(0L)
-            player.pause()
-            isVideoPlaying = true
             isVideoMode = true
         }
     }
 
     val closeVideoMode = {
-        releaseMusicVideo()
         val activity = generateSequence(view.context) { (it as? android.content.ContextWrapper)?.baseContext }
             .filterIsInstance<android.app.Activity>().firstOrNull()
         activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         isVideoFullscreen = false
         isVideoMode = false
-        if (videoPositionMs > 0L) {
-            player.seekTo(videoPositionMs)
-        }
-        if (resumeAudioAfterVideo) player.resume()
-        resumeAudioAfterVideo = false
+        // Master audio clock continues uninterrupted without restart or seek
     }
     BackHandler(enabled = isVideoMode) {
         if (isVideoFullscreen) {
@@ -2298,10 +2301,7 @@ private fun FullPlayer(
 
         fun switchToVoice() {
             if (isVideoMode) {
-                val currentPos = videoPositionMs.coerceAtLeast(0L)
                 closeVideoMode()
-                player.seekTo(currentPos)
-                player.resume()
             }
         }
 
@@ -2333,24 +2333,6 @@ private fun FullPlayer(
             runCatching { ctx.unregisterReceiver(screenOffReceiver) }
             lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
         }
-    }
-
-    // Ensure WebView never leaks audio if track changes or FullPlayer is closed
-    DisposableEffect(trackIdentity) {
-        onDispose {
-            releaseMusicVideo()
-        }
-    }
-
-    // Stable StateFlow for video progress so we don't re-allocate a StateFlow on every progress tick
-    val videoProgressFlow = remember {
-        MutableStateFlow(PlaybackProgressState(positionMs = 0L, durationMs = 0L))
-    }
-    LaunchedEffect(videoPositionMs, videoDurationMs, track.durationMs, state.durationMs) {
-        videoProgressFlow.value = PlaybackProgressState(
-            positionMs = videoPositionMs,
-            durationMs = if (videoDurationMs > 0L) videoDurationMs else (track.durationMs ?: state.durationMs),
-        )
     }
 
     var showLyricsOffsetDialog by rememberSaveable { mutableStateOf(false) }
@@ -3101,15 +3083,8 @@ private fun FullPlayer(
                                                                         seekOverlayDirection = side
                                                                         lastTapTimestamp = now
                                                                         val deltaMs = if (side == SeekDirection.FORWARD) 5_000L else -5_000L
-                                                                        if (isVideoMode) {
-                                                                            val maxDur = if (videoDurationMs > 0L) videoDurationMs else (track.durationMs ?: state.durationMs).coerceAtLeast(0L)
-                                                                            val newPos = (videoPositionMs + deltaMs).coerceIn(0L, maxDur)
-                                                                            videoPositionMs = newPos
-                                                                            videoSeekCommandSeconds = newPos / 1000f
-                                                                        } else {
-                                                                            val newPos = (player.state.value.positionMs + deltaMs).coerceIn(0L, player.state.value.durationMs.coerceAtLeast(0L))
-                                                                            player.seekTo(newPos)
-                                                                        }
+                                                                        val newPos = (player.state.value.positionMs + deltaMs).coerceIn(0L, player.state.value.durationMs.coerceAtLeast(0L))
+                                                                        player.seekTo(newPos)
 
                                                                         seekResetJob?.cancel()
                                                                         seekResetJob = coroutineScope.launch {
@@ -3201,24 +3176,11 @@ private fun FullPlayer(
                                                 ) {
                                                     Box(Modifier.fillMaxSize()) {
                                                         if (!isVideoFullscreen) {
-                                                            InAppMusicVideo(
-                                                                videoId = effectiveVideoId.orEmpty(),
+                                                            SyncedVideoSurface(
+                                                                track = track,
+                                                                musicPlayer = player,
                                                                 modifier = Modifier.fillMaxSize(),
-                                                                isPlaying = isVideoPlaying,
-                                                                initialPositionSeconds = (videoPositionMs.takeIf { it > 0L } ?: player.state.value.positionMs)
-                                                                    .let { (it / 1000f).coerceAtLeast(0f) },
-                                                                seekCommandSeconds = videoSeekCommandSeconds,
-                                                                onProgressUpdate = { curMs, durMs ->
-                                                                    videoPositionMs = curMs
-                                                                    if (durMs > 0L) videoDurationMs = durMs
-                                                                },
-                                                                onPlaybackStateChanged = { playing ->
-                                                                    isVideoPlaying = playing
-                                                                },
-                                                                onVideoEnded = {
-                                                                    closeVideoMode()
-                                                                    player.next()
-                                                                },
+                                                                videoId = effectiveVideoId,
                                                             )
                                                         }
                                                         Surface(
@@ -3720,22 +3682,16 @@ private fun FullPlayer(
                                         }
                                     }
                                     Spacer(Modifier.height(verticalGap))
-                                    val effectiveProgressState = if (isVideoMode) videoProgressFlow else progressState
                                     SeekBar(
-                                        progressState = effectiveProgressState,
-                                        isPlaying = if (isVideoMode) isVideoPlaying else state.isPlaying,
-                                        trackKey = if (isVideoMode) "video_$effectiveVideoId" else (track.videoId ?: "${track.artist}|${track.title}"),
+                                        progressState = progressState,
+                                        isPlaying = state.isPlaying,
+                                        trackKey = track.videoId ?: "${track.artist}|${track.title}",
                                         wavyEnabled = wavySeekbarEnabled,
                                         onSeek = { targetMs ->
-                                            if (isVideoMode) {
-                                                videoPositionMs = targetMs
-                                                videoSeekCommandSeconds = targetMs / 1000f
-                                            } else {
-                                                player.seekTo(targetMs)
-                                            }
+                                            player.seekTo(targetMs)
                                         },
                                         isTranslucent = LocalLiquidGlass.current,
-                                        fallbackDurationMs = if (isVideoMode && videoDurationMs > 0L) videoDurationMs else (track.durationMs ?: state.durationMs),
+                                        fallbackDurationMs = track.durationMs ?: state.durationMs,
                                         primaryColor = ambientColor,
                                         secondaryColor = ambientCompanion,
                                         tertiaryColor = ambientDeep,
@@ -3747,10 +3703,10 @@ private fun FullPlayer(
                                         player = player,
                                         isTranslucent = true,
                                         compact = isLandscape,
-                                        overridePlaying = if (isVideoMode) isVideoPlaying else null,
-                                        onTogglePlay = if (isVideoMode) { { isVideoPlaying = !isVideoPlaying } } else null,
-                                        onNext = if (isVideoMode) { { closeVideoMode(); player.next() } } else null,
-                                        onPrev = if (isVideoMode) { { closeVideoMode(); player.previous() } } else null,
+                                        overridePlaying = null,
+                                        onTogglePlay = null,
+                                        onNext = if (isVideoMode) { { player.next() } } else null,
+                                        onPrev = if (isVideoMode) { { player.previous() } } else null,
                                         ambientColor = ambientColor,
                                         ambientCompanion = ambientCompanion,
                                     )
@@ -3894,26 +3850,13 @@ private fun FullPlayer(
                         },
                 ) {
                     if (isVideoFullscreen) {
-                        InAppMusicVideo(
-                            videoId = effectiveVideoId.orEmpty(),
+                        SyncedVideoSurface(
+                            track = track,
+                            musicPlayer = player,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .align(Alignment.Center),
-                            isPlaying = isVideoPlaying,
-                            initialPositionSeconds = (videoPositionMs.takeIf { it > 0L } ?: player.state.value.positionMs)
-                                .let { (it / 1000f).coerceAtLeast(0f) },
-                            seekCommandSeconds = videoSeekCommandSeconds,
-                            onProgressUpdate = { curMs, durMs ->
-                                videoPositionMs = curMs
-                                if (durMs > 0L) videoDurationMs = durMs
-                            },
-                            onPlaybackStateChanged = { playing ->
-                                isVideoPlaying = playing
-                            },
-                            onVideoEnded = {
-                                closeVideoMode()
-                                player.next()
-                            },
+                            videoId = effectiveVideoId,
                         )
                     }
                     AnimatedVisibility(
@@ -5656,7 +5599,7 @@ private fun AudioControlsSheet(
                             )
 
                             // Reset Button placed right next to Lock button
-                            androidx.compose.material3.FilledTonalButton(
+                            GlassTonalButton(
                                 onClick = {
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     currentSpeed = 1.0f
@@ -5957,10 +5900,11 @@ private fun QueuePanel(
     // True upcoming play order (shuffle/repeat aware). Under shuffle the list
     // below stays in playlist order, so without this strip you can never tell
     // what plays next — and Play-next adds look "lost".
-    val shuffleUpcoming = remember(state.queue, state.currentIndex, state.shuffleEnabled, state.repeatMode) {
-        if (state.shuffleEnabled) runCatching { player.peekUpcomingIndices(3) }.getOrDefault(emptyList())
-        else emptyList()
+    val upcomingIndices = remember(state.queue, state.currentIndex, state.shuffleEnabled, state.repeatMode) {
+        runCatching { player.peekUpcomingIndices(4) }.getOrDefault(emptyList())
     }.filter { it in state.queue.indices && it != state.currentIndex }
+    val nextQueueIndex = upcomingIndices.firstOrNull()
+    val shuffleUpcoming = if (state.shuffleEnabled) upcomingIndices else emptyList()
 
     Column(modifier) {
         Row(
@@ -6078,7 +6022,65 @@ private fun QueuePanel(
                 }
             }
         }
-        if (shuffleUpcoming.isNotEmpty()) {
+        nextQueueIndex?.let { upcomingIndex ->
+            val nextTrack = state.queue.getOrNull(upcomingIndex)
+            if (nextTrack != null) {
+                val nextShape = RoundedCornerShape(22.dp)
+                LiquidGlassSurface(
+                    onClick = { player.seekToQueueItem(upcomingIndex) },
+                    glassModifier = Modifier.liquidGlassChrome(
+                        nextShape,
+                        LocalLiquidGlass.current,
+                        LiquidGlassPreset.FloatingControls,
+                    ),
+                    shape = nextShape,
+                    color = Color.White.copy(alpha = 0.08f),
+                    contentColor = Color.White,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        PlayerArtwork(nextTrack, Modifier.size(56.dp), 15.dp)
+                        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "UP NEXT",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = ambientColor,
+                                )
+                            }
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                nextTrack.title,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                            )
+                            Text(
+                                nextTrack.artist,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.66f),
+                            )
+                        }
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "Play next song",
+                            tint = Color.White.copy(alpha = 0.82f),
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+            }
+        }
+        if (shuffleUpcoming.size > 1) {
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -6093,7 +6095,7 @@ private fun QueuePanel(
                     color = Color.White.copy(alpha = 0.60f),
                     fontWeight = FontWeight.Bold,
                 )
-                shuffleUpcoming.forEachIndexed { order, queueIndex ->
+                shuffleUpcoming.drop(1).forEachIndexed { order, queueIndex ->
                     val item = state.queue[queueIndex]
                     Row(
                         modifier = Modifier
@@ -6104,7 +6106,7 @@ private fun QueuePanel(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "${order + 1}",
+                            "${order + 2}",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,
