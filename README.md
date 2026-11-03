@@ -37,13 +37,17 @@ Project documentation is indexed in [docs/README.md](docs/README.md).
 
 <div align="center">
 
-| 🏠 Home & Discovery | 🔎 Search | 💎 Audio & Theme Settings |
-|:---:|:---:|:---:|
-| <img src="docs/screenshots/home_screen.png" width="260" alt="Neon Song home screen captured on Android" /> | <img src="docs/screenshots/search_screen.png" width="260" alt="Search screen captured on Android" /> | <img src="docs/screenshots/settings_screen.png" width="260" alt="Audio and visual theme settings captured on Android" /> |
+| 🏠 Home & Discovery | 🔎 Search |
+|:---:|:---:|
+| <img src="docs/screenshots/home_screen.png" width="260" alt="Neon Song home screen captured on Android" /> | <img src="docs/screenshots/search_screen.png" width="260" alt="Search screen captured on Android" /> |
 
 <br>
 
-Screenshots were captured from a Samsung Galaxy S24 Ultra running Android 17. Account and listening-history details are omitted.
+| 🎵 Player | 💎 Audio & Theme Settings |
+|:---:|:---:|
+| <img src="docs/screenshots/player_screen.png" width="260" alt="Neon Song player captured on Android" /> | <img src="docs/screenshots/settings_screen.png" width="260" alt="Audio and visual theme settings captured on Android" /> |
+
+Screenshots were captured from a Samsung Galaxy S24 Ultra running Android 17.
 
 </div>
 
