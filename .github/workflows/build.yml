@@ -39,7 +39,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run unit tests (audio pipeline + regression)
-        run: ./gradlew :app:testDebugUnitTest --stacktrace || true
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
 
       - name: Upload test reports
         if: always()
