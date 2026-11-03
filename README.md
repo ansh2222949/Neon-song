@@ -37,15 +37,13 @@ Project documentation is indexed in [docs/README.md](docs/README.md).
 
 <div align="center">
 
-| 🌌 4D Ambient Player | 🏠 Home & Discovery | 💎 Liquid Glass Settings |
+| 🏠 Home & Discovery | 🔎 Search | 💎 Audio & Theme Settings |
 |:---:|:---:|:---:|
-| <img src="docs/screenshots/player_dark.png" width="260" alt="4D Player Screen" /> | <img src="docs/screenshots/home_screen.png" width="260" alt="Home Screen" /> | <img src="docs/screenshots/settings_screen.png" width="260" alt="Liquid Glass Settings" /> |
+| <img src="docs/screenshots/home_screen.png" width="260" alt="Neon Song home screen captured on Android" /> | <img src="docs/screenshots/search_screen.png" width="260" alt="Search screen captured on Android" /> | <img src="docs/screenshots/settings_screen.png" width="260" alt="Audio and visual theme settings captured on Android" /> |
 
 <br>
 
-| 🎨 Hero Artwork Player | 📥 Offline Library & Downloads |
-|:---:|:---:|
-| <img src="docs/screenshots/player_screen.png" width="260" alt="Hero Artwork Player" /> | <img src="docs/screenshots/downloads_screen.png" width="260" alt="Downloads Screen" /> |
+Screenshots were captured from a Samsung Galaxy S24 Ultra running Android 17. Account and listening-history details are omitted.
 
 </div>
 

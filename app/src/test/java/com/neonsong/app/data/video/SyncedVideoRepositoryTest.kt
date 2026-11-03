@@ -45,6 +45,14 @@ class SyncedVideoRepositoryTest {
     @Test
     fun resolveVideoWithDirectVideoIdCachesAndReturnsBundle() = runTest {
         val bundle = sampleBundle("vid_abc")
+        coEvery { mockInnerTube.searchVideos("Midnight City M83", limit = 12) } returns listOf(
+            YouTubeMusicTrack(
+                videoId = "vid_abc",
+                title = "Midnight City Official Music Video",
+                artist = "M83",
+                artworkUrl = "https://example.com/art.jpg",
+            ),
+        )
         coEvery { mockExtractor.resolveVideoStreamBundle("vid_abc") } returns bundle
 
         // First resolve: queries extractor
@@ -59,7 +67,8 @@ class SyncedVideoRepositoryTest {
         assertThat(result2.getOrNull()).isEqualTo(bundle)
         coVerify(exactly = 1) { mockExtractor.resolveVideoStreamBundle("vid_abc") }
 
-        // InnerTube search was not required because direct videoId was provided
+        // A direct ID is preferred among filtered music-video results.
+        coVerify(exactly = 1) { mockInnerTube.searchVideos("Midnight City M83", limit = 12) }
         coVerify(exactly = 0) { mockInnerTube.searchSongs(any(), any(), any()) }
     }
 
@@ -71,7 +80,7 @@ class SyncedVideoRepositoryTest {
             artist = "The Weeknd",
             artworkUrl = "https://example.com/art.jpg",
         )
-        coEvery { mockInnerTube.searchSongs("Starboy The Weeknd", limit = 5) } returns listOf(searchTrack)
+        coEvery { mockInnerTube.searchVideos("Starboy The Weeknd", limit = 12) } returns listOf(searchTrack)
 
         val bundle = sampleBundle("searched_vid_123")
         coEvery { mockExtractor.resolveVideoStreamBundle("searched_vid_123") } returns bundle
@@ -80,7 +89,7 @@ class SyncedVideoRepositoryTest {
         assertThat(result.isSuccess).isTrue()
         assertThat(result.getOrNull()?.videoId).isEqualTo("searched_vid_123")
 
-        coVerify(exactly = 1) { mockInnerTube.searchSongs("Starboy The Weeknd", limit = 5) }
+        coVerify(exactly = 1) { mockInnerTube.searchVideos("Starboy The Weeknd", limit = 12) }
         coVerify(exactly = 1) { mockExtractor.resolveVideoStreamBundle("searched_vid_123") }
     }
 }
