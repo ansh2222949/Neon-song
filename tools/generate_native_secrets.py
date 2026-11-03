@@ -40,12 +40,23 @@ def resolve_env(name: str) -> str:
     val = os.environ.get(name, "").strip()
     if val:
         return val
-    if os.path.isfile(".env"):
-        with open(".env", "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith(f"{name}="):
-                    return line.split("=", 1)[1].strip()
+    # Gradle's signing and build configuration accepts both files. Read them
+    # here too so a secret stored in ignored local.properties reaches the
+    # native vault generator instead of silently appearing missing.
+    for path in (".env", "local.properties"):
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for raw_line in f:
+                    line = raw_line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    if key.strip() == name:
+                        return value.strip().strip("\"'")
+        except OSError:
+            continue
     return ""
 
 

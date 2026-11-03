@@ -54,8 +54,8 @@ jobs:
       - name: Require stable release signing credentials
         shell: bash
         run: |
-          if [ -z "$SIGNING_KEY" ] || [ -z "$RELEASE_STORE_PASSWORD" ]; then
-            echo "::error::Configure SIGNING_KEY and KEY_STORE_PASSWORD (or RELEASE_STORE_PASSWORD) in GitHub Actions secrets before publishing a release."
+          if [ -z "$ADDON_CLIENT_SECRET" ] || [ -z "$SIGNING_KEY" ] || [ -z "$RELEASE_STORE_PASSWORD" ]; then
+            echo "::error::Configure ADDON_CLIENT_SECRET, SIGNING_KEY, and KEY_STORE_PASSWORD (or RELEASE_STORE_PASSWORD) in GitHub Actions secrets before publishing a release."
             exit 1
           fi
 

@@ -55,6 +55,14 @@ jobs:
             keytool -genkeypair -alias androiddebugkey -keypass android -keystore ~/.android/debug.keystore -storepass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
           fi
 
+      - name: Require addon secret for release APK build
+        shell: bash
+        run: |
+          if [ -z "$ADDON_CLIENT_SECRET" ]; then
+            echo "::error::Configure ADDON_CLIENT_SECRET in GitHub Actions secrets before building release APKs."
+            exit 1
+          fi
+
       - name: Build Android 10 Release APKs (compressed + raw)
         env:
           ADDON_CLIENT_SECRET: ${{ secrets.ADDON_CLIENT_SECRET }}
