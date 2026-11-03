@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/License-GPLv3-blue?style=for-the-badge" alt="GPLv3" />
 </p>
 
-> **Origin and license:** Neon Song is a modified derivative of [LastWave Native](https://github.com/Clash-Projects/LastWave-Native). This project is released under GPL-3.0. See [NOTICE.md](NOTICE.md) for the upstream credit and modification notice.
+> **Personal project:** Neon Song is my personal, AI-assisted modification of [LastWave Native](https://github.com/Clash-Projects/LastWave-Native). It is an independent project, not an official LastWave release. The upstream project and this derivative are covered by GPL-3.0; see [NOTICE.md](NOTICE.md) for credits and change notes.
 
 ---
 
@@ -53,6 +53,22 @@ Screenshots were captured from a Samsung Galaxy S24 Ultra running Android 17.
 
 ---
 
+## What I changed for Neon Song
+
+I personally adapted this project with help from AI coding tools. The original LastWave Native project and its contributors remain credited; the features below describe the main Neon Song changes, not original authorship of the upstream code.
+
+- **Neon branding and Liquid Glass UI:** Apple-inspired translucent surfaces, animated player controls and loading states, updated search and queue panels, responsive artwork, and haptic feedback.
+- **More reliable playback handoff:** Resolve the next track at the selected quality before it is needed, warm up to three upcoming AutoDJ tracks, show the upcoming track in the player, detect the active stream format, and retry/fall back when a source fails.
+- **AutoDJ and AutoMix:** Dual-deck transitions, BPM/key-aware matching, crossfade curves, DJ controls, and a native audio mixing engine.
+- **Audio tools:** Parametric EQ, studio clarity controls, output and loudness settings, and device-aware spatial/Atmos and bit-perfect handling.
+- **Lossless providers:** Connect a compatible personal streaming add-on for FLAC, Hi-Res, or Dolby Atmos when that provider has a matching source. The app reports the source format and falls back when the requested source is unavailable.
+- **Video and offline listening:** Synchronized music-video playback, screen-off audio handoff, and downloads with artwork and track metadata.
+- **Build and release work:** Separate Android package branding, native Rust secret handling, and automated APK packaging/checksums.
+
+The inherited LastWave features—such as YouTube Music search and playback, background controls, synced lyrics, library tools, and downloads—remain credited to the upstream project. See [CHANGELOG.md](CHANGELOG.md) for release-by-release changes.
+
+---
+
 ## ✨ Features
 
 ### 🎧 4D Audiophile Player Experience
@@ -71,6 +87,16 @@ Screenshots were captured from a Samsung Galaxy S24 Ultra running Android 17.
 - **Ad-Free Music Streaming**: High-efficiency Opus / AAC streaming directly from YouTube Music.
 - **Background & Lockscreen Playback**: System notification controls with synced progress and media session integration.
 - **In-App Music Video Mode**: One-tap toggle to watch the official YouTube music video synchronized with current audio.
+
+### 🎚️ AutoDJ, AutoMix & Audio Tools
+- BPM/key-aware AutoDJ suggestions and dual-deck AutoMix transitions.
+- Choose transition curves and adjust DJ controls while a mix is playing.
+- Tune playback with the parametric equalizer, Studio Clarity, output settings, and device-aware spatial audio handling.
+
+### 🎼 Lossless & Hi-Res Add-ons
+- Connect a personal provider URL to request CD-quality FLAC, Hi-Res FLAC, or Dolby Atmos when available.
+- Choose a preferred maximum quality and see the format reported by the active stream.
+- If the provider or a matching lossless source is unavailable, playback can fall back to YouTube Music quality.
 
 ### 🎤 Real-Time Synced Karaoke Lyrics
 - Millisecond-accurate word & line synchronized lyrics.
@@ -96,27 +122,37 @@ Screenshots were captured from a Samsung Galaxy S24 Ultra running Android 17.
 
 ---
 
-## 🚀 Getting Started
+## 🎧 Enable Lossless, Hi-Res, or Dolby Atmos
 
-### Prerequisites
-- Android Studio Ladybug / Meerkat (or newer)
-- JDK 17 or higher
-- Android SDK 37 and NDK 28.2.13676358 (Target API 35, Min API 29)
+Lossless streaming needs a compatible external add-on; it is not included as a server in this repository.
 
-### Build & Run
-```bash
-# Clone the repository
-git clone https://github.com/ansh2222949/Neon-song.git
-cd Neon-song
+1. Follow the [official LastWave add-on guide](https://lastwave.app/addon/) to verify with Telegram or Discord and copy your personal add-on URL.
+2. In Neon Song, open **Settings → Provider Modules → Add Streaming Addon**, paste the complete URL (including `https://`), and tap **Connect**.
+3. Open **Settings → Audio & Playback → Audio Quality**, turn on Lossless Audio, and choose a preferred quality tier.
+4. Play a track. Available quality depends on the provider, track, network, and device; the app may use YouTube Music quality when no matching lossless source is available.
 
-# Assemble debug APK
-./gradlew assembleDebug
+The app does not ask for the add-on website password. Website verification gives you a private URL; keep that URL private and do not post it in screenshots or issues. The add-on is a separate service, so a DNS message such as “No address associated with hostname” means the service hostname could not be resolved. Check the URL and service availability; changing app settings cannot repair the provider's DNS.
 
-# Install directly to a connected device
-./gradlew installDebug
+## 🚀 Build from source
+
+### Quick build on Windows
+
+Install Android Studio, then use SDK Manager to install **Android SDK Platform 37**, **NDK 28.2.13676358**, and **CMake 3.22.1**. Also install **JDK 17 or newer**, **Python 3.9 or newer**, and the stable Rust toolchain.
+
+Open PowerShell in the cloned project folder and run:
+
+```powershell
+rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+cargo install cargo-ndk --locked
+$env:ANDROID_NDK_HOME = Join-Path $env:LOCALAPPDATA 'Android\Sdk\ndk\28.2.13676358'
+.\gradlew.bat :app:assembleDebug
 ```
 
-See [Builds and releases](builds/README.md) for local APK builds, phone downloads, and the signing requirements for GitHub releases.
+If Android Studio installed the SDK somewhere else, change the `ANDROID_NDK_HOME` path to that SDK's `ndk\28.2.13676358` folder. The debug APK appears at `app/build/outputs/apk/debug/app-debug.apk`. To install it on a connected phone, run `.\gradlew.bat :app:installDebug`.
+
+For macOS or Linux, install the same Android SDK, NDK, CMake, Python, and Rust components, set `ANDROID_NDK_HOME` to the installed NDK folder, then run `cargo install cargo-ndk --locked`, `rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android`, and `./gradlew :app:assembleDebug`.
+
+A normal debug build needs no private key and is suitable for trying the app's standard features. Add-on signing is intentionally unavailable in debuggable builds. For a private add-on-enabled release build, see [the local build and signing guide](builds/README.md); never commit a real secret or share an APK that contains one. GitHub release builds need maintainer-provided Actions secrets.
 
 ---
 
