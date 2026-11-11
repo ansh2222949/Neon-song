@@ -16,7 +16,12 @@
   <a href="https://isocpp.org"><img src="https://img.shields.io/badge/DSP-C%2B%2B20%20%7C%20Oboe%20%7C%20libsoxr-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white" alt="C++20 Audio Engine" /></a>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Vault-Rust%202021%20Native-DEA584?style=for-the-badge&logo=rust&logoColor=black" alt="Rust Native Vault" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-00B0FF?style=for-the-badge" alt="GPLv3 License" /></a>
-  <img src="https://img.shields.io/badge/Version-v4.2.5%20(Build%2025)-E91E63?style=for-the-badge" alt="Version 4.2.5" />
+  <a href="https://github.com/ansh2222949/Neon-song/releases/latest"><img src="https://img.shields.io/badge/Version-v4.2.5%20(Build%2025)-E91E63?style=for-the-badge" alt="Version 4.2.5" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/ansh2222949/Neon-song/releases/latest/download/NeonSong.apk"><img src="https://img.shields.io/badge/⚡_DOWNLOAD_APK-Neon_Song_v4.2.5_(Universal_Android)-00C853?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" /></a>
+  <a href="https://github.com/ansh2222949/Neon-song/releases/latest"><img src="https://img.shields.io/github/v/release/ansh2222949/Neon-song?color=7928CA&label=All%20Releases&logo=github&style=for-the-badge" alt="All Releases" /></a>
 </p>
 
 > **Origin & License Notice:** Neon Song is an advanced derivative of [LastWave Native](https://github.com/Clash-Projects/LastWave-Native), released under the **GNU General Public License v3.0 (GPL-3.0)**. See [NOTICE.md](NOTICE.md) and [LICENSE](LICENSE) for full licensing, third-party library notices, and upstream credits.
