@@ -5,24 +5,55 @@
 </p>
 
 <p align="center">
-  <b>Next-Generation Native Android Music Experience</b><br>
+  <b>Next-Generation Audiophile Android Music Experience</b><br>
   <i>Powered by 4D Liquid Glass UI, Song-Reactive Artwork Physics, Polyglot Native DSP Audio Engine (C++20 / Rust / Kotlin), and Lossless / Spatial Streaming.</i>
 </p>
 
+<!-- Primary Status & Release Badges -->
 <p align="center">
-  <a href="https://developer.android.com"><img src="https://img.shields.io/badge/Platform-Android%2010%2B%20(API%2029--35)-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android Platform" /></a>
-  <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Language-Kotlin%202.x-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Kotlin 2.x" /></a>
-  <a href="https://developer.android.com/jetpack/compose"><img src="https://img.shields.io/badge/UI-Jetpack%20Compose%20%7C%20Liquid%20Glass-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white" alt="Jetpack Compose" /></a>
-  <a href="https://isocpp.org"><img src="https://img.shields.io/badge/DSP-C%2B%2B20%20%7C%20Oboe%20%7C%20libsoxr-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white" alt="C++20 Audio Engine" /></a>
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Vault-Rust%202021%20Native-DEA584?style=for-the-badge&logo=rust&logoColor=black" alt="Rust Native Vault" /></a>
+  <a href="https://github.com/ansh2222949/Neon-song/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/ansh2222949/Neon-song/build.yml?branch=main&label=CI%20Build&logo=githubactions&logoColor=white&style=for-the-badge" alt="CI Build Status" /></a>
+  <a href="https://github.com/ansh2222949/Neon-song/releases/latest"><img src="https://img.shields.io/github/v/release/ansh2222949/Neon-song?color=E91E63&label=Latest%20Release&logo=android&logoColor=white&style=for-the-badge" alt="Latest Release" /></a>
+  <a href="https://github.com/ansh2222949/Neon-song/releases"><img src="https://img.shields.io/github/downloads/ansh2222949/Neon-song/total?color=00D26A&label=Downloads&logo=github&style=for-the-badge" alt="Total Downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-00B0FF?style=for-the-badge" alt="GPLv3 License" /></a>
-  <a href="https://github.com/ansh2222949/Neon-song/releases/latest"><img src="https://img.shields.io/badge/Version-v4.2.5%20(Build%2025)-E91E63?style=for-the-badge" alt="Version 4.2.5" /></a>
 </p>
 
+<!-- Tech Stack Badges -->
 <p align="center">
-  <a href="https://github.com/ansh2222949/Neon-song/releases/latest/download/NeonSong.apk"><img src="https://img.shields.io/badge/⚡_DOWNLOAD_APK-Neon_Song_v4.2.5_(Universal_Android)-00C853?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" /></a>
-  <a href="https://github.com/ansh2222949/Neon-song/releases/latest"><img src="https://img.shields.io/github/v/release/ansh2222949/Neon-song?color=7928CA&label=All%20Releases&logo=github&style=for-the-badge" alt="All Releases" /></a>
+  <a href="https://developer.android.com"><img src="https://img.shields.io/badge/Platform-Android%2010%2B%20(API%2029--35)-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android Platform" /></a>
+  <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Language-Kotlin%202.x-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin 2.x" /></a>
+  <a href="https://developer.android.com/jetpack/compose"><img src="https://img.shields.io/badge/UI-Jetpack%20Compose%20%7C%20Liquid%20Glass-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" alt="Jetpack Compose" /></a>
+  <a href="https://isocpp.org"><img src="https://img.shields.io/badge/DSP-C%2B%2B20%20%7C%20Oboe%20%7C%20libsoxr-00599C?style=flat-square&logo=c%2B%2B&logoColor=white" alt="C++20 Audio Engine" /></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Vault-Rust%202021%20Native-DEA584?style=flat-square&logo=rust&logoColor=black" alt="Rust Native Vault" /></a>
+  <img src="https://img.shields.io/badge/ELF%20Page--Size-16%20KB%20Aligned-FF9800?style=flat-square&logo=linux&logoColor=white" alt="16 KB Aligned" />
+  <img src="https://img.shields.io/badge/DSP%20Precision-32--bit%20Float-9C27B0?style=flat-square" alt="32-bit Float" />
 </p>
+
+<!-- Value Props Badges -->
+<p align="center">
+  <img src="https://img.shields.io/badge/Privacy-100%25%20Offline%20%7C%20No%20Tracking-2E7D32?style=flat-square" alt="No Tracking" />
+  <img src="https://img.shields.io/badge/Monetization-Zero%20Ads%20%7C%20Free%20Forever-00897B?style=flat-square" alt="Zero Ads" />
+  <img src="https://img.shields.io/badge/Audio-Lossless%20FLAC%20%2B%20320kbps-D81B60?style=flat-square" alt="Lossless Audio" />
+  <img src="https://img.shields.io/badge/DAC-Bit--Perfect%20USB%20Direct-3949AB?style=flat-square" alt="USB Direct" />
+</p>
+
+<br>
+
+<!-- Prominent 1-Click Action Buttons -->
+<p align="center">
+  <a href="https://github.com/ansh2222949/Neon-song/releases/latest/download/NeonSong.apk">
+    <img src="https://img.shields.io/badge/⚡_DOWNLOAD_APK-v4.2.5_(Universal_Android_10+)-00C853?style=for-the-badge&logo=android&logoColor=white" height="42" alt="Download Universal APK" />
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/ansh2222949/Neon-song/releases/download/v4.2.5/Neon.Song-v4.2.5-android7.apk">
+    <img src="https://img.shields.io/badge/📱_LEGACY_APK-Android_7--9-2979FF?style=for-the-badge&logo=android&logoColor=white" height="42" alt="Download Legacy APK" />
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/ansh2222949/neon-audio-gateway">
+    <img src="https://img.shields.io/badge/🌐_AUDIO_GATEWAY-Cloudflare_Worker-FF6F00?style=for-the-badge&logo=cloudflare&logoColor=white" height="42" alt="Neon Audio Gateway" />
+  </a>
+</p>
+
+<br>
 
 > **Origin & License Notice:** Neon Song is an advanced derivative of [LastWave Native](https://github.com/Clash-Projects/LastWave-Native), released under the **GNU General Public License v3.0 (GPL-3.0)**. See [NOTICE.md](NOTICE.md) and [LICENSE](LICENSE) for full licensing, third-party library notices, and upstream credits.
 
@@ -257,11 +288,16 @@ Neon Song features a native modular streaming engine that supports open-standard
 
 ## 📥 Download & Installation
 
-### Direct APK Installation (Recommended)
-1. Download the latest precompiled APK:
-   - **Direct Link**: [Download NeonSong.apk](https://github.com/ansh2222949/Neon-song/releases/latest/download/NeonSong.apk)
-   - **Release Hub**: [Browse All Releases](https://github.com/ansh2222949/Neon-song/releases)
-2. On your Android device (Android 10+), open the downloaded `.apk` file and tap **Install**.
+### Available Builds (v4.2.5)
+
+| Package | Target OS | Architecture | File Size | Direct Download |
+|---|---|---|---|---|
+| **Universal Release APK** *(Recommended)* | Android 10+ (API 29–35) | `arm64-v8a`, `armeabi-v7a`, `x86_64` | **36.3 MB** | [⚡ Download `NeonSong.apk`](https://github.com/ansh2222949/Neon-song/releases/latest/download/NeonSong.apk) |
+| **Optimized Release APK** | Android 10+ (API 29–35) | `arm64-v8a`, `armeabi-v7a` | **36.3 MB** | [📦 Download Release APK](https://github.com/ansh2222949/Neon-song/releases/download/v4.2.5/Neon.Song-v4.2.5-release.apk) |
+| **Legacy Android 7 APK** | Android 7.0 – 9.0 (API 24–28) | Multi-arch | **30.0 MB** | [📱 Download Legacy APK](https://github.com/ansh2222949/Neon-song/releases/download/v4.2.5/Neon.Song-v4.2.5-android7.apk) |
+| **SHA-256 Checksums** | All Builds | Text | < 1 KB | [🔒 View `SHA256SUMS.txt`](https://github.com/ansh2222949/Neon-song/releases/download/v4.2.5/SHA256SUMS.txt) |
+
+> 💡 **Installation Note:** On Android, when prompted by your browser or file manager, enable **"Install unknown apps"** for that source, then tap **Install**. All APKs are compiled directly from source via GitHub Actions.
 
 ---
 
