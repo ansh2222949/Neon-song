@@ -1,0 +1,66 @@
+# Contributing to Neon Song
+
+Thank you for your interest in contributing to Neon Song. This document outlines the development workflow, code standards, and submission guidelines.
+
+
+## Getting Started
+
+### Prerequisites
+* Android Studio Ladybug or newer
+* JDK 17 (Temurin recommended)
+* Android SDK 37 & NDK 28.2.13676358
+* Git
+
+### Cloning the Repository
+```bash
+git clone https://github.com/ansh2222949/Neon-song.git
+cd Neon-song
+```
+
+### Community & Questions
+For development discussions, suggestions, and feedback:
+* GitHub Discussions: https://github.com/ansh2222949/Neon-song/discussions
+* Issue Tracker: https://github.com/ansh2222949/Neon-song/issues
+
+### Local Configuration
+Copy `.env.example` to `.env` to supply build-time environment properties:
+```bash
+cp .env.example .env
+```
+
+## Architecture Overview
+
+Neon Song is built using modern Android architecture patterns:
+* **UI Layer:** Jetpack Compose with app-owned Liquid Glass controls and Navigation Compose.
+* **Audio Engine:** ExoPlayer / Media3 with Jellyfin FFmpeg software decoders and custom C++ DSP processing (`AudioEngine.cpp`).
+* **Dependency Injection:** Dagger Hilt.
+* **Storage & Caching:** Room Database, DataStore Preferences.
+* **Networking:** Retrofit, OkHttp 4, Kotlinx Serialization.
+
+## Development Guidelines
+
+### Branching Strategy
+* `main` contains the latest stable development code.
+* Create feature or bugfix branches from `main` using descriptive names:
+  * `feat/your-feature-name`
+  * `fix/issue-description`
+
+### Code Style & Quality
+* Follow official Kotlin coding conventions and Android Architecture recommendations.
+* Keep composables focused, stateless where possible, and extract complex state into ViewModels.
+* Ensure all native C++ code respects 16KB memory page alignment constraints for Android 15+.
+* Avoid embedding hardcoded API secrets or URLs directly in source files.
+
+### Testing
+Run local unit tests before opening a pull request:
+```bash
+./gradlew testDebugUnitTest
+```
+
+## Submitting a Pull Request
+
+1. Push your branch to your fork.
+2. Open a Pull Request against the `main` branch.
+3. Provide a concise summary of changes, problem analysis, and testing steps in the PR description.
+4. Ensure continuous integration checks pass.
+5. Address reviewer feedback promptly.

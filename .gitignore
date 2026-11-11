@@ -1,0 +1,118 @@
+# Built application files
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Files for the ART/Dalvik VM
+*.dex
+
+# Java and Python compiled files
+*.class
+__pycache__/
+*.pyc
+
+# Generated build files
+build/
+**/build/
+.gradle/
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+.navigation/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Local configuration file (contains SDK location, private tokens)
+local.properties
+
+# Log files
+*.log
+
+# Keystore files
+*.jks
+*.keystore
+*.p12
+*.pem
+
+# OS & Tooling
+.DS_Store
+Thumbs.db
+.acside/
+.codex/
+.codex*
+*.codex
+*.codex*
+*.pid
+
+# Credentials & Environment
+Screenshot/release.jks
+keystore_credentials.txt
+.env
+.wrangler/
+.gradle_home/
+# Bundled provider modules (.lwp packages)
+app/src/main/assets/modules/
+*.lwp
+tools/*
+!tools/generate_native_secrets.py
+!tools/verify_vault_binary.py
+provider.js
+# Single raw provider source at repo base only (plaintext JSON, encrypted at build)
+provider.json
+# Local Kotlin daemon state
+.kotlin/
+# Local editor/runtime state
+/.glance_core/
+# Native generated secrets (CI only, never commit)
+app/src/main/cpp/SecretsBridge_generated.h
+security/neonsong-vault/src/secrets_generated.rs
+
+# Rust build artifacts
+target/
+**/target/
+
+
+# Addon service & credentials (never commit)
+addon-service/
+*.zip
+credentials_backup*
+
+# Isolated git worktrees (never commit their contents)
+.worktrees/
+
+# OpenCode local agent data & caches
+.opencode/
+
+# Local databases, media samples and diagnostic dumps
+/neonsong.db
+/am_dump.xml
+/dump_now.xml
+/sample_music.mp3
+/test.mp3
+
+# Temporary scripts and source snapshots created during local work
+/scratch/
+/backup_*/
+/security/neonsong-vault/backup_oct23/
+
+# Internal generated audit/research reports: review and sanitize before publishing
+/AI_PROJECT_*.md
+/ANDROID_BACKEND_AUDIT_AND_PLAN.md
+/APPLE_MUSIC_UI_AND_AUDIO_REDESIGN.md
+/AUDIO_ENGINE_*_REDESIGN.md
+/NEON_SONG_*.md
+/STAGE_*.md
+/UI_*_REPORT.md
+/UI_*_BASELINE.md
+/UI_*_MATRIX.md
+
+# Temporary logs & reference extraction
+reference zip/
+run_log*.txt
+.vscode/
+*.url
+
+

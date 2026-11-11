@@ -1,0 +1,8 @@
+{
+  "version": "4.2.5",
+  "versionCode": 25,
+  "changelog": "• Initial release of Neon Song\n• Pure Liquid Glass UI and song-reactive fluid artwork backgrounds\n• High-fidelity native audio engine, bit-perfect playback and AutoDJ",
+  "downloadUrl": "https://github.com/ansh2222949/Neon-song/releases/latest/download/NeonSong.apk",
+  "releaseUrl": "https://github.com/ansh2222949/Neon-song/releases/latest",
+  "isMandatory": false
+}

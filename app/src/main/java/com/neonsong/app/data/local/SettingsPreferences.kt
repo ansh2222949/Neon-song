@@ -1,0 +1,815 @@
+package com.neonsong.app.data.local
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.withContext
+import javax.inject.Inject
+import javax.inject.Singleton
+
+enum class SpatialImmersionPreset(
+    val id: String,
+    val title: String,
+    val shortTitle: String,
+    val description: String,
+    val strength: Float,
+) {
+    STUDIO_NEARFIELD(
+        id = "studio_nearfield",
+        title = "Studio Nearfield",
+        shortTitle = "Nearfield",
+        description = "Gentle spatial mix for a focused, nearby soundstage.",
+        strength = 0.52F,
+    ),
+    CONCERT_HALL(
+        id = "concert_hall",
+        title = "Concert Hall",
+        shortTitle = "Hall",
+        description = "Balanced width and depth for everyday listening.",
+        strength = 0.74F,
+    ),
+    CINEMA_DOME(
+        id = "cinema_dome",
+        title = "Cinema Dome",
+        shortTitle = "Dome",
+        description = "Stronger mix intensity for a wider virtual stage.",
+        strength = 0.94F,
+    );
+
+    companion object {
+        val DEFAULT = CONCERT_HALL
+
+        fun fromId(id: String?): SpatialImmersionPreset =
+            entries.firstOrNull { it.id == id } ?: DEFAULT
+    }
+}
+
+enum class LyricsUiVersion(val id: String, val title: String) {
+    CLASSIC("classic", "Classic"),
+    MODERN("modern", "Modern");
+
+    companion object {
+        fun fromId(id: String?): LyricsUiVersion =
+            entries.firstOrNull { it.id == id } ?: MODERN
+    }
+}
+
+enum class LyricsAnimation(val id: String, val title: String, val description: String) {
+    APPLE_FLUID("apple_fluid", "Apple Fluid", "Smooth spring scaling with dynamic focal tracking"),
+    KARAOKE_PULSE("karaoke_pulse", "Karaoke Pulse", "Rhythmic scale pop with energetic spring bounce"),
+    KINETIC_SLIDE("kinetic_slide", "Kinetic Slide", "Active line glides smoothly from leading edge"),
+    CINEMATIC_BLUR("cinematic_blur", "Cinematic Focus", "Soft background blur & vertical drift on past lines"),
+    LOSSLESS_GLOW("lossless_glow", "Lossless Glow", "Vibrant gradient text with frosted glass reflection"),
+    CARD_POP("card_pop", "Glass Elevation", "3D floating glass card lift with specular highlights"),
+    APPLE_ZOOM("apple_zoom", "Dynamic Focus Zoom", "Expanded focal magnification with fluid spring push"),
+    MINIMAL_WAVE("minimal_wave", "Minimal Clean", "Pure low-latency opacity transitions without distortion");
+
+    companion object {
+        fun fromId(id: String?): LyricsAnimation =
+            entries.firstOrNull { it.id == id } ?: APPLE_FLUID
+    }
+}
+
+/** Preferred lyrics source. Apple Music (syllable-synced) is the default:
+ *  it is tried first and the app falls through to the rest automatically
+ *  when it returns nothing. AUTO keeps the legacy behavior (race the
+ *  word-sync providers, LRCLIB line-sync fallback). Provider names are
+ *  proper nouns — no localization needed. */
+enum class LyricsProvider(val id: String, val title: String, val subtitle: String) {
+    AUTO("auto", "Auto", "Fastest word-sync wins, LRCLIB fallback"),
+    NEONSONG("neonsong", "Neon Song", "Syllable & line-synced Apple lyrics first"),
+    APPLE_MUSIC("apple_music", "Apple Music", "Syllable-synced Apple Music lyrics first"),
+    BETTER_LYRICS("better_lyrics", "BetterLyrics", "Word-synced lyrics first"),
+    KUGOU("kugou", "Kugou", "KRC word-synced lyrics first"),
+    BINI_LYRICS("bini_lyrics", "Syllable-Sync", "Recording-matched syllable lyrics first"),
+    SIMP_MUSIC("simp_music", "Video-Match", "Matched on the playing video first"),
+    MUSIXMATCH("musixmatch", "Catalog", "Largest catalogue line-sync first"),
+    LRCLIB("lrclib", "LRCLIB", "Line-synced community lyrics first");
+
+    val isWordProvider: Boolean get() =
+        this == NEONSONG || this == APPLE_MUSIC || this == BETTER_LYRICS || this == KUGOU ||
+            this == BINI_LYRICS || this == SIMP_MUSIC || this == MUSIXMATCH
+
+    companion object {
+        fun fromId(id: String?): LyricsProvider =
+            entries.firstOrNull { it.id == id } ?: AUTO
+    }
+}
+
+data class MiscSettings(
+    /** Optional local image shown as the user's Settings identity photo. */
+    val settingsPhotoUri: String = "",
+    /** When on, the app's accent color follows the dominant color of the
+     *  currently-scrobbling track's artwork (Home's "now playing" track),
+     *  updating live as that track changes. Falls back to the user's
+     *  regular selected accent whenever nothing is playing or artwork
+     *  colors can't be extracted — see ThemeRepository.updateNowPlayingArtwork. */
+    val dynamicNowPlayingEnabled: Boolean = false,
+    /** "Use Application Font" — on: the bundled Google Sans Flex variable
+     *  font (see ui/theme/Type.kt); off: the device's own system font.
+     *  Defaults on so the app ships with its own identity out of the box. */
+    val useCustomFont: Boolean = true,
+    /** Last.fm usernames pinned to the top of Home's friend-switcher sheet
+     *  (long-press a friend row to toggle). Order among pinned friends
+     *  follows whatever order user.getfriends itself returns them in —
+     *  just filtered to the front, not independently reorderable. */
+    val pinnedFriends: Set<String> = emptySet(),
+    /** When true, the player attempts to resolve and stream lossless / Hi-Res audio
+     *  directly from lossless CDN when a high-confidence match exists. Falls back to YouTube Music. */
+    val preferLosslessStreaming: Boolean = true,
+    /** When true, the player also queries installed provider modules in
+     *  parallel with the addon; a module hit plays instantly on miss. */
+    val preferProviderModules: Boolean = true,
+    /** Preferred quality preset for lossless streaming (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k).
+     *  If a track does not support the requested quality, the worker automatically selects the highest available. */
+    val losslessQuality: Int = 27,
+    /** Preferred quality preset for cellular streaming. */
+    val cellularStreamingQuality: Int = 27,
+    /** Preferred quality preset for Wi-Fi streaming. */
+    val wifiStreamingQuality: Int = 27,
+    /** Preferred quality preset for downloads (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k, -1: YouTube Music). */
+    val downloadQuality: Int = 27,
+    /** Dolby Atmos spatial audio mode: "Automatic", "Always On", "Off". */
+    val dolbyAtmosMode: String = "Automatic",
+    /** Optional studio-clarity curve. On by default; Bit-Perfect disables it. */
+    val isStudioMasterClarityEnabled: Boolean = true,
+    /** Clarity output preset index (0 Reference, 1 Speaker, 2 Headphone, 3 DAC). */
+    val clarityPreset: Int = 0,
+    /** When true, the clarity chain bypasses on multichannel/spatial sources. */
+    val clarityAtmosBypass: Boolean = false,
+    /** When true, completely bypasses DSP, EQ, tone effects, and software volume ducking for bit-exact audio. */
+    val isBitPerfectEnabled: Boolean = false,
+    /** System audio-effects mode (Settings -> Experimental). Off by default:
+     *  when on, the app flattens its own DSP on mixer routes and publishes
+     *  the audio session so external equalizer apps / OEM Dolby can process
+     *  playback. Bypass routes (USB exclusive, bit-perfect) suspend it. */
+    val systemEffectsMode: Boolean = false,
+    /** When true, shows floating button now playing instead of the bottom mini player card (Settings -> Experimental). */
+    val buttonNowPlayingEnabled: Boolean = false,
+    /** Lyrics UI layout version (Classic or Modern). */
+    val lyricsUiVersion: LyricsUiVersion = LyricsUiVersion.MODERN,
+    val wordByWordLyrics: Boolean = true,
+    /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
+    val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
+    /** Preferred lyrics source (Settings -> Experimental -> Lyrics Provider).
+     *  AUTO races all providers (fastest valid word-sync wins); an explicit
+     *  pick is tried first with the rest as fallback. */
+    val lyricsProvider: LyricsProvider = LyricsProvider.AUTO,
+    val lyricsOffsetMs: Long = 0L,
+    /** Scale factor applied to lyrics font size across both modern and classic views.
+     *  Default 1.0f (100%), clamped between 0.7f (70%) and 1.5f (150%). */
+    val lyricsFontScale: Float = 1.0f,
+    /** Blend the end of one queued track into the beginning of the next. */
+    val crossfadeEnabled: Boolean = false,
+    /** Crossfade length in seconds; kept within the native settings slider range. */
+    val crossfadeSeconds: Int = 5,
+    val automixEnabled: Boolean = false,
+    val automixBars: Int = 8,
+    val autoDJEnabled: Boolean = true,
+    val musicVideoEnabled: Boolean = false,
+    val ytMusicHiddenSections: Set<String> = emptySet(),
+    val ytMusicSectionsOrder: List<String> = emptyList(),
+    val suppressYouTubeLoginPrompt: Boolean = false,
+    /** When true (default), uses the multi-layer dynamic wavy seekbar.
+     *  When false, uses the classic standard progress slider in the player tab. */
+    val wavySeekbarEnabled: Boolean = true,
+    /** When true (default), animates fluid rotating artwork in the player and lyrics background.
+     *  When false, uses a calm static blurred artwork background (especially recommended for Android 11 and below). */
+    val rotatingBackgroundEnabled: Boolean = true,
+    /** When true (default), downloads fetch and save synced lyrics (.lrc companion files and embedded tags). */
+    val downloadLyrics: Boolean = true,
+    /** In-app language override tag: "system" (default), "en", "tr", "zh-Hans". */
+    val appLanguageTag: String = AppLanguage.SYSTEM.tag,
+    /** Subfolder name under public Music/ where downloads are saved.
+     *  Default "Neon Song" -> Music/Neon Song. Scoped storage (API 29+)
+     *  forbids arbitrary paths, so only the leaf folder name is configurable. */
+    val downloadFolder: String = DEFAULT_DOWNLOAD_FOLDER,
+    /** User-chosen SAF tree Uri (ACTION_OPEN_DOCUMENT_TREE) for downloads,
+     *  e.g. a folder on the SD card. Blank = default Music/<downloadFolder>.
+     *  Persisted via takePersistableUriPermission so it survives reboots. */
+    val downloadTreeUri: String = "",
+    /** Subfolder layout under Music/<downloadFolder>/ (flat by default). */
+    val downloadStructure: DownloadFolderStructure = DownloadFolderStructure.FLAT,
+    /** When true, folder names use the album-artist tag when available (falls back to track artist). */
+    val useAlbumArtistForFolders: Boolean = true,
+    /** When true, folder names use only the primary artist (strips feat./collaborators). */
+    val primaryArtistOnly: Boolean = true,
+    /** User configured HTTP Addon URL (e.g. http://localhost:8787/a/<token>/). */
+    val addonUrl: String = "",
+    /** Display name discovered from the addon's manifest. */
+    val addonName: String = "",
+    /** User configured HTTP Addon signing key / secret token. */
+    val addonSigningKey: String = "",
+    /** When true, the addon is active for search, streaming, and downloads. */
+    val addonEnabled: Boolean = true,
+    /** Ids of Home tab sections the user hid ([HomeSection.id]).
+     *  Empty = everything visible. Unknown ids are dropped on read. */
+    val hiddenHomeSections: Set<String> = emptySet(),
+    /** When true, Animated Album Canvas motion video loops are displayed. */
+    val canvasEnabled: Boolean = true,
+    /** When true, portrait motion artwork is displayed edge-to-edge behind player controls. */
+    val canvasFullBleed: Boolean = true,
+    /** When true, canvas video loops may be fetched over cellular data. */
+    val canvasOverCellular: Boolean = true,
+    /** Audiophile Bauer / Meier acoustic crossfeed filter for headphone listening fatigue reduction. */
+    val bauerCrossfeedEnabled: Boolean = false,
+    /** Analog tube warmth & soft-clipping tape saturation harmonics. */
+    val analogTubeWarmthEnabled: Boolean = false,
+    /** Mono bass summing filter (<120 Hz) to eliminate low-frequency phase cancellation. */
+    val monoBassEnabled: Boolean = false,
+    /** AutoMix transition curve: 0 = Equal Power, 1 = Smooth S-Curve, 2 = Club Bass Swap, 3 = Fast Drop. */
+    val automixCurveType: Int = 0,
+    /** Bluetooth AAC & lossy True-Peak Headroom (-1.2 dBFS margin). Default is true (Auto-engages on Bluetooth). */
+    val bluetoothHeadroomEnabled: Boolean = true,
+    /** 3D Spatial + Studio Immersion with Mid/Side phase-pure vocal lock & pinna air. */
+    val spatialImmersionEnabled: Boolean = false,
+    /** Selected spatial mix intensity; this does not select a physical speaker layout. */
+    val spatialImmersionPreset: SpatialImmersionPreset = SpatialImmersionPreset.DEFAULT,
+    /** 3D HRTF spherical Woodworth scale calibration factor (0.85f .. 1.18f). Default 1.00f (KEMAR). */
+    val hrtfHeadScale: Float = 1.00f,
+    /** Vocal vs. Instrument 3D Separation ratio (0.00f .. 1.00f). Default 0.75f (Studio 3D). */
+    val vocalInstrumentSeparation: Float = 0.75f,
+    /** Apple-Style Music Haptics with dual-layer hardware LRA haptic beats. */
+    val musicHapticsEnabled: Boolean = false,
+    /** Music Haptics mode: "beats_only", "full_song", "vocals_melody", "bass_heavy". */
+    val musicHapticsMode: String = "beats_only",
+    /** Music Haptics intensity: "low", "normal", "strong". */
+    val musicHapticsIntensity: String = "normal",
+    /** Smart auto-switch for Studio Master Clarity & per-device saved EQ profiles. */
+    val smartRouteAutoSwitchEnabled: Boolean = true,
+)
+
+/** Toggleable sections of the Home tab (see FeedScreen). Hero greeting and
+ *  footer are structural; everything listed here can be hidden by the user.
+ *  Titles are string resources so HomeSectionsScreen follows the app language. */
+enum class HomeSection(val id: String, val titleRes: Int, val subtitleRes: Int) {
+    HERO("hero", com.neonsong.app.R.string.home_section_hero_title, com.neonsong.app.R.string.home_section_hero_sub),
+    QUICK_TILES("quick_tiles", com.neonsong.app.R.string.home_section_quick_tiles_title, com.neonsong.app.R.string.home_section_quick_tiles_sub),
+    TASTE_STRIP("taste_strip", com.neonsong.app.R.string.home_section_taste_strip_title, com.neonsong.app.R.string.home_section_taste_strip_sub),
+    QUICK_PICKS("quick_picks", com.neonsong.app.R.string.home_section_quick_picks_title, com.neonsong.app.R.string.home_section_quick_picks_sub),
+    BECAUSE_YOU_LISTEN_TO("because_you_listen_to", com.neonsong.app.R.string.home_section_because_title, com.neonsong.app.R.string.home_section_because_sub),
+    FRESH_FINDS("fresh_finds", com.neonsong.app.R.string.home_section_fresh_title, com.neonsong.app.R.string.home_section_fresh_sub),
+    JUMP_BACK_IN("jump_back_in", com.neonsong.app.R.string.home_section_jump_title, com.neonsong.app.R.string.home_section_jump_sub),
+    MIXES("mixed_for_you", com.neonsong.app.R.string.home_section_mixes_title, com.neonsong.app.R.string.home_section_mixes_sub),
+    SPOTLIGHT("spotlight_hero", com.neonsong.app.R.string.home_section_spotlight_title, com.neonsong.app.R.string.home_section_spotlight_sub),
+    TOP_ARTISTS("top_artists", com.neonsong.app.R.string.home_section_artists_title, com.neonsong.app.R.string.home_section_artists_sub),
+    HEAVY_ROTATION("heavy_rotation", com.neonsong.app.R.string.home_section_heavy_title, com.neonsong.app.R.string.home_section_heavy_sub),
+    ALBUMS("albums_in_rotation", com.neonsong.app.R.string.home_section_albums_title, com.neonsong.app.R.string.home_section_albums_sub),
+    CHARTS("trending_charts", com.neonsong.app.R.string.home_section_charts_title, com.neonsong.app.R.string.home_section_charts_sub),
+    NEW_RELEASES("new_releases", com.neonsong.app.R.string.home_section_releases_title, com.neonsong.app.R.string.home_section_releases_sub),
+    FRIENDS("friends_activity", com.neonsong.app.R.string.home_section_friends_title, com.neonsong.app.R.string.home_section_friends_sub);
+
+    companion object {
+        fun fromId(id: String?): HomeSection? =
+            entries.firstOrNull { it.id == id }
+    }
+}
+
+/** Subfolder layout for downloaded tracks under Music/<downloadFolder>/.
+ *  Titles are string resources; [example] stays raw (filesystem paths are universal). */
+enum class DownloadFolderStructure(val id: String, val titleRes: Int, val example: String, val shortLabelRes: Int) {
+    FLAT("flat", com.neonsong.app.R.string.dl_struct_flat_title, "Music/<dir>/song.flac", com.neonsong.app.R.string.dl_struct_flat_short),
+    ARTIST_ALBUM("artist_album", com.neonsong.app.R.string.dl_struct_artist_album_title, "Artist/Album/", com.neonsong.app.R.string.dl_struct_artist_album_short),
+    ARTIST_YEAR_ALBUM("artist_year_album", com.neonsong.app.R.string.dl_struct_artist_year_album_title, "Artist/[2025] Album/", com.neonsong.app.R.string.dl_struct_artist_year_album_short),
+    ALBUM_ONLY("album_only", com.neonsong.app.R.string.dl_struct_album_only_title, "Album/", com.neonsong.app.R.string.dl_struct_album_only_short),
+    YEAR_ALBUM("year_album", com.neonsong.app.R.string.dl_struct_year_album_title, "[2025] Album/", com.neonsong.app.R.string.dl_struct_year_album_short),
+    ARTIST_ALBUM_SINGLES("artist_album_singles", com.neonsong.app.R.string.dl_struct_artist_album_singles_title, "Artist/Album/ and Artist/Singles/", com.neonsong.app.R.string.dl_struct_artist_album_singles_short),
+    ARTIST_ALBUM_SINGLES_FLAT("artist_album_singles_flat", com.neonsong.app.R.string.dl_struct_artist_album_singles_flat_title, "Artist/Album/ and Artist/song.flac", com.neonsong.app.R.string.dl_struct_artist_album_singles_flat_short);
+
+    companion object {
+        fun fromId(id: String?): DownloadFolderStructure =
+            entries.firstOrNull { it.id == id } ?: FLAT
+    }
+}
+
+/** Default subfolder under Music/ for offline tracks (Music/Neon Song). */
+const val DEFAULT_DOWNLOAD_FOLDER = "Neon Song"
+
+/** Sanitize a user-entered download folder to a safe single path segment:
+ *  no separators, no traversal, max 40 chars, fallback to default. */
+fun sanitizeDownloadFolderName(raw: String?): String {
+    var name = raw?.trim().orEmpty()
+    // Prevent path traversal: keep only the last segment.
+    name = name.split('/', '\\').lastOrNull()?.trim().orEmpty()
+    name = name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().trim('.', '_').trim()
+    if (name.length > 40) name = name.take(40).trim()
+    if (name.isBlank() || name == "." || name == "..") return DEFAULT_DOWNLOAD_FOLDER
+    return name
+}
+
+/** Small dedicated prefs object for settings that don't fit ThemePreferences
+ *  or SessionPreferences semantically — shares the app's single DataStore. */
+@Singleton
+class SettingsPreferences @Inject constructor(
+    private val dataStore: DataStore<Preferences>,
+    @ApplicationContext private val appContext: Context,
+) {
+    private object Keys {
+        val DYNAMIC_NOW_PLAYING = booleanPreferencesKey("lw_dynamic_now_playing")
+        val SETTINGS_PHOTO_URI = stringPreferencesKey("lw_settings_photo_uri")
+        val USE_CUSTOM_FONT = booleanPreferencesKey("lw_use_custom_font")
+        val PINNED_FRIENDS = stringSetPreferencesKey("lw_pinned_friends")
+        val PREFER_LOSSLESS_STREAMING = booleanPreferencesKey("lw_prefer_lossless_streaming")
+        val PREFER_PROVIDER_MODULES = booleanPreferencesKey("lw_prefer_provider_modules")
+        val LOSSLESS_QUALITY = intPreferencesKey("lw_lossless_quality")
+        val CELLULAR_STREAMING_QUALITY = intPreferencesKey("lw_cellular_streaming_quality")
+        val WIFI_STREAMING_QUALITY = intPreferencesKey("lw_wifi_streaming_quality")
+        val DOWNLOAD_QUALITY = intPreferencesKey("lw_download_quality")
+        val DOLBY_ATMOS_MODE = stringPreferencesKey("lw_dolby_atmos_mode")
+        val MUSIC_ENHANCER = booleanPreferencesKey("lw_music_enhancer")
+        val CLARITY_PRESET = intPreferencesKey("lw_clarity_preset")
+        val CLARITY_ATMOS_BYPASS = booleanPreferencesKey("lw_clarity_atmos_bypass")
+        val BIT_PERFECT_ENABLED = booleanPreferencesKey("lw_bit_perfect_enabled")
+        val LYRICS_UI_VERSION = stringPreferencesKey("lw_lyrics_ui_version")
+        val WORD_BY_WORD_LYRICS = booleanPreferencesKey("lw_word_by_word_lyrics")
+        val LYRICS_ANIMATION = stringPreferencesKey("lw_lyrics_animation")
+        val LYRICS_PROVIDER = stringPreferencesKey("lw_lyrics_provider")
+        val LYRICS_OFFSET_MS = longPreferencesKey("lw_lyrics_offset_ms")
+        val LYRICS_FONT_SCALE = floatPreferencesKey("lw_lyrics_font_scale")
+        val CROSSFADE_ENABLED = booleanPreferencesKey("lw_crossfade_enabled")
+        val CROSSFADE_SECONDS = intPreferencesKey("lw_crossfade_seconds")
+        val AUTOMIX_ENABLED = booleanPreferencesKey("lw_automix_enabled")
+        val AUTOMIX_BARS = intPreferencesKey("lw_automix_bars")
+        val AUTODJ_ENABLED = booleanPreferencesKey("lw_autodj_enabled")
+        val WAVY_SEEKBAR_ENABLED = booleanPreferencesKey("lw_wavy_seekbar_enabled")
+        val ROTATING_BACKGROUND_ENABLED = booleanPreferencesKey("lw_rotating_background_enabled")
+        val DOWNLOAD_LYRICS = booleanPreferencesKey("lw_download_lyrics")
+        val APP_LANGUAGE = stringPreferencesKey("lw_app_language")
+        val DOWNLOAD_FOLDER = stringPreferencesKey("lw_download_folder")
+        val DOWNLOAD_TREE_URI = stringPreferencesKey("lw_download_tree_uri")
+        val DOWNLOAD_STRUCTURE = stringPreferencesKey("lw_download_structure")
+        val SYSTEM_EFFECTS_MODE = booleanPreferencesKey("lw_system_effects_mode")
+        val BUTTON_NOW_PLAYING_ENABLED = booleanPreferencesKey("lw_button_now_playing_enabled")
+        val MUSIC_VIDEO_ENABLED = booleanPreferencesKey("lw_music_video_enabled")
+        val USE_ALBUM_ARTIST_FOLDERS = booleanPreferencesKey("lw_use_album_artist_folders")
+        val PRIMARY_ARTIST_ONLY = booleanPreferencesKey("lw_primary_artist_only")
+        val HIDDEN_HOME_SECTIONS = stringSetPreferencesKey("lw_hidden_home_sections")
+        val YT_MUSIC_HIDDEN_SECTIONS = stringSetPreferencesKey("lw_yt_music_hidden_sections")
+        val YT_MUSIC_SECTIONS_ORDER = stringPreferencesKey("lw_yt_music_sections_order")
+        val ADDON_URL = stringPreferencesKey("lw_addon_url")
+        val ADDON_NAME = stringPreferencesKey("lw_addon_name")
+        val ADDON_SIGNING_KEY = stringPreferencesKey("lw_addon_signing_key")
+        val ADDON_ENABLED = booleanPreferencesKey("lw_addon_enabled")
+        val CANVAS_ENABLED = booleanPreferencesKey("lw_canvas_enabled")
+        val CANVAS_FULL_BLEED = booleanPreferencesKey("lw_canvas_full_bleed")
+        val CANVAS_OVER_CELLULAR = booleanPreferencesKey("lw_canvas_over_cellular")
+        val SUPPRESS_YOUTUBE_LOGIN_PROMPT = booleanPreferencesKey("lw_suppress_youtube_login_prompt")
+        val BAUER_CROSSFEED_ENABLED = booleanPreferencesKey("lw_bauer_crossfeed_enabled")
+        val ANALOG_TUBE_WARMTH_ENABLED = booleanPreferencesKey("lw_analog_tube_warmth_enabled")
+        val MONO_BASS_ENABLED = booleanPreferencesKey("lw_mono_bass_enabled")
+        val AUTOMIX_CURVE_TYPE = intPreferencesKey("lw_automix_curve_type")
+        val BLUETOOTH_HEADROOM_ENABLED = booleanPreferencesKey("lw_bluetooth_headroom_enabled")
+        val SPATIAL_IMMERSION_ENABLED = booleanPreferencesKey("lw_spatial_immersion_enabled")
+        val SPATIAL_IMMERSION_PRESET = stringPreferencesKey("lw_spatial_immersion_preset")
+        val HRTF_HEAD_SCALE = floatPreferencesKey("lw_hrtf_head_scale")
+        val VOCAL_INSTRUMENT_SEPARATION = floatPreferencesKey("lw_vocal_instrument_separation")
+        val MUSIC_HAPTICS_ENABLED = booleanPreferencesKey("lw_music_haptics_enabled")
+        val MUSIC_HAPTICS_MODE = stringPreferencesKey("lw_music_haptics_mode")
+        val MUSIC_HAPTICS_INTENSITY = stringPreferencesKey("lw_music_haptics_intensity")
+        val SMART_ROUTE_AUTO_SWITCH_ENABLED = booleanPreferencesKey("lw_smart_route_auto_switch_enabled")
+    }
+
+    val settings: Flow<MiscSettings> = dataStore.data
+        .recoverPreferences("SettingsPreferences")
+        .map { p ->
+            MiscSettings(
+                settingsPhotoUri = p.readSafely(Keys.SETTINGS_PHOTO_URI)?.takeIf { it.isNotBlank() }.orEmpty(),
+                dynamicNowPlayingEnabled = p.readSafely(Keys.DYNAMIC_NOW_PLAYING) ?: false,
+                useCustomFont = p.readSafely(Keys.USE_CUSTOM_FONT) ?: true,
+                pinnedFriends = p.readSafely(Keys.PINNED_FRIENDS) ?: emptySet(),
+                preferLosslessStreaming = p.readSafely(Keys.PREFER_LOSSLESS_STREAMING) ?: true,
+                preferProviderModules = p.readSafely(Keys.PREFER_PROVIDER_MODULES) ?: true,
+                losslessQuality = p.readSafely(Keys.LOSSLESS_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES } ?: 27,
+                cellularStreamingQuality = p.readSafely(Keys.CELLULAR_STREAMING_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES }
+                    ?: p.readSafely(Keys.LOSSLESS_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES } ?: 27,
+                wifiStreamingQuality = p.readSafely(Keys.WIFI_STREAMING_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES }
+                    ?: p.readSafely(Keys.LOSSLESS_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES } ?: 27,
+                downloadQuality = p.readSafely(Keys.DOWNLOAD_QUALITY)?.takeIf { it in DOWNLOAD_QUALITIES } ?: 27,
+                dolbyAtmosMode = p.readSafely(Keys.DOLBY_ATMOS_MODE) ?: "Automatic",
+                systemEffectsMode = p.readSafely(Keys.SYSTEM_EFFECTS_MODE) ?: false,
+                buttonNowPlayingEnabled = p.readSafely(Keys.BUTTON_NOW_PLAYING_ENABLED) ?: false,
+                musicVideoEnabled = p.readSafely(Keys.MUSIC_VIDEO_ENABLED) ?: false,
+                isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: true,
+                clarityPreset = p.readSafely(Keys.CLARITY_PRESET)?.takeIf { it in 0..3 } ?: 0,
+                clarityAtmosBypass = p.readSafely(Keys.CLARITY_ATMOS_BYPASS) ?: false,
+                isBitPerfectEnabled = p.readSafely(Keys.BIT_PERFECT_ENABLED) ?: false,
+                lyricsUiVersion = LyricsUiVersion.fromId(p.readSafely(Keys.LYRICS_UI_VERSION)),
+                wordByWordLyrics = p.readSafely(Keys.WORD_BY_WORD_LYRICS) ?: true,
+                lyricsAnimation = LyricsAnimation.fromId(p.readSafely(Keys.LYRICS_ANIMATION)),
+                lyricsProvider = LyricsProvider.fromId(p.readSafely(Keys.LYRICS_PROVIDER)),
+                lyricsOffsetMs = (p.readSafely(Keys.LYRICS_OFFSET_MS) ?: 0L).coerceIn(-10000L, 10000L),
+                lyricsFontScale = (p.readSafely(Keys.LYRICS_FONT_SCALE) ?: 1.0f).coerceIn(0.7f, 1.5f),
+                crossfadeEnabled = p.readSafely(Keys.CROSSFADE_ENABLED) ?: false,
+                crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 12),
+                automixEnabled = p.readSafely(Keys.AUTOMIX_ENABLED) ?: false,
+                automixBars = (p.readSafely(Keys.AUTOMIX_BARS) ?: 8).let { if (it >= 16) 16 else 8 },
+                autoDJEnabled = p.readSafely(Keys.AUTODJ_ENABLED) ?: true,
+                wavySeekbarEnabled = p.readSafely(Keys.WAVY_SEEKBAR_ENABLED) ?: true,
+                rotatingBackgroundEnabled = p.readSafely(Keys.ROTATING_BACKGROUND_ENABLED) ?: true,
+                downloadLyrics = p.readSafely(Keys.DOWNLOAD_LYRICS) ?: true,
+                appLanguageTag = AppLanguage.fromTag(p.readSafely(Keys.APP_LANGUAGE)).tag,
+                downloadFolder = sanitizeDownloadFolderName(p.readSafely(Keys.DOWNLOAD_FOLDER)),
+                downloadTreeUri = p.readSafely(Keys.DOWNLOAD_TREE_URI)?.takeIf { it.isNotBlank() }.orEmpty(),
+                downloadStructure = DownloadFolderStructure.fromId(p.readSafely(Keys.DOWNLOAD_STRUCTURE)),
+                useAlbumArtistForFolders = p.readSafely(Keys.USE_ALBUM_ARTIST_FOLDERS) ?: true,
+                primaryArtistOnly = p.readSafely(Keys.PRIMARY_ARTIST_ONLY) ?: true,
+                hiddenHomeSections = p.readSafely(Keys.HIDDEN_HOME_SECTIONS)
+                    ?.filter { id -> HomeSection.entries.any { it.id == id } }?.toSet()
+                    ?: emptySet(),
+                ytMusicHiddenSections = p.readSafely(Keys.YT_MUSIC_HIDDEN_SECTIONS) ?: emptySet(),
+                ytMusicSectionsOrder = p.readSafely(Keys.YT_MUSIC_SECTIONS_ORDER)?.split("|||")?.filter { it.isNotBlank() } ?: emptyList(),
+                addonUrl = p.readSafely(Keys.ADDON_URL)?.trim().orEmpty(),
+                addonName = p.readSafely(Keys.ADDON_NAME)?.trim().orEmpty(),
+                addonSigningKey = p.readSafely(Keys.ADDON_SIGNING_KEY)?.trim().orEmpty(),
+                addonEnabled = p.readSafely(Keys.ADDON_ENABLED) ?: true,
+                canvasEnabled = p.readSafely(Keys.CANVAS_ENABLED) ?: true,
+                canvasFullBleed = p.readSafely(Keys.CANVAS_FULL_BLEED) ?: true,
+                canvasOverCellular = p.readSafely(Keys.CANVAS_OVER_CELLULAR) ?: true,
+                suppressYouTubeLoginPrompt = p.readSafely(Keys.SUPPRESS_YOUTUBE_LOGIN_PROMPT) ?: false,
+                bauerCrossfeedEnabled = p.readSafely(Keys.BAUER_CROSSFEED_ENABLED) ?: false,
+                analogTubeWarmthEnabled = p.readSafely(Keys.ANALOG_TUBE_WARMTH_ENABLED) ?: false,
+                monoBassEnabled = p.readSafely(Keys.MONO_BASS_ENABLED) ?: false,
+                automixCurveType = (p.readSafely(Keys.AUTOMIX_CURVE_TYPE) ?: 0).coerceIn(0, 3),
+                bluetoothHeadroomEnabled = p.readSafely(Keys.BLUETOOTH_HEADROOM_ENABLED) ?: true,
+                spatialImmersionEnabled = p.readSafely(Keys.SPATIAL_IMMERSION_ENABLED) ?: false,
+                spatialImmersionPreset = SpatialImmersionPreset.fromId(
+                    p.readSafely(Keys.SPATIAL_IMMERSION_PRESET),
+                ),
+                hrtfHeadScale = (p.readSafely(Keys.HRTF_HEAD_SCALE) ?: 1.00f).coerceIn(0.85f, 1.18f),
+                vocalInstrumentSeparation = (p.readSafely(Keys.VOCAL_INSTRUMENT_SEPARATION) ?: 0.75f).coerceIn(0.00f, 1.00f),
+                musicHapticsEnabled = p.readSafely(Keys.MUSIC_HAPTICS_ENABLED) ?: false,
+                musicHapticsMode = p.readSafely(Keys.MUSIC_HAPTICS_MODE) ?: "beats_only",
+                musicHapticsIntensity = p.readSafely(Keys.MUSIC_HAPTICS_INTENSITY) ?: "normal",
+                smartRouteAutoSwitchEnabled = p.readSafely(Keys.SMART_ROUTE_AUTO_SWITCH_ENABLED) ?: true,
+            )
+        }
+
+    val addonUrl: StateFlow<String?> = settings
+        .map { it.addonUrl.takeIf { s -> s.isNotBlank() } }
+        .stateIn(CoroutineScope(Dispatchers.IO + SupervisorJob()), SharingStarted.Eagerly, null)
+
+    val addonName: StateFlow<String?> = settings
+        .map { it.addonName.takeIf { s -> s.isNotBlank() } }
+        .stateIn(CoroutineScope(Dispatchers.IO + SupervisorJob()), SharingStarted.Eagerly, null)
+
+    val addonSigningKey: StateFlow<String?> = settings
+        .map { it.addonSigningKey.takeIf { s -> s.isNotBlank() } }
+        .stateIn(CoroutineScope(Dispatchers.IO + SupervisorJob()), SharingStarted.Eagerly, null)
+
+    val addonEnabled: StateFlow<Boolean> = settings
+        .map { it.addonEnabled }
+        .stateIn(CoroutineScope(Dispatchers.IO + SupervisorJob()), SharingStarted.Eagerly, true)
+
+    suspend fun setAddonUrl(url: String?) {
+        dataStore.edit {
+            if (url.isNullOrBlank()) it.remove(Keys.ADDON_URL)
+            else it[Keys.ADDON_URL] = url.trim()
+        }
+    }
+
+    suspend fun setAddonName(name: String?) {
+        dataStore.edit {
+            if (name.isNullOrBlank()) it.remove(Keys.ADDON_NAME)
+            else it[Keys.ADDON_NAME] = name.trim()
+        }
+    }
+
+    suspend fun setAddonSigningKey(key: String?) {
+        dataStore.edit {
+            if (key.isNullOrBlank()) it.remove(Keys.ADDON_SIGNING_KEY)
+            else it[Keys.ADDON_SIGNING_KEY] = key.trim()
+        }
+    }
+
+    suspend fun setAddonEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.ADDON_ENABLED] = enabled }
+    }
+
+    suspend fun setDynamicNowPlaying(enabled: Boolean) {
+        dataStore.edit { it[Keys.DYNAMIC_NOW_PLAYING] = enabled }
+    }
+
+    suspend fun setSettingsPhotoUri(uri: String?) {
+        dataStore.edit { prefs ->
+            if (uri.isNullOrBlank()) prefs.remove(Keys.SETTINGS_PHOTO_URI)
+            else prefs[Keys.SETTINGS_PHOTO_URI] = uri
+        }
+    }
+
+    suspend fun setUseCustomFont(enabled: Boolean) {
+        dataStore.edit { it[Keys.USE_CUSTOM_FONT] = enabled }
+    }
+
+    suspend fun setPreferLosslessStreaming(enabled: Boolean) {
+        dataStore.edit {
+            it[Keys.PREFER_LOSSLESS_STREAMING] = enabled
+        }
+    }
+
+    suspend fun setPreferProviderModules(enabled: Boolean) {
+        dataStore.edit {
+            it[Keys.PREFER_PROVIDER_MODULES] = enabled
+        }
+    }
+
+    suspend fun setLosslessQuality(quality: Int) {
+        dataStore.edit {
+            val q = quality.takeIf { it in LOSSLESS_QUALITIES } ?: 27
+            it[Keys.LOSSLESS_QUALITY] = q
+        }
+    }
+
+    suspend fun setCellularStreamingQuality(quality: Int) {
+        dataStore.edit {
+            val q = quality.takeIf { it in LOSSLESS_QUALITIES } ?: 27
+            it[Keys.CELLULAR_STREAMING_QUALITY] = q
+        }
+    }
+
+    suspend fun setWifiStreamingQuality(quality: Int) {
+        dataStore.edit {
+            val q = quality.takeIf { it in LOSSLESS_QUALITIES } ?: 27
+            it[Keys.WIFI_STREAMING_QUALITY] = q
+            it[Keys.LOSSLESS_QUALITY] = q
+        }
+    }
+
+    suspend fun setDownloadQuality(quality: Int) {
+        dataStore.edit {
+            val q = quality.takeIf { it in DOWNLOAD_QUALITIES } ?: 27
+            it[Keys.DOWNLOAD_QUALITY] = q
+        }
+    }
+
+    suspend fun setDolbyAtmosMode(mode: String) {
+        dataStore.edit { it[Keys.DOLBY_ATMOS_MODE] = mode }
+    }
+
+    suspend fun setSystemEffectsMode(enabled: Boolean) {
+        dataStore.edit { it[Keys.SYSTEM_EFFECTS_MODE] = enabled }
+    }
+
+    suspend fun setStudioMasterClarity(enabled: Boolean) {
+        dataStore.edit { it[Keys.MUSIC_ENHANCER] = enabled }
+    }
+
+    suspend fun setClarityPreset(preset: Int) {
+        dataStore.edit { it[Keys.CLARITY_PRESET] = preset.coerceIn(0, 3) }
+    }
+
+    suspend fun setClarityAtmosBypass(enabled: Boolean) {
+        dataStore.edit { it[Keys.CLARITY_ATMOS_BYPASS] = enabled }
+    }
+
+    suspend fun setLyricsUiVersion(version: LyricsUiVersion) {
+        dataStore.edit { it[Keys.LYRICS_UI_VERSION] = version.id }
+    }
+
+    suspend fun setBitPerfectEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.BIT_PERFECT_ENABLED] = enabled }
+    }
+
+    suspend fun setWordByWordLyrics(enabled: Boolean) {
+        dataStore.edit { it[Keys.WORD_BY_WORD_LYRICS] = enabled }
+    }
+
+    suspend fun setLyricsAnimation(animation: LyricsAnimation) {
+        dataStore.edit { it[Keys.LYRICS_ANIMATION] = animation.id }
+    }
+
+    suspend fun setLyricsProvider(provider: LyricsProvider) {
+        dataStore.edit { it[Keys.LYRICS_PROVIDER] = provider.id }
+    }
+
+    suspend fun setLyricsOffsetMs(offsetMs: Long) {
+        dataStore.edit { it[Keys.LYRICS_OFFSET_MS] = offsetMs.coerceIn(-10000L, 10000L) }
+    }
+
+    suspend fun setLyricsFontScale(scale: Float) {
+        dataStore.edit { it[Keys.LYRICS_FONT_SCALE] = scale.coerceIn(0.7f, 1.5f) }
+    }
+
+    suspend fun setMusicVideoEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.MUSIC_VIDEO_ENABLED] = enabled }
+    }
+
+    suspend fun setCrossfadeEnabled(enabled: Boolean) {
+        dataStore.edit {
+            it[Keys.CROSSFADE_ENABLED] = enabled
+            if (enabled) {
+                it[Keys.AUTOMIX_ENABLED] = false
+            }
+        }
+    }
+
+    suspend fun setCrossfadeSeconds(seconds: Int) {
+        dataStore.edit { it[Keys.CROSSFADE_SECONDS] = seconds.coerceIn(1, 12) }
+    }
+
+    suspend fun setAutomixEnabled(enabled: Boolean) {
+        dataStore.edit {
+            it[Keys.AUTOMIX_ENABLED] = enabled
+            if (enabled) {
+                it[Keys.CROSSFADE_ENABLED] = false
+            }
+        }
+    }
+
+    suspend fun setAutomixBars(bars: Int) {
+        dataStore.edit { it[Keys.AUTOMIX_BARS] = if (bars >= 16) 16 else 8 }
+    }
+
+    suspend fun setAutoDJEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.AUTODJ_ENABLED] = enabled }
+    }
+
+    suspend fun setSuppressYouTubeLoginPrompt(suppress: Boolean) {
+        dataStore.edit { it[Keys.SUPPRESS_YOUTUBE_LOGIN_PROMPT] = suppress }
+    }
+
+    suspend fun saveYtMusicSections(order: List<String>, hidden: Set<String>) {
+        dataStore.edit { prefs ->
+            prefs[Keys.YT_MUSIC_SECTIONS_ORDER] = order.joinToString("|||")
+            prefs[Keys.YT_MUSIC_HIDDEN_SECTIONS] = hidden
+        }
+    }
+
+    suspend fun setYtMusicSections(order: List<String>, hidden: Set<String>) = saveYtMusicSections(order, hidden)
+
+    suspend fun resetYtMusicSections() {
+        dataStore.edit { prefs ->
+            prefs.remove(Keys.YT_MUSIC_SECTIONS_ORDER)
+            prefs.remove(Keys.YT_MUSIC_HIDDEN_SECTIONS)
+        }
+    }
+
+    suspend fun setWavySeekbarEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.WAVY_SEEKBAR_ENABLED] = enabled }
+    }
+
+    suspend fun setRotatingBackgroundEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.ROTATING_BACKGROUND_ENABLED] = enabled }
+    }
+
+    suspend fun setDownloadLyrics(enabled: Boolean) {
+        dataStore.edit { it[Keys.DOWNLOAD_LYRICS] = enabled }
+    }
+
+    suspend fun setDownloadFolder(name: String) {
+        dataStore.edit { it[Keys.DOWNLOAD_FOLDER] = sanitizeDownloadFolderName(name) }
+    }
+
+    /** Persists the user-chosen SAF download folder. Blank clears the
+     *  custom location (back to the default Music/<downloadFolder>). */
+    suspend fun setDownloadTreeUri(uriString: String) {
+        dataStore.edit { prefs ->
+            if (uriString.isBlank()) prefs.remove(Keys.DOWNLOAD_TREE_URI)
+            else prefs[Keys.DOWNLOAD_TREE_URI] = uriString.trim()
+        }
+    }
+
+    suspend fun setDownloadStructure(structure: DownloadFolderStructure) {
+        dataStore.edit { it[Keys.DOWNLOAD_STRUCTURE] = structure.id }
+    }
+
+    suspend fun setUseAlbumArtistForFolders(enabled: Boolean) {
+        dataStore.edit { it[Keys.USE_ALBUM_ARTIST_FOLDERS] = enabled }
+    }
+
+    suspend fun setPrimaryArtistOnly(enabled: Boolean) {
+        dataStore.edit { it[Keys.PRIMARY_ARTIST_ONLY] = enabled }
+    }
+
+    suspend fun setHomeSectionVisible(id: String, visible: Boolean) {
+        if (HomeSection.entries.none { it.id == id }) return
+        dataStore.edit { prefs ->
+            val current = prefs.readSafely(Keys.HIDDEN_HOME_SECTIONS) ?: emptySet()
+            prefs[Keys.HIDDEN_HOME_SECTIONS] = if (visible) current - id else current + id
+        }
+    }
+
+    suspend fun showAllHomeSections() {
+        dataStore.edit { it.remove(Keys.HIDDEN_HOME_SECTIONS) }
+    }
+
+    /**
+     * Synchronous mirror for `attachBaseContext`, which runs before DataStore
+     * can deliver a value. commit() on IO: immune to process-kill races and
+     * never blocks the UI thread.
+     */
+    fun readLanguageTagSync(): String =
+        runCatching {
+            appContext.getSharedPreferences(AppLanguage.SYNC_FILE, Context.MODE_PRIVATE)
+                .getString(AppLanguage.SYNC_KEY, AppLanguage.SYSTEM.tag)
+        }.getOrNull().let { AppLanguage.fromTag(it).tag }
+
+    suspend fun setAppLanguage(language: AppLanguage) {
+        dataStore.edit { it[Keys.APP_LANGUAGE] = language.tag }
+        withContext(Dispatchers.IO) {
+            runCatching {
+                appContext.getSharedPreferences(AppLanguage.SYNC_FILE, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(AppLanguage.SYNC_KEY, language.tag)
+                    .commit()
+            }
+        }
+    }
+
+    suspend fun toggleFriendPinned(username: String) {
+        dataStore.edit { prefs ->
+            val current = prefs.readSafely(Keys.PINNED_FRIENDS) ?: emptySet()
+            prefs[Keys.PINNED_FRIENDS] = if (username in current) current - username else current + username
+        }
+    }
+
+    suspend fun setCanvasEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.CANVAS_ENABLED] = enabled }
+    }
+
+    suspend fun setCanvasFullBleed(enabled: Boolean) {
+        dataStore.edit { it[Keys.CANVAS_FULL_BLEED] = enabled }
+    }
+
+    suspend fun setCanvasOverCellular(enabled: Boolean) {
+        dataStore.edit { it[Keys.CANVAS_OVER_CELLULAR] = enabled }
+    }
+
+    suspend fun setBauerCrossfeedEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.BAUER_CROSSFEED_ENABLED] = enabled }
+    }
+
+    suspend fun setAnalogTubeWarmthEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.ANALOG_TUBE_WARMTH_ENABLED] = enabled }
+    }
+
+    suspend fun setMonoBassEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.MONO_BASS_ENABLED] = enabled }
+    }
+
+    suspend fun setAutomixCurveType(curveType: Int) {
+        dataStore.edit { it[Keys.AUTOMIX_CURVE_TYPE] = curveType.coerceIn(0, 3) }
+    }
+
+    suspend fun setBluetoothHeadroomEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.BLUETOOTH_HEADROOM_ENABLED] = enabled }
+    }
+
+    suspend fun setSpatialImmersionEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.SPATIAL_IMMERSION_ENABLED] = enabled }
+    }
+
+    suspend fun setSpatialImmersionPreset(preset: SpatialImmersionPreset) {
+        dataStore.edit { it[Keys.SPATIAL_IMMERSION_PRESET] = preset.id }
+    }
+
+    suspend fun setHrtfHeadScale(scale: Float) {
+        val clamped = scale.coerceIn(0.85f, 1.18f)
+        dataStore.edit { it[Keys.HRTF_HEAD_SCALE] = clamped }
+    }
+
+    suspend fun setVocalInstrumentSeparation(separation: Float) {
+        val clamped = separation.coerceIn(0.00f, 1.00f)
+        dataStore.edit { it[Keys.VOCAL_INSTRUMENT_SEPARATION] = clamped }
+    }
+
+    suspend fun setMusicHapticsEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.MUSIC_HAPTICS_ENABLED] = enabled }
+    }
+
+    suspend fun setMusicHapticsMode(mode: String) {
+        dataStore.edit { it[Keys.MUSIC_HAPTICS_MODE] = mode }
+    }
+
+    suspend fun setMusicHapticsIntensity(intensity: String) {
+        dataStore.edit { it[Keys.MUSIC_HAPTICS_INTENSITY] = intensity }
+    }
+
+    suspend fun setSmartRouteAutoSwitchEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.SMART_ROUTE_AUTO_SWITCH_ENABLED] = enabled }
+    }
+
+    suspend fun setButtonNowPlayingEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.BUTTON_NOW_PLAYING_ENABLED] = enabled }
+    }
+
+    private companion object {
+        val LOSSLESS_QUALITIES = setOf(-1, 4, 5, 6, 7, 27, 28)
+        val DOWNLOAD_QUALITIES = setOf(-1, 4, 5, 6, 7, 27, 28)
+    }
+}
