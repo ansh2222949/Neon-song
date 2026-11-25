@@ -10,6 +10,7 @@ import com.neonsong.app.data.playlist.SavedPlaylist
 import com.neonsong.app.data.repository.AlbumRepository
 import com.neonsong.app.playback.MusicPlayer
 import com.neonsong.app.playback.PlayableTrack
+import com.neonsong.app.util.cancellableRunCatching
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -58,6 +59,7 @@ class AlbumViewModel @Inject constructor(
     private var currentArtistName: String = ""
     private var currentBrowseId: String? = null
     private var loadJob: Job? = null
+    private var savedStateJob: Job? = null
 
     fun loadAlbum(albumTitle: String, artistName: String = "", browseId: String? = null) {
         if (albumTitle == currentAlbumTitle && artistName == currentArtistName && browseId == currentBrowseId && _uiState.value is AlbumUiState.Success) {
@@ -69,13 +71,15 @@ class AlbumViewModel @Inject constructor(
         _saveUiState.value = AlbumSaveUiState()
 
         loadJob?.cancel()
+        savedStateJob?.cancel()
         loadJob = viewModelScope.launch {
             _uiState.value = AlbumUiState.Loading
             try {
                 val data = repository.getAlbumDetails(albumTitle, artistName, browseId) { initialData ->
                     coroutineContext.ensureActive()
                     _uiState.value = AlbumUiState.Success(initialData)
-                    viewModelScope.launch { refreshSavedState(initialData) }
+                    savedStateJob?.cancel()
+                    savedStateJob = viewModelScope.launch { refreshSavedState(initialData) }
                 }
                 coroutineContext.ensureActive()
                 _uiState.value = AlbumUiState.Success(data)
@@ -133,8 +137,9 @@ class AlbumViewModel @Inject constructor(
      *  duplicate. Yields while a save is in flight (that flow owns state). */
     private suspend fun refreshSavedState(data: AlbumPageData) {
         if (_saveUiState.value.isSaving || _saveUiState.value.savedToLibrary) return
+        if (!data.title.equals(currentAlbumTitle, ignoreCase = true) && currentAlbumTitle.isNotBlank()) return
         val title = data.title.ifBlank { return }
-        val copy = runCatching { playlistRepository.findByTitle(title) }.getOrNull()
+        val copy = cancellableRunCatching { playlistRepository.findByTitle(title) }.getOrNull()
         if (copy != null && isAlbumCopy(copy, data.tracks.map { it.toGeneratedTrack() })) {
             _saveUiState.value = AlbumSaveUiState(savedToLibrary = true)
         }
@@ -151,7 +156,7 @@ class AlbumViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val tracks = data.tracks.map { it.toGeneratedTrack() }
-                val existing = runCatching { playlistRepository.findByTitle(data.title) }.getOrNull()
+                val existing = cancellableRunCatching { playlistRepository.findByTitle(data.title) }.getOrNull()
                 if (existing == null || !isAlbumCopy(existing, tracks)) {
                     playlistRepository.save(
                         title = data.title.ifBlank { "Album" },

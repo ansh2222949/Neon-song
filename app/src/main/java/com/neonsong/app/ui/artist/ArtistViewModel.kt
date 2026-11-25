@@ -48,6 +48,7 @@ class ArtistViewModel @Inject constructor(
     private var currentArtistName: String = ""
     private var currentBrowseId: String? = null
     private var loadJob: Job? = null
+    private var mixJob: Job? = null
 
     fun loadArtist(artistName: String, browseId: String? = null) {
         val cached = (_uiState.value as? ArtistUiState.Success)?.data
@@ -101,7 +102,8 @@ class ArtistViewModel @Inject constructor(
         val topSongs = state.data.topSongs
         val firstTrack = topSongs.firstOrNull()
 
-        viewModelScope.launch {
+        mixJob?.cancel()
+        mixJob = viewModelScope.launch {
             val radioTracks = try {
                 repository.getArtistRadio(artistName, firstTrack)
             } catch (e: CancellationException) {

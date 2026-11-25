@@ -24,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -119,10 +120,15 @@ class YtMusicLibraryManager @Inject constructor(
             } catch (_: Exception) {}
         }
         applicationScope.launch {
-            val persistedConnection = preferences.connection.first()
-            auth.connection.first { it == persistedConnection }
-            handleConnection(persistedConnection)
-            auth.connection.dropWhile { it == persistedConnection }.collect(::handleConnection)
+            val initialConnection = auth.awaitLoadedConnection()
+            var lastConnection = initialConnection
+            handleConnection(initialConnection)
+            auth.connection.collect { conn ->
+                if (conn != lastConnection) {
+                    lastConnection = conn
+                    handleConnection(conn)
+                }
+            }
         }
         // InnerTube has no push subscription. Short foreground-process polling
         // gives connected playlists near-real-time behavior without importing.
@@ -140,11 +146,18 @@ class YtMusicLibraryManager @Inject constructor(
                 val cached = preferences.cachedLibraryPlaylists().map { it.toSummary() }
                 if (cached.isNotEmpty()) publish(cached)
             }
-            val visibleRemoteIds = preferences.hiddenLibraryPlaylistIds.first().let { hiddenIds ->
-                _accountPlaylists.value.mapNotNull { it.id.takeUnless(hiddenIds::contains) }.toSet()
-            }
-            playlists.first { projected ->
-                projected.mapNotNull(SavedPlaylist::remotePlaylistId).toSet() == visibleRemoteIds
+            val hiddenIds = preferences.hiddenLibraryPlaylistIds.first()
+            val mappings = preferences.playlistMappings.first()
+            val localIds = playlistRepository.getAll().mapTo(mutableSetOf()) { it.id }
+            val linkedRemoteIds = mappings.filterKeys { it in localIds }.values
+                .mapTo(mutableSetOf()) { it.remotePlaylistId.removePrefix("VL") }
+            val visibleRemoteIds = _accountPlaylists.value
+                .filterNot { it.id in hiddenIds || it.id.removePrefix("VL") in linkedRemoteIds }
+                .mapTo(mutableSetOf()) { it.id }
+            withTimeoutOrNull(2_000L) {
+                playlists.first { projected ->
+                    projected.mapNotNull(SavedPlaylist::remotePlaylistId).toSet() == visibleRemoteIds
+                }
             }
             _libraryReady.value = true
             refresh()
@@ -541,7 +554,8 @@ class YtMusicLibraryManager @Inject constructor(
         val owned = getOwnedPlaylist(localId, remoteId, targetVideoId) ?: return@withContext playlist
         val item = owned.items.firstOrNull { it.videoId == targetVideoId && it.setVideoId != null }
             ?: return@withContext playlist
-        if (!innerTube.removeVideosFromRemotePlaylist(remoteId, listOf(item.setVideoId!! to item.videoId))) {
+        val setVideoId = item.setVideoId ?: return@withContext playlist
+        if (!innerTube.removeVideosFromRemotePlaylist(remoteId, listOf(setVideoId to item.videoId))) {
             return@withContext playlist
         }
         val remainingTracks = playlist.tracks.filterIndexed { i, _ -> i != index }
