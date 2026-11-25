@@ -150,7 +150,11 @@ class YouTubeStreamExtractor @Inject constructor(
                 async(Dispatchers.IO) { candidate to probePlayableVideo(candidate) }
             }.awaitAll()
         }
-        val playableDefault = probeResults.firstOrNull { it.second }?.first ?: defaultCandidates.first()
+        val playableDefault = probeResults.firstOrNull { it.second }?.first
+            ?: run {
+                invalidatePlayerState(videoId)
+                throw IOException("YouTube video URLs failed playback probe for $videoId")
+            }
 
         SyncedVideoStreamBundle(
             videoId = videoId,
@@ -209,12 +213,21 @@ class YouTubeStreamExtractor @Inject constructor(
                 "Origin" to YOUTUBE_ORIGIN,
                 "Referer" to "$YOUTUBE_ORIGIN/watch?v=$videoId",
             ),
-            expiresAtEpochMs = streamUrl.toHttpUrlOrNull()
-                ?.queryParameter("expire")
-                ?.toLongOrNull()
-                ?.times(1_000L)
+            expiresAtEpochMs = extractStreamExpiryEpochMs(streamUrl)
                 ?: (now + UNKNOWN_EXPIRY_TTL_MS),
         )
+    }
+
+    private fun extractStreamExpiryEpochMs(url: String): Long? {
+        val parsed = url.toHttpUrlOrNull()
+        val queryExpire = parsed?.queryParameter("expire")?.toLongOrNull()
+        if (queryExpire != null) return queryExpire * 1_000L
+        val pathExpire = Regex("""/expire/(\d+)""")
+            .find(parsed?.encodedPath ?: url)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toLongOrNull()
+        return pathExpire?.times(1_000L)
     }
 
     private fun org.schabi.newpipe.extractor.stream.AudioStream.toYouTubeAudioStream(
@@ -244,11 +257,8 @@ class YouTubeStreamExtractor @Inject constructor(
                 "Origin" to YOUTUBE_ORIGIN,
                 "Referer" to "$YOUTUBE_ORIGIN/watch?v=$videoId",
             ),
-            expiresAtEpochMs = content.toHttpUrlOrNull()
-                ?.queryParameter("expire")
-                ?.toLongOrNull()
-                ?.times(1_000L)
-                ?: now + UNKNOWN_EXPIRY_TTL_MS,
+            expiresAtEpochMs = extractStreamExpiryEpochMs(content)
+                ?: (now + UNKNOWN_EXPIRY_TTL_MS),
         )
     }
 

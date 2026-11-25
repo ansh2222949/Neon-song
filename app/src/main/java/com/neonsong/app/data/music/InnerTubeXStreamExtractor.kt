@@ -29,10 +29,29 @@ class InnerTubeXStreamExtractor @Inject constructor(
     private val ytAuth: YtMusicAuthManager,
 ) {
     private val failedProfilesUntil = ConcurrentHashMap<String, Long>()
-    private val runtime: RuntimeStack? by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        runCatching { createRuntime() }
-            .onFailure { Log.w(TAG, "InnerTubeX unavailable; legacy resolver remains fallback", it) }
-            .getOrNull()
+    @Volatile private var cachedRuntime: RuntimeStack? = null
+    @Volatile private var lastRuntimeInitFailureAtMs: Long = 0L
+    private val runtimeLock = Any()
+    private val innerTubeConfigLock = Any()
+
+    private fun getRuntime(): RuntimeStack? {
+        cachedRuntime?.let { return it }
+        val now = System.currentTimeMillis()
+        if (now - lastRuntimeInitFailureAtMs < RUNTIME_RETRY_COOLDOWN_MS) return null
+        return synchronized(runtimeLock) {
+            cachedRuntime?.let { return@synchronized it }
+            val currentNow = System.currentTimeMillis()
+            if (currentNow - lastRuntimeInitFailureAtMs < RUNTIME_RETRY_COOLDOWN_MS) {
+                return@synchronized null
+            }
+            try {
+                createRuntime().also { cachedRuntime = it }
+            } catch (t: Throwable) {
+                lastRuntimeInitFailureAtMs = currentNow
+                Log.w(TAG, "InnerTubeX unavailable; legacy resolver remains fallback", t)
+                null
+            }
+        }
     }
 
     suspend fun resolve(
@@ -40,12 +59,15 @@ class InnerTubeXStreamExtractor @Inject constructor(
         visitorData: String?,
         authScope: String,
     ): YouTubeAudioStream? = withContext(Dispatchers.IO) {
-        val stack = runtime ?: return@withContext null
+        val stack = getRuntime() ?: return@withContext null
         try {
             val connection = ytAuth.connection.value
-            setProperty(stack.innerTube, "VisitorData", visitorData)
-            setProperty(stack.innerTube, "Cookie", ytAuth.cookieHeaderValue())
-            setProperty(stack.innerTube, "UseLoginForBrowse", connection.isConnected)
+            val cookieHeader = ytAuth.cookieHeaderValue()
+            synchronized(innerTubeConfigLock) {
+                setProperty(stack.innerTube, "VisitorData", visitorData)
+                setProperty(stack.innerTube, "Cookie", cookieHeader)
+                setProperty(stack.innerTube, "UseLoginForBrowse", connection.isConnected)
+            }
 
             val hints = newInstance("com.metrolist.innertubex.extraction.ContentHints")
             val withCapabilities = hints.javaClass.methods.firstOrNull {
@@ -302,8 +324,13 @@ class InnerTubeXStreamExtractor @Inject constructor(
         }
     }
 
-    private fun extractExpiry(url: String): Long? =
-        Uri.parse(url).getQueryParameter("expire")?.toLongOrNull()?.times(1_000L)
+    private fun extractExpiry(url: String): Long? {
+        val uri = Uri.parse(url)
+        val queryExpire = uri.getQueryParameter("expire")?.toLongOrNull()
+        if (queryExpire != null) return queryExpire * 1_000L
+        val pathExpire = PATH_EXPIRE_REGEX.find(uri.encodedPath ?: url)?.groupValues?.getOrNull(1)?.toLongOrNull()
+        return pathExpire?.times(1_000L)
+    }
 
     private fun instantToEpochMillis(value: Any?): Long? {
         value ?: return null
@@ -322,5 +349,7 @@ class InnerTubeXStreamExtractor @Inject constructor(
         const val TAG = "InnerTubeXStreamExtractor"
         const val UNKNOWN_STREAM_EXPIRY_TTL_MS = 5 * 60 * 1_000L
         const val CLIENT_FAILURE_COOLDOWN_MS = 60_000L
+        const val RUNTIME_RETRY_COOLDOWN_MS = 30_000L
+        val PATH_EXPIRE_REGEX = Regex("""/expire/(\d+)""")
     }
 }

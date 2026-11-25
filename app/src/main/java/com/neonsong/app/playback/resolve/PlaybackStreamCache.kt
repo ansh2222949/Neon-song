@@ -163,10 +163,19 @@ class PlaybackStreamCache(
     private fun store(entry: StreamCache, replace: Boolean, source: String): Boolean {
         require(entry.trackId.isNotBlank() && entry.youtubeVideoId.isNotBlank())
         require(entry.streamUrl.isNotBlank()) { "streamUrl is required" }
+        val now = nowMs()
+        if (entry.isExpired(now)) {
+            log(
+                "CACHE_EXPIRY",
+                entry.youtubeVideoId,
+                "source=$source trackId=${entry.trackId} rejectedOnStore=true expiresAt=${entry.expiresAt} now=$now",
+            )
+            return false
+        }
         val versioned = synchronized(lock) {
             val key = entry.youtubeVideoId
             val existing = memory[key]
-            if (!replace && existing != null && existing.streamUrl.isNotBlank() && !existing.isExpired(nowMs())) {
+            if (!replace && existing != null && existing.streamUrl.isNotBlank() && !existing.isExpired(now)) {
                 return@synchronized null
             }
             memory[key] = entry
