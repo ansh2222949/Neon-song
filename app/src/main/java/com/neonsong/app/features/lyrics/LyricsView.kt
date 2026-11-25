@@ -166,12 +166,7 @@ fun LyricsPanel(
 ) {
     val track = state.current ?: return
     val liquidGlass = LocalLiquidGlass.current
-
-    // High-frequency live progress stream
-    val progress by (progressState ?: player.progressState).collectAsStateWithLifecycle(
-        initialValue = PlaybackProgressState(positionMs = state.positionMs, durationMs = state.durationMs),
-    )
-
+    val effectiveProgressFlow = progressState ?: player.progressState
 
     Column(
         modifier = modifier.fillMaxSize(),
@@ -230,7 +225,7 @@ fun LyricsPanel(
                         } else if (targetState.isSynced && targetState.lines.isNotEmpty()) {
                             SyncedLyricsList(
                                 lines = targetState.lines,
-                                currentPositionMs = { progress.positionMs + lyricsOffsetMs },
+                                currentPositionMs = { effectiveProgressFlow.value.positionMs + lyricsOffsetMs },
                                 lyricsOffsetMs = lyricsOffsetMs,
                                 lyricsFontScale = lyricsFontScale,
                                 isPlaying = state.isPlaying,
@@ -259,11 +254,10 @@ fun LyricsPanel(
             }
         }
 
-        // Transparent playback controls; no separate player-bar container.
-        LyricsPlaybackControls(
+        // Transparent playback controls; isolated so playback ticks don't recompose LyricsPanel
+        LyricsPlaybackControlsHost(
+            progressFlow = effectiveProgressFlow,
             state = state,
-            currentPositionMs = progress.positionMs,
-            totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs,
             player = player,
             wavySeekbarEnabled = wavySeekbarEnabled,
             onToggleFullscreen = onToggleFullscreen,
@@ -281,6 +275,45 @@ fun LyricsPanel(
                 .padding(bottom = 16.dp, top = 6.dp),
         )
     }
+}
+
+@Composable
+private fun LyricsPlaybackControlsHost(
+    progressFlow: StateFlow<PlaybackProgressState>,
+    state: MusicPlayerState,
+    player: MusicPlayer,
+    wavySeekbarEnabled: Boolean,
+    onToggleFullscreen: (() -> Unit)?,
+    isFullscreen: Boolean,
+    lyricsOffsetMs: Long,
+    onOpenLyricsOffset: (() -> Unit)?,
+    lyricsFontScale: Float,
+    onLyricsFontScaleChange: (Float) -> Unit,
+    primaryColor: Color,
+    secondaryColor: Color,
+    tertiaryColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    val progress by progressFlow.collectAsStateWithLifecycle(
+        initialValue = PlaybackProgressState(positionMs = state.positionMs, durationMs = state.durationMs),
+    )
+    LyricsPlaybackControls(
+        state = state,
+        currentPositionMs = progress.positionMs,
+        totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs,
+        player = player,
+        wavySeekbarEnabled = wavySeekbarEnabled,
+        onToggleFullscreen = onToggleFullscreen,
+        isFullscreen = isFullscreen,
+        lyricsOffsetMs = lyricsOffsetMs,
+        onOpenLyricsOffset = onOpenLyricsOffset,
+        lyricsFontScale = lyricsFontScale,
+        onLyricsFontScaleChange = onLyricsFontScaleChange,
+        primaryColor = primaryColor,
+        secondaryColor = secondaryColor,
+        tertiaryColor = tertiaryColor,
+        modifier = modifier,
+    )
 }
 
 internal fun activeLineIndex(lines: List<LyricLine>, positionMs: Long): Int {

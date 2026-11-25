@@ -1723,7 +1723,7 @@ private fun FeedLoadingSkeleton() {
                 }
             }
         }
-        items(3) { row ->
+        items(3, contentType = { "skeletonRow" }) { row ->
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(
                     modifier = Modifier
@@ -1738,7 +1738,7 @@ private fun FeedLoadingSkeleton() {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     userScrollEnabled = false,
                 ) {
-                    items(4) {
+                    items(4, contentType = { "skeletonCard" }) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Box(
                                 modifier = Modifier

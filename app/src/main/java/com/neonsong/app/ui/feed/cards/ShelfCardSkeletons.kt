@@ -26,28 +26,35 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 @Composable
-private fun rememberShimmerPulse(): Float {
+private fun rememberShimmerPulse(): State<Float> {
     val transition = rememberInfiniteTransition(label = "shelfSkeleton")
-    val pulse by transition.animateFloat(
+    return transition.animateFloat(
         initialValue = 0.45f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(animation = tween(900), repeatMode = RepeatMode.Reverse),
         label = "shelfSkeletonPulse",
     )
-    return pulse
 }
 
 @Composable
-private fun Modifier.shimmer(pulse: Float, radius: Dp) =
+private fun Modifier.shimmer(
+    pulse: State<Float>,
+    radius: Dp,
+    baseColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+): Modifier =
     this.clip(com.neonsong.app.ui.theme.SquircleShape(radius))
-        .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.24f + 0.24f * pulse))
+        .drawBehind {
+            drawRect(baseColor.copy(alpha = 0.24f + 0.24f * pulse.value))
+        }
 
 /** Square-card skeleton row matching [ShelfSquareCard]. */
 @Composable
@@ -59,7 +66,7 @@ fun ShelfSquareSkeletonRow(cardWidth: Dp = rememberSquareCardWidth(), count: Int
         horizontalArrangement = Arrangement.spacedBy(CardTokens.cardGap),
         userScrollEnabled = false,
     ) {
-        items(count) {
+        items(count, contentType = { "skeletonSquare" }) {
             Column {
                 Box(Modifier.width(cardWidth).height(coverHeight).shimmer(pulse, CardTokens.coverCornerRadius))
                 Spacer(Modifier.height(CardTokens.coverToTextGap))
@@ -81,7 +88,7 @@ fun ShelfWideSkeletonRow(cardWidth: Dp = rememberWideCardWidth(), count: Int = 3
         horizontalArrangement = Arrangement.spacedBy(CardTokens.cardGap),
         userScrollEnabled = false,
     ) {
-        items(count) {
+        items(count, contentType = { "skeletonWide" }) {
             Column {
                 Box(Modifier.width(cardWidth).height(coverHeight).shimmer(pulse, CardTokens.coverCornerRadius))
                 Spacer(Modifier.height(CardTokens.coverToTextGap))
@@ -102,7 +109,7 @@ fun ShelfCommunitySkeletonRow(cardWidth: Dp, count: Int = 2) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         userScrollEnabled = false,
     ) {
-        items(count) {
+        items(count, contentType = { "skeletonCommunity" }) {
             Column(Modifier.width(cardWidth)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(Modifier.size(96.dp).shimmer(pulse, 14.dp))

@@ -666,8 +666,10 @@ fun FluidArtworkBackground(
     }
 
     var current by remember { mutableStateOf<Bitmap?>(cachedInitialBitmap) }
-    if (cachedInitialBitmap != null && current !== cachedInitialBitmap) {
-        current = cachedInitialBitmap
+    LaunchedEffect(cachedInitialBitmap) {
+        if (cachedInitialBitmap != null && current !== cachedInitialBitmap) {
+            current = cachedInitialBitmap
+        }
     }
     var previous by remember { mutableStateOf<Bitmap?>(null) }
     var transitionBuffer by remember { mutableStateOf<Bitmap?>(null) }

@@ -7,11 +7,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -60,20 +60,25 @@ fun Modifier.neonGlassSurface(
     )
 
 // 2. Spring Bounce + Haptic Click (M3 ripple ki jagah)
+@Composable
 fun Modifier.neonTactileClick(
     pressedScale: Float = 0.94f,
     onClick: () -> Unit,
-): Modifier = composed {
+): Modifier {
     val haptic = LocalHapticFeedback.current
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
+    val scaleState = animateFloatAsState(
         targetValue = if (isPressed) pressedScale else 1f,
         animationSpec = spring(dampingRatio = 0.55f, stiffness = 600f),
         label = "neonScale",
     )
-    this
-        .graphicsLayer { scaleX = scale; scaleY = scale }
+    return this
+        .graphicsLayer {
+            val scale = scaleState.value
+            scaleX = scale
+            scaleY = scale
+        }
         .clickable(interactionSource = interactionSource, indication = null) {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             onClick()

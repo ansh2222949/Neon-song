@@ -936,12 +936,37 @@ class GlassInteraction(
                 touchPosition = change.position
             }
         }
+
+    suspend fun bindInteractionSource(
+        source: MutableInteractionSource,
+    ) {
+        source.interactions.collect { event ->
+            when (event) {
+                is androidx.compose.foundation.interaction.PressInteraction.Press -> {
+                    touchPosition = event.pressPosition
+                    animationScope.launch { pressAnimation.animateTo(1f, pressSpec) }
+                }
+                is androidx.compose.foundation.interaction.PressInteraction.Release,
+                is androidx.compose.foundation.interaction.PressInteraction.Cancel -> {
+                    animationScope.launch { pressAnimation.animateTo(0f, releaseSpec) }
+                }
+            }
+        }
+    }
 }
 
 @Composable
-fun rememberGlassInteraction(): GlassInteraction {
+fun rememberGlassInteraction(
+    interactionSource: MutableInteractionSource? = null,
+): GlassInteraction {
     val scope = rememberCoroutineScope()
-    return remember(scope) { GlassInteraction(scope) }
+    val interaction = remember(scope) { GlassInteraction(scope) }
+    if (interactionSource != null) {
+        androidx.compose.runtime.LaunchedEffect(interaction, interactionSource) {
+            interaction.bindInteractionSource(interactionSource)
+        }
+    }
+    return interaction
 }
 
 class GlassSurfaceDrawCache {
@@ -1002,6 +1027,7 @@ fun Modifier.drawInteractiveGlass(
     minScrim: Float = 0.14f,
     maxScrim: Float = 0.38f,
     accentTint: Color = Color.Unspecified,
+    attachPressGesture: Boolean = true,
     drawCache: GlassSurfaceDrawCache = remember { GlassSurfaceDrawCache() },
 ): Modifier =
     this
@@ -1127,7 +1153,7 @@ fun Modifier.drawInteractiveGlass(
                     null
                 },
         ).then(
-            if (interaction != null) {
+            if (interaction != null && attachPressGesture) {
                 Modifier.pointerInput(interaction) { interaction.detectPress(this) }
             } else {
                 Modifier
@@ -1423,7 +1449,7 @@ fun Modifier.liquidGlassChrome(
 
     if (useLiveBackdrop && backdrop != null) {
         val isDark = LocalIsDarkTheme.current
-        val interaction = if (profile.interactive) rememberGlassInteraction() else null
+        val interaction = if (profile.interactive) rememberGlassInteraction(interactionSource) else null
         val highlight = remember(resolvedBorderWidth) { Highlight(width = resolvedBorderWidth) }
         return this.drawInteractiveGlass(
             isDark = isDark,
@@ -1432,19 +1458,21 @@ fun Modifier.liquidGlassChrome(
             luminanceAnimation = if (contentBrightness > 0f) contentBrightness else 0.45f,
             shape = shape,
             interaction = interaction,
+            pressedScale = if (interactionSource != null) 1f else 0.982f,
             highlight = highlight,
             blurScale = profile.blurScale,
             lensIntensity = profile.lensIntensity,
             minScrim = profile.minScrim,
             maxScrim = profile.maxScrim,
             accentTint = accentTint,
+            attachPressGesture = interactionSource == null,
         )
     }
     return this.liquidGlassSurface(
         shape = shape,
         borderWidth = resolvedBorderWidth,
         accentTint = accentTint,
-        interactive = profile.interactive,
+        interactive = profile.interactive && interactionSource == null,
     )
 }
 

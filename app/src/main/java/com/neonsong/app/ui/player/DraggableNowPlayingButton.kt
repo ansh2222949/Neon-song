@@ -73,15 +73,6 @@ fun DraggableNowPlayingButton(
     modifier: Modifier = Modifier,
     onExpand: () -> Unit,
 ) {
-    val liveProgress by progressState?.collectAsStateWithLifecycle()
-        ?: remember { mutableStateOf(PlaybackProgressState(0L, 0L)) }
-
-    val progressFraction = remember(liveProgress.positionMs, liveProgress.durationMs) {
-        val dur = liveProgress.durationMs.takeIf { it > 0 } ?: track.durationMs ?: 0L
-        if (dur > 0) (liveProgress.positionMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
-        else 0f
-    }
-
     AnimatedVisibility(
         visible = true,
         enter = fadeIn(tween(250)) + scaleIn(tween(250)),
@@ -114,15 +105,15 @@ fun DraggableNowPlayingButton(
                 offsetY = offsetY.coerceIn(minMarginY, maxMarginY)
             }
 
-            val dragScale by animateFloatAsState(
+            val dragScaleState = animateFloatAsState(
                 targetValue = if (isDragging) 1.08f else 1.0f,
                 animationSpec = spring(dampingRatio = 0.72f, stiffness = 460f),
                 label = "nowPlayingDragScale",
             )
 
-            val pulseScale = if (isPlaying && !isDragging) {
+            val pulseScaleState = if (isPlaying && !isDragging) {
                 val infiniteTransition = rememberInfiniteTransition(label = "now_playing_btn_pulse")
-                val scale by infiniteTransition.animateFloat(
+                infiniteTransition.animateFloat(
                     initialValue = 1.0f,
                     targetValue = 1.05f,
                     animationSpec = infiniteRepeatable(
@@ -131,9 +122,8 @@ fun DraggableNowPlayingButton(
                     ),
                     label = "btn_pulse",
                 )
-                scale
             } else {
-                1.0f
+                null
             }
 
             Box(
@@ -190,7 +180,7 @@ fun DraggableNowPlayingButton(
                     modifier = Modifier
                         .size(buttonSizeDp)
                         .graphicsLayer {
-                            val s = dragScale * pulseScale
+                            val s = dragScaleState.value * (pulseScaleState?.value ?: 1f)
                             scaleX = s
                             scaleY = s
                         }
@@ -205,15 +195,13 @@ fun DraggableNowPlayingButton(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
-                        // Circular track progress slider around cover art
-                        CircularProgressIndicator(
-                            progress = { progressFraction },
+                        // Isolated progress ring so 250ms ticks do not recompose the parent button or art
+                        NowPlayingProgressRing(
+                            track = track,
+                            progressState = progressState,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(2.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
-                            strokeWidth = 3.5.dp,
                         )
 
                         // Album artwork in center
@@ -237,4 +225,28 @@ fun DraggableNowPlayingButton(
             }
         }
     }
+}
+
+@Composable
+private fun NowPlayingProgressRing(
+    track: PlayableTrack,
+    progressState: StateFlow<PlaybackProgressState>?,
+    modifier: Modifier = Modifier,
+) {
+    val liveProgress by progressState?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf(PlaybackProgressState(0L, 0L)) }
+
+    val progressFraction = remember(liveProgress.positionMs, liveProgress.durationMs, track.durationMs) {
+        val dur = liveProgress.durationMs.takeIf { it > 0 } ?: track.durationMs ?: 0L
+        if (dur > 0) (liveProgress.positionMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+        else 0f
+    }
+
+    CircularProgressIndicator(
+        progress = { progressFraction },
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.primary,
+        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+        strokeWidth = 3.5.dp,
+    )
 }
