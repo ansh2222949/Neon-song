@@ -204,41 +204,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         super.onDestroy()
     }
 
-    /**
-     * Ask the window scheduler for the panel's fastest supported rate. This is
-     * a preference, not a forced mode: Android can still lower it for battery,
-     * thermals or a user's display setting, and 60 Hz panels remain at 60 Hz.
-     */
-    @Suppress("DEPRECATION")
-    private fun requestHighestSupportedRefreshRate() {
-        runCatching {
-            val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                display ?: windowManager.defaultDisplay
-            } else {
-                windowManager.defaultDisplay
-            }
-            val currentMode = display.mode
-            val matchingModes = display.supportedModes.filter {
-                it.physicalWidth == currentMode.physicalWidth &&
-                    it.physicalHeight == currentMode.physicalHeight
-            }
-            val highestMode = matchingModes.maxByOrNull { it.refreshRate } ?: currentMode
-            val attributes = window.attributes
-            var changed = false
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && attributes.preferredDisplayModeId != highestMode.modeId) {
-                attributes.preferredDisplayModeId = highestMode.modeId
-                changed = true
-            }
-            if (attributes.preferredRefreshRate != highestMode.refreshRate) {
-                attributes.preferredRefreshRate = highestMode.refreshRate
-                changed = true
-            }
-            if (changed) {
-                window.attributes = attributes
-            }
-        }
-    }
-
     private fun handlePlaybackIntent(intent: Intent?) {
         if (intent?.action == android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH) {
             val playbackIntent = Intent(this, com.neonsong.app.playback.MusicPlaybackService::class.java)

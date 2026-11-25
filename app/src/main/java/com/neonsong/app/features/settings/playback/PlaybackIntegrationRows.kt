@@ -17,7 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudSync
-import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material3.AlertDialog
 import com.neonsong.app.ui.theme.GlassActionButton as Button
@@ -140,7 +140,7 @@ fun YouTubeAccountRow(
                     contentColor = MaterialTheme.colorScheme.onErrorContainer,
                 ),
             ) {
-                Icon(Icons.Filled.Logout, contentDescription = "Disconnect")
+                Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Disconnect")
             }
         }
     }
@@ -248,7 +248,7 @@ fun LastFmIntegrationCard(
                             contentColor = MaterialTheme.colorScheme.onErrorContainer,
                         ),
                     ) {
-                        Icon(Icons.Filled.Logout, contentDescription = "Disconnect")
+                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Disconnect")
                     }
                 }
             }

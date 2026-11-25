@@ -43,8 +43,8 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material.icons.filled.PlaylistAdd
-import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.QueuePlayNext
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sell
@@ -559,7 +559,7 @@ fun TrackContextMenuSheet(
                             }
                         }
                     }
-                    add { pos -> MenuActionRow(Icons.Filled.QueueMusic, "Add to queue", position = pos) { musicPlayer.addToQueue(playable); onDismiss() } }
+                    add { pos -> MenuActionRow(Icons.AutoMirrored.Filled.QueueMusic, "Add to queue", position = pos) { musicPlayer.addToQueue(playable); onDismiss() } }
                     add { pos ->
                         Box(
                             modifier = Modifier
@@ -721,7 +721,7 @@ private fun QuickActionsRow(
     ) {
         QuickActionCard(Icons.Filled.PlayCircle, "Play", Modifier.weight(1f), onPlay)
         QuickActionCard(Icons.Filled.QueuePlayNext, "Play next", Modifier.weight(1f), onPlayNext)
-        QuickActionCard(Icons.Filled.PlaylistAdd, "Add to playlist", Modifier.weight(1f), onAddToPlaylist)
+        QuickActionCard(Icons.AutoMirrored.Filled.PlaylistAdd, "Add to playlist", Modifier.weight(1f), onAddToPlaylist)
     }
 }
 

@@ -109,13 +109,9 @@ fun NeonSongTheme(
         SideEffect {
             val window = (view.context as? Activity)?.window ?: return@SideEffect
             runCatching {
-                window.statusBarColor = android.graphics.Color.TRANSPARENT
-                window.navigationBarColor = android.graphics.Color.TRANSPARENT
-                WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !isDark
-                WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !isDark
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                    window.isStatusBarContrastEnforced = false
-                    window.isNavigationBarContrastEnforced = false
+                WindowCompat.getInsetsController(window, view).apply {
+                    isAppearanceLightStatusBars = !isDark
+                    isAppearanceLightNavigationBars = !isDark
                 }
             }
         }

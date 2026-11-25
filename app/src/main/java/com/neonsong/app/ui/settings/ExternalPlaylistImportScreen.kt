@@ -29,7 +29,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import com.neonsong.app.ui.theme.GlassActionButton as Button
 import androidx.compose.material3.ButtonDefaults
 import com.neonsong.app.ui.theme.GlassCircularProgressIndicator as CircularProgressIndicator
@@ -48,7 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -91,7 +91,7 @@ fun ExternalPlaylistImportScreen(
     viewModel: ExternalPlaylistImportViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
     val keyboard = LocalSoftwareKeyboardController.current
     val haptic = LocalHapticFeedback.current
     val isDark = LocalIsDarkTheme.current
@@ -176,7 +176,7 @@ fun ExternalPlaylistImportScreen(
                                         }
                                     } else {
                                         IconButton(onClick = {
-                                            val text = clipboard.getText()?.text.orEmpty()
+                                            val text = clipboard.nativeClipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
                                             if (text.isNotBlank()) {
                                                 viewModel.onLinkChange(text)
                                             }
@@ -222,7 +222,7 @@ fun ExternalPlaylistImportScreen(
                                     Spacer(Modifier.width(8.dp))
                                     Text("Reading Playlist...")
                                 } else {
-                                    Icon(Icons.Filled.QueueMusic, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(8.dp))
                                     Text("Preview Playlist", fontWeight = FontWeight.Bold)
                                 }

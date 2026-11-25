@@ -107,7 +107,7 @@ import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.VolumeMute
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -1255,7 +1255,7 @@ private fun FloatingMorphArtworkOverlay(
                                     val volIcon = when {
                                         volumeHudFraction <= 0.01f -> Icons.Filled.VolumeMute
                                         volumeHudFraction < 0.5f -> Icons.Filled.VolumeDown
-                                        else -> Icons.Filled.VolumeUp
+                                        else -> Icons.AutoMirrored.Filled.VolumeUp
                                     }
                                     Icon(volIcon, null, tint = Color.White, modifier = Modifier.size(24.dp))
                                     Box(

@@ -20,7 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import com.neonsong.app.ui.theme.GlassActionButton as Button
 import androidx.compose.material3.Checkbox
 import com.neonsong.app.ui.theme.GlassCircularProgressIndicator as CircularProgressIndicator
@@ -369,7 +369,7 @@ fun YouTubeLibraryVisibilitySheet(
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Icon(
-                                        Icons.Filled.QueueMusic,
+                                        Icons.AutoMirrored.Filled.QueueMusic,
                                         contentDescription = null,
                                         tint = if (isShown) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -532,7 +532,7 @@ fun SyncPlaylistsSheet(
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Icon(
-                                        Icons.Filled.QueueMusic,
+                                        Icons.AutoMirrored.Filled.QueueMusic,
                                         contentDescription = null,
                                         tint = if (isChecked) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(22.dp),

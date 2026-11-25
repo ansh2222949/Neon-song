@@ -104,12 +104,11 @@ fun Modifier.wobbleOverscroll(): Modifier {
  *  [wobbleOverscroll]'s doc comment for why this matters: without it, the
  *  platform's own overscroll effect keeps running underneath a custom one
  *  and the two visibly conflict at the scroll boundary. */
-@Suppress("DEPRECATION")
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun WithoutPlatformOverscroll(content: @Composable () -> Unit) {
     androidx.compose.runtime.CompositionLocalProvider(
-        androidx.compose.foundation.LocalOverscrollConfiguration provides null,
+        androidx.compose.foundation.LocalOverscrollFactory provides null,
         content = content,
     )
 }

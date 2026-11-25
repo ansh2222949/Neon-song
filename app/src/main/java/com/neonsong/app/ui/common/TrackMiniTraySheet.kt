@@ -34,8 +34,8 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.PlaylistAdd
-import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.QueuePlayNext
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -208,7 +208,7 @@ fun TrackMiniTraySheet(
                 }
                 // 3. Add to queue
                 add { pos ->
-                    MiniTrayRow(Icons.Filled.QueueMusic, "Add to queue", position = pos) {
+                    MiniTrayRow(Icons.AutoMirrored.Filled.QueueMusic, "Add to queue", position = pos) {
                         musicPlayer.addToQueue(playable)
                         onDismiss()
                     }
@@ -246,7 +246,7 @@ fun TrackMiniTraySheet(
                 }
                 // 5. Add to playlist
                 add { pos ->
-                    MiniTrayRow(Icons.Filled.PlaylistAdd, "Add to playlist", position = pos) {
+                    MiniTrayRow(Icons.AutoMirrored.Filled.PlaylistAdd, "Add to playlist", position = pos) {
                         addToPlaylist(playable)
                         onDismiss()
                     }
