@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ / One UI Dark with Dynamic Accents -->
+    <color name="widget_surface">#D9151518</color>
+    <color name="widget_surface_top">#E0222329</color>
+    <color name="widget_surface_variant">#24FFFFFF</color>
+    <color name="widget_on_surface">#FFFFFFFF</color>
+    <color name="widget_on_surface_variant">#B3FFFFFF</color>
+    <color name="widget_icon_tint">#FFFFFFFF</color>
+    <color name="widget_primary">@android:color/system_accent1_200</color>
+    <color name="widget_primary_deep">@android:color/system_accent1_300</color>
+    <color name="widget_primary_top">@android:color/system_accent1_100</color>
+    <color name="widget_on_primary">@android:color/system_accent1_900</color>
+    <color name="widget_accent">@android:color/system_accent1_200</color>
+    <color name="widget_hairline">#26FFFFFF</color>
+    <color name="widget_track">#29FFFFFF</color>
+    <color name="widget_eq_bar">@android:color/system_accent1_200</color>
+</resources>

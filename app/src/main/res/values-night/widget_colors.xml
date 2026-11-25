@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Samsung One UI Dark Obsidian Glass Palette -->
+    <color name="widget_surface">#D9151518</color>
+    <color name="widget_surface_top">#E0222329</color>
+    <color name="widget_surface_variant">#24FFFFFF</color>
+    <color name="widget_on_surface">#FFFFFFFF</color>
+    <color name="widget_on_surface_variant">#B3FFFFFF</color>
+    <color name="widget_icon_tint">#FFFFFFFF</color>
+    <color name="widget_primary">#FF00E5FF</color>
+    <color name="widget_primary_deep">#FF00B8D4</color>
+    <color name="widget_primary_top">#FF18FFFF</color>
+    <color name="widget_on_primary">#FF000000</color>
+    <color name="widget_accent">#FF00E5FF</color>
+    <color name="widget_hairline">#26FFFFFF</color>
+    <color name="widget_track">#29FFFFFF</color>
+    <color name="widget_eq_bar">#FF00E5FF</color>
+</resources>

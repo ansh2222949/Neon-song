@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_ref_background"
+    android:clipToOutline="true"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="14dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp">
+
+    <!-- Empty state -->
+    <LinearLayout
+        android:id="@+id/widget_empty_group"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/widget_empty_icon"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:contentDescription="@null"
+            android:src="@drawable/widget_art_placeholder" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/widget_empty_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:text="@string/widget_name"
+                android:textColor="@color/widget_on_surface"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_empty_sub"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif"
+                android:maxLines="1"
+                android:text="@string/widget_description"
+                android:textColor="@color/widget_on_surface_variant"
+                android:textSize="13sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Active playback state (Samsung One UI Standard Media Card) -->
+    <LinearLayout
+        android:id="@+id/widget_content_group"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <!-- Album Artwork: 60dp Squircle -->
+        <ImageView
+            android:id="@+id/widget_art"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:contentDescription="@null"
+            android:scaleType="centerCrop"
+            android:src="@drawable/widget_art_placeholder" />
+
+        <!-- Title, Artist & Progress Column -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="10dp"
+            android:layout_weight="1"
+            android:gravity="center_vertical"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/widget_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:text="Unknown track"
+                android:textColor="@color/widget_on_surface"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_subtitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif"
+                android:maxLines="1"
+                android:text="Unknown artist"
+                android:textColor="@color/widget_on_surface_variant"
+                android:textSize="13sp" />
+
+            <!-- Progress row -->
+            <LinearLayout
+                android:id="@+id/widget_progress_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ProgressBar
+                    android:id="@+id/widget_progress"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="0dp"
+                    android:layout_height="3.5dp"
+                    android:layout_weight="1"
+                    android:max="1000"
+                    android:progress="0"
+                    android:progressBackgroundTint="@color/widget_track"
+                    android:progressTint="@color/widget_primary" />
+
+                <LinearLayout
+                    android:id="@+id/widget_eq_group"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:gravity="center_vertical"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:id="@+id/widget_eq_icon"
+                        android:layout_width="12dp"
+                        android:layout_height="12dp"
+                        android:contentDescription="@null"
+                        android:src="@drawable/widget_eq_frame_0" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/widget_state"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- One UI Controls: Prev, Hero Play/Pause, Next -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageButton
+                android:id="@+id/widget_prev"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:background="@drawable/widget_circle"
+                android:contentDescription="@string/desc_previous"
+                android:padding="9dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_widget_skip_previous"
+                android:tint="@color/widget_icon_tint" />
+
+            <FrameLayout
+                android:id="@+id/widget_play_pause_container"
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:layout_marginStart="8dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/widget_play_pill">
+
+                <ImageView
+                    android:id="@+id/widget_play_pause"
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="@string/desc_play_pause"
+                    android:src="@drawable/ic_widget_play"
+                    android:tint="@color/widget_on_primary" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/widget_next_container"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:background="@drawable/widget_circle">
+
+                <ImageButton
+                    android:id="@+id/widget_next"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="@string/desc_next"
+                    android:padding="9dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_widget_skip_next"
+                    android:tint="@color/widget_icon_tint" />
+            </FrameLayout>
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

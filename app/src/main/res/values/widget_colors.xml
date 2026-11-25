@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Samsung One UI Light Frosted Glass Palette -->
+    <color name="widget_surface">#E8F6F7F9</color>
+    <color name="widget_surface_top">#F7FFFFFF</color>
+    <color name="widget_surface_variant">#14000000</color>
+    <color name="widget_on_surface">#FF1A1A1E</color>
+    <color name="widget_on_surface_variant">#8A1A1A1E</color>
+    <color name="widget_icon_tint">#FF1A1A1E</color>
+    <color name="widget_primary">#FF00E5FF</color>
+    <color name="widget_primary_deep">#FF00B8D4</color>
+    <color name="widget_primary_top">#FF18FFFF</color>
+    <color name="widget_on_primary">#FF000000</color>
+    <color name="widget_accent">#FF00E5FF</color>
+    <color name="widget_hairline">#1A000000</color>
+    <color name="widget_track">#1C000000</color>
+    <color name="widget_eq_bar">#FF00E5FF</color>
+</resources>

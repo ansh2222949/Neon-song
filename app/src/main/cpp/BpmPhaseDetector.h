@@ -1,0 +1,76 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <array>
+#include <atomic>
+
+namespace neonsong::audio {
+
+struct BeatDetectionResult final {
+    float bpm{120.0F};
+    float confidence{0.0F};
+    std::uint64_t lastDownbeatFrame{0};
+};
+
+class BpmPhaseDetector final {
+public:
+    static constexpr std::size_t kDecimationRate = 240; // 48000 / 240 = 200 Hz envelope rate
+    static constexpr std::size_t kEnvelopeBufferSize = 1024; // ~5.12 seconds buffer
+    static constexpr std::size_t kMinLag = 66;  // 181.8 BPM @ 200Hz
+    static constexpr std::size_t kMaxLag = 200; // 60.0 BPM @ 200Hz
+    static constexpr std::size_t kCorrelationBufferSize = 256;
+    static constexpr std::uint64_t kAnalysisIntervalMs = 1750;
+    static constexpr float kConfidenceLockThreshold = 0.75F;
+
+    BpmPhaseDetector() noexcept;
+    void configure(double sampleRate) noexcept;
+    void reset() noexcept;
+    void process(const float* stereoInterleaved, std::size_t frames) noexcept;
+    [[nodiscard]] BeatDetectionResult getResult() const noexcept;
+
+private:
+    double sampleRate_{48000.0};
+    std::size_t decimationFactor_{240};
+
+    // 2nd-order Butterworth bandpass (60-140 Hz)
+    double b0_{0.0};
+    double b1_{0.0};
+    double b2_{0.0};
+    double a1_{0.0};
+    double a2_{0.0};
+    double z1_{0.0};
+    double z2_{0.0};
+
+    // Envelope decimation accumulator
+    float decimationAccumulator_{0.0F};
+    std::size_t decimationCounter_{0};
+    std::uint64_t totalFramesProcessed_{0};
+    std::uint64_t nextAnalysisFrame_{0};
+    bool confidenceLocked_{false};
+
+    // Ring buffer of decimated envelope
+    std::array<float, kEnvelopeBufferSize> envelopeBuffer_{};
+    std::array<float, kEnvelopeBufferSize> linearEnvelope_{};
+    std::array<float, kCorrelationBufferSize> correlationValues_{};
+    std::size_t envelopeWritePos_{0};
+    bool envelopeFull_{false};
+
+    // Onset and peak tracking
+    float previousFiltered_{0.0F};
+    float onsetThreshold_{0.01F};
+    std::uint64_t lastPeakFrame_{0};
+
+    std::size_t minLag_{65};
+    std::size_t maxLag_{218};
+    float envMovingAvg_{0.0F};
+    std::uint64_t minBeatGapFrames_{12000};
+
+    // Cached result
+    std::atomic<float> currentBpm_{120.0F};
+    std::atomic<float> currentConfidence_{0.0F};
+    std::atomic<std::uint64_t> currentDownbeatFrame_{0};
+    void updateAutocorrelation() noexcept;
+};
+
+} // namespace neonsong::audio
