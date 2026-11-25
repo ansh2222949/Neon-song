@@ -3,6 +3,8 @@ package com.neonsong.app.data.feed
 import androidx.compose.runtime.Immutable
 import com.neonsong.app.data.artwork.ArtworkNormalizer
 import com.neonsong.app.util.ArtistHelper
+import com.neonsong.app.util.cancellableRunCatching
+import java.io.IOException
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import com.neonsong.app.data.generate.GeneratedTrack
@@ -116,8 +118,8 @@ class FeedRepository @Inject constructor(
     private val ytAuth: YtMusicAuthManager,
     private val playlistRepository: PlaylistRepository,
 ) {
-    private var cachedFeed: FeedData? = null
-    private var cachedKey: String? = null
+    @Volatile private var cachedFeed: FeedData? = null
+    @Volatile private var cachedKey: String? = null
 
     fun getCachedFeed(): FeedData? = cachedFeed
 
@@ -133,19 +135,19 @@ class FeedRepository @Inject constructor(
         val connection = connectionPre
         val isYtConnected = connection.isConnected
 
-        val newReleasesDef = async(Dispatchers.IO) { runCatching { innerTube.fetchNewReleases() }.getOrDefault(emptyList()) }
-        val chartsDef = async(Dispatchers.IO) { runCatching { innerTube.fetchCharts() }.getOrDefault(emptyList()) }
-        val homeMixesDef = async(Dispatchers.IO) { runCatching { innerTube.fetchHomeMixes() }.getOrDefault(emptyList()) }
+        val newReleasesDef = async(Dispatchers.IO) { cancellableRunCatching { innerTube.fetchNewReleases() }.getOrDefault(emptyList()) }
+        val chartsDef = async(Dispatchers.IO) { cancellableRunCatching { innerTube.fetchCharts() }.getOrDefault(emptyList()) }
+        val homeMixesDef = async(Dispatchers.IO) { cancellableRunCatching { innerTube.fetchHomeMixes() }.getOrDefault(emptyList()) }
         val homeSongsDef = async(Dispatchers.IO) {
-            if (isYtConnected) emptyList() else runCatching { innerTube.fetchHomeSongs() }.getOrDefault(emptyList())
+            if (isYtConnected) emptyList() else cancellableRunCatching { innerTube.fetchHomeSongs() }.getOrDefault(emptyList())
         }
         val homePageDef = async(Dispatchers.IO) {
-            runCatching { innerTube.fetchHomePage() }.getOrDefault(HomePage())
+            cancellableRunCatching { innerTube.fetchHomePage(throwOnError = true) }
         }
 
         val ytTasteDef = async(Dispatchers.IO) {
             if (isYtConnected) {
-                runCatching { innerTube.fetchTasteSignals(recentLimit = 40, likedLimit = 40, feedLimit = 60) }.getOrNull()
+                cancellableRunCatching { innerTube.fetchTasteSignals(recentLimit = 40, likedLimit = 40, feedLimit = 60) }.getOrNull()
             } else null
         }
 
@@ -160,15 +162,15 @@ class FeedRepository @Inject constructor(
             } else emptyList()
         }
         val tasteProfileDef = async(Dispatchers.IO) {
-            runCatching { tasteProfileProvider.get() }.getOrNull()
+            cancellableRunCatching { tasteProfileProvider.get() }.getOrNull()
         }
         val likedSongsIdDef = async(Dispatchers.IO) {
-            runCatching { playlistRepository.ensureLikedSongs().id }.getOrNull()
+            cancellableRunCatching { playlistRepository.ensureLikedSongs().id }.getOrNull()
         }
         // Local-first fallback for guest/disconnected: liked songs + saved
         // playlist tracks from Room (on-device history proxy). Never throws.
         val localLibraryDef = async(Dispatchers.IO) {
-            runCatching {
+            cancellableRunCatching {
                 val liked = playlistRepository.getLikedSongs()?.tracks.orEmpty()
                 val saved = playlistRepository.getAll().flatMap { it.tracks }
                 (liked + saved).filter { it.name.isNotBlank() && it.artist.isNotBlank() }
@@ -180,7 +182,7 @@ class FeedRepository @Inject constructor(
         // usually just the single name and open a whole different record.
         val lastFmTopAlbumsDef = async(Dispatchers.IO) {
             if (!username.isNullOrBlank()) {
-                runCatching { homeRepository.fetchTopAlbums(limit = 20, username = username).getOrNull().orEmpty() }
+                cancellableRunCatching { homeRepository.fetchTopAlbums(limit = 20, username = username).getOrNull().orEmpty() }
                     .getOrDefault(emptyList())
             } else emptyList()
         }
@@ -191,9 +193,10 @@ class FeedRepository @Inject constructor(
             it.id.startsWith("PL") || it.id.startsWith("RD") || it.id.startsWith("OLAK") || it.id == "LM"
         }
         val homeSongs = homeSongsDef.await()
-        val homePage = homePageDef.await()
+        val homePageResult = homePageDef.await()
+        val homePage = homePageResult.getOrDefault(HomePage())
         val nativeShelves = homePage.shelves.ifEmpty {
-            runCatching { innerTube.fetchHomeShelves() }.getOrDefault(emptyList())
+            cancellableRunCatching { innerTube.fetchHomeShelves() }.getOrDefault(emptyList())
         }
         val homeChips = homePage.chips
         val homeContinuationToken = homePage.continuationToken
@@ -204,6 +207,19 @@ class FeedRepository @Inject constructor(
         val likedSongsId = likedSongsIdDef.await()
 
         val localLibrary = localLibraryDef.await()
+        if (homePageResult.isFailure &&
+            previous == null &&
+            releaseCandidates.isEmpty() &&
+            charts.isEmpty() &&
+            homePlaylists.isEmpty() &&
+            homeSongs.isEmpty() &&
+            nativeShelves.isEmpty() &&
+            localLibrary.isEmpty() &&
+            recentTracks.isEmpty() &&
+            ytTaste == null
+        ) {
+            throw homePageResult.exceptionOrNull() ?: IOException("Failed to load feed")
+        }
         val localQuickPicks = localLibrary.map {
             YouTubeMusicTrack(it.youtubeVideoIdOrNull().orEmpty(), it.name, it.artist, it.album, it.artworkUrl)
         }
@@ -369,7 +385,7 @@ class FeedRepository @Inject constructor(
                     ?.artworkUrl
                 previous?.topArtists?.firstOrNull { it.name.equals(name, ignoreCase = true) && it.browseId != null }
                     ?.let { return@async it }
-                val entity = runCatching {
+                val entity = cancellableRunCatching {
                     innerTube.searchArtists(name, limit = 3)
                         .firstOrNull { it.name.trim().equals(name, ignoreCase = true) }
                 }.getOrNull()
@@ -387,7 +403,7 @@ class FeedRepository @Inject constructor(
             .take(4).map { artist ->
                 async(Dispatchers.IO) {
                     val page = artist.browseId?.let { id ->
-                        runCatching { innerTube.fetchArtistPage(id, artist.name) }.getOrNull()
+                        cancellableRunCatching { innerTube.fetchArtistPage(id, artist.name) }.getOrNull()
                     }
                     (page?.albums.orEmpty() + page?.singles.orEmpty())
                         .filter { it.year == releaseYear && it.browseId.isNotBlank() }
@@ -529,7 +545,7 @@ class FeedRepository @Inject constructor(
                     artistPageRequests.withPermit {
                         val browseId = artist.browseId?.takeIf(String::isNotBlank)
                             ?: return@withPermit emptyList<FeedAlbum>()
-                        val page = runCatching { innerTube.fetchArtistPage(browseId, artist.name) }.getOrNull()
+                        val page = cancellableRunCatching { innerTube.fetchArtistPage(browseId, artist.name) }.getOrNull()
                         page?.albums.orEmpty()
                             .filter { item ->
                                 item.browseId.isNotBlank() && item.title.isNotBlank() &&
@@ -562,7 +578,7 @@ class FeedRepository @Inject constructor(
             .map { topAlbum ->
                 async(Dispatchers.IO) {
                     albumArtworkRequests.withPermit {
-                        val candidates = runCatching {
+                        val candidates = cancellableRunCatching {
                             innerTube.searchAlbums("${topAlbum.name} ${topAlbum.artist}", limit = 5)
                         }.getOrNull().orEmpty()
                         val match = candidates.firstOrNull {
@@ -595,7 +611,7 @@ class FeedRepository @Inject constructor(
                         album
                     } else albumArtworkRequests.withPermit {
                         val pageArt = album.browseId?.takeIf(String::isNotBlank)?.let { id ->
-                            runCatching { innerTube.fetchAlbumPage(id) }.getOrNull()?.artworkUrl
+                            cancellableRunCatching { innerTube.fetchAlbumPage(id) }.getOrNull()?.artworkUrl
                         }?.takeIf(ArtworkNormalizer::isRealImage)
                         album.copy(artworkUrl = pageArt ?: album.artworkUrl)
                     }

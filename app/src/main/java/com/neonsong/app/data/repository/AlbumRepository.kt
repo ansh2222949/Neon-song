@@ -6,6 +6,8 @@ import com.neonsong.app.data.model.ArtistAlbumItem
 import com.neonsong.app.data.music.InnerTubeMusicApi
 import com.neonsong.app.data.network.LastFmApiService
 import com.neonsong.app.playback.PlayableTrack
+import com.neonsong.app.util.asJsonObjectList
+import com.neonsong.app.util.cancellableRunCatching
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -48,7 +50,7 @@ class AlbumRepository @Inject constructor(
             // 1. Resolve browseId if missing
             if (targetBrowseId == null) {
                 val query = if (cleanArtist.isNotBlank()) "$cleanTitle $cleanArtist" else cleanTitle
-                val searchResults = runCatching { innerTube.searchAlbums(query, limit = 5) }.getOrNull().orEmpty()
+                val searchResults = cancellableRunCatching { innerTube.searchAlbums(query, limit = 5) }.getOrNull().orEmpty()
                 val match = searchResults.firstOrNull { it.name.equals(cleanTitle, ignoreCase = true) }
                     ?: searchResults.firstOrNull()
                 targetBrowseId = match?.browseId
@@ -58,14 +60,14 @@ class AlbumRepository @Inject constructor(
             coroutineScope {
                 // Load InnerTube album data in parallel with Last.fm metadata
                 val innerTubeDeferred = async {
-                    runCatching {
+                    cancellableRunCatching {
                         resolvedId?.let { innerTube.fetchAlbumPage(it, albumTitleFallback = cleanTitle, artistFallback = cleanArtist) }
                     }.getOrNull()
                 }
 
                 val lastFmDeferred = async {
                     if (cleanArtist.isNotBlank()) {
-                        runCatching { fetchLastFmAlbumInfo(cleanTitle, cleanArtist) }.getOrNull()
+                        cancellableRunCatching { fetchLastFmAlbumInfo(cleanTitle, cleanArtist) }.getOrNull()
                     } else null
                 }
 
@@ -85,7 +87,7 @@ class AlbumRepository @Inject constructor(
                 // Mapping raw search hits 1:1 used to render a single random
                 // song (or unrelated songs) as the whole "tracklist".
                 if (tracks.isEmpty() && finalTitle.isNotBlank()) {
-                    val songs = runCatching {
+                    val songs = cancellableRunCatching {
                         innerTube.searchSongs("$finalTitle $finalArtist", limit = 20)
                     }.getOrDefault(emptyList())
 
@@ -152,7 +154,7 @@ class AlbumRepository @Inject constructor(
     )
 
     private suspend fun fetchLastFmAlbumInfo(albumTitle: String, artistName: String): LastFmAlbumMeta? {
-        val session = runCatching { sessionPreferences.session.first() }.getOrNull()
+        val session = cancellableRunCatching { sessionPreferences.session.first() }.getOrNull()
         // No shared key: without a personal key the YT Music path below is used.
         val apiKey = session?.apiKey?.takeIf(String::isNotBlank) ?: return null
 
@@ -177,12 +179,12 @@ class AlbumRepository @Inject constructor(
         val published = albumObj["wiki"]?.jsonObject?.get("published")?.jsonPrimitive?.contentOrNull
         val releaseYear = published?.let { Regex("(19|20)\\d{2}").find(it)?.value }
 
-        val tags = albumObj["tags"]?.jsonObject?.get("tag")?.jsonArray?.mapNotNull {
-            it.jsonObject["name"]?.jsonPrimitive?.contentOrNull
-        }.orEmpty()
+        val tags = albumObj["tags"]?.jsonObject?.get("tag").asJsonObjectList().mapNotNull {
+            it["name"]?.jsonPrimitive?.contentOrNull
+        }
 
-        val images = albumObj["image"]?.jsonArray?.mapNotNull { it.jsonObject }
-        val artworkUrl = images?.lastOrNull {
+        val images = albumObj["image"].asJsonObjectList()
+        val artworkUrl = images.lastOrNull {
             it["#text"]?.jsonPrimitive?.contentOrNull?.isNotBlank() == true
         }?.get("#text")?.jsonPrimitive?.contentOrNull
 

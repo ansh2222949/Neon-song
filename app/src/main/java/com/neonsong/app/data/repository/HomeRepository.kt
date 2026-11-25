@@ -80,8 +80,8 @@ class HomeRepository @Inject constructor(
     private val inFlightStats = ConcurrentHashMap<String, Deferred<Result<HomeStats>>>()
     private val inFlightRecent = ConcurrentHashMap<String, Deferred<Result<RecentTracksPage>>>()
 
-    private var cachedInitialData: Pair<String, HomeInitialData>? = null
-    private var cachedInitialDataTimestamp: Long = 0L
+    @Volatile private var cachedInitialData: Pair<String, HomeInitialData>? = null
+    @Volatile private var cachedInitialDataTimestamp: Long = 0L
 
     private val playableCheckSemaphore = kotlinx.coroutines.sync.Semaphore(6)
 
@@ -202,6 +202,8 @@ class HomeRepository @Inject constructor(
                 )
             )
         }
+    } catch (c: kotlinx.coroutines.CancellationException) {
+        throw c
     } catch (e: Exception) {
         Result.failure(e)
     }
@@ -242,22 +244,29 @@ class HomeRepository @Inject constructor(
 
             coroutineScope {
                 val infoDeferred = async(Dispatchers.IO) {
-                    try { api.get(base + ("method" to "user.getinfo")).body()?.string().orEmpty() } catch (_: Exception) { "" }
+                    try { api.get(base + ("method" to "user.getinfo")).body()?.string().orEmpty() } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Exception) { null }
                 }
                 val tracksDeferred = async(Dispatchers.IO) {
-                    try { api.get(base + ("method" to "user.gettoptracks") + ("limit" to "1") + ("period" to "overall")).body()?.string().orEmpty() } catch (_: Exception) { "" }
+                    try { api.get(base + ("method" to "user.gettoptracks") + ("limit" to "1") + ("period" to "overall")).body()?.string().orEmpty() } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Exception) { null }
                 }
                 val artistsDeferred = async(Dispatchers.IO) {
-                    try { api.get(base + ("method" to "user.gettopartists") + ("limit" to "1") + ("period" to "overall")).body()?.string().orEmpty() } catch (_: Exception) { "" }
+                    try { api.get(base + ("method" to "user.gettopartists") + ("limit" to "1") + ("period" to "overall")).body()?.string().orEmpty() } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Exception) { null }
                 }
                 val albumsDeferred = async(Dispatchers.IO) {
-                    try { api.get(base + ("method" to "user.gettopalbums") + ("limit" to "1") + ("period" to "overall")).body()?.string().orEmpty() } catch (_: Exception) { "" }
+                    try { api.get(base + ("method" to "user.gettopalbums") + ("limit" to "1") + ("period" to "overall")).body()?.string().orEmpty() } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Exception) { null }
                 }
 
-                val infoBody = infoDeferred.await()
-                val tracksBody = tracksDeferred.await()
-                val artistsBody = artistsDeferred.await()
-                val albumsBody = albumsDeferred.await()
+                val infoRaw = infoDeferred.await()
+                val tracksRaw = tracksDeferred.await()
+                val artistsRaw = artistsDeferred.await()
+                val albumsRaw = albumsDeferred.await()
+                if (infoRaw == null && tracksRaw == null && artistsRaw == null && albumsRaw == null) {
+                    return@coroutineScope Result.failure(java.io.IOException("Unable to reach Last.fm stats"))
+                }
+                val infoBody = infoRaw.orEmpty()
+                val tracksBody = tracksRaw.orEmpty()
+                val artistsBody = artistsRaw.orEmpty()
+                val albumsBody = albumsRaw.orEmpty()
 
                 val info = runCatching { json.decodeFromString<UserInfoEnvelope>(infoBody) }.getOrNull()
                 val tracks = runCatching { json.decodeFromString<TopTracksEnvelope>(tracksBody) }.getOrNull()
@@ -321,6 +330,8 @@ class HomeRepository @Inject constructor(
                 )
             }
         }
+    } catch (c: kotlinx.coroutines.CancellationException) {
+        throw c
     } catch (e: Exception) {
         Result.failure(e)
     }
@@ -364,6 +375,8 @@ class HomeRepository @Inject constructor(
             )
         }
         Result.success(tracks)
+    } catch (c: kotlinx.coroutines.CancellationException) {
+        throw c
     } catch (e: Exception) {
         Result.failure(e)
     }
@@ -427,6 +440,8 @@ class HomeRepository @Inject constructor(
             )
         }
         Result.success(artists)
+    } catch (c: kotlinx.coroutines.CancellationException) {
+        throw c
     } catch (e: Exception) {
         Result.failure(e)
     }
@@ -484,6 +499,8 @@ class HomeRepository @Inject constructor(
             }
             Result.success(albums)
         }
+    } catch (c: kotlinx.coroutines.CancellationException) {
+        throw c
     } catch (e: Exception) {
         Result.failure(e)
     }
@@ -496,10 +513,11 @@ class HomeRepository @Inject constructor(
         val cacheKey = targetUser.ifBlank { "guest" }
 
         val now = System.currentTimeMillis()
+        val snapshot = cachedInitialData
         if (forceRefresh) {
             cachedInitialData = null
-        } else if (cachedInitialData?.first == cacheKey && (now - cachedInitialDataTimestamp < 30_000L)) {
-            return Result.success(cachedInitialData!!.second)
+        } else if (snapshot != null && snapshot.first == cacheKey && (now - cachedInitialDataTimestamp < 30_000L)) {
+            return Result.success(snapshot.second)
         }
 
         val deferred = inFlightInitialData.getOrPut(cacheKey) {
@@ -555,6 +573,8 @@ class HomeRepository @Inject constructor(
                 Result.success(HomeInitialData(resolvedStats, recent, topTracks))
             }
         }
+    } catch (c: kotlinx.coroutines.CancellationException) {
+        throw c
     } catch (e: Exception) {
         Result.failure(e)
     }
@@ -579,6 +599,8 @@ class HomeRepository @Inject constructor(
             throw LastFmException(LastFmErrors.friendlyMessage(parsed.error, parsed.message), parsed.error)
         }
         Result.success(parsed.friends?.user.orEmpty())
+    } catch (c: kotlinx.coroutines.CancellationException) {
+        throw c
     } catch (e: Exception) {
         Result.failure(e)
     }

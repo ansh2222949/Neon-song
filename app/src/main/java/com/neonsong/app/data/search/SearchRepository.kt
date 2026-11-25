@@ -74,6 +74,8 @@ class SearchRepository @Inject constructor(
                 }
                 list
             }
+        } catch (c: CancellationException) {
+            throw c
         } catch (e: Exception) {
             emptyList()
         }
@@ -82,7 +84,7 @@ class SearchRepository @Inject constructor(
     suspend fun search(tab: SearchTab, query: String): List<SearchResultItem> {
         if (query.isBlank()) return emptyList()
         return when (tab) {
-            SearchTab.TRACKS -> innerTube.searchSongs(query).map { track ->
+            SearchTab.TRACKS -> innerTube.searchSongs(query, throwOnError = true).map { track ->
                 SearchResultItem(
                     name = track.title,
                     artist = track.artist,
@@ -92,7 +94,7 @@ class SearchRepository @Inject constructor(
                     entityId = track.videoId,
                 )
             }
-            SearchTab.ARTISTS -> innerTube.searchArtists(query).map { artist ->
+            SearchTab.ARTISTS -> innerTube.searchArtists(query, throwOnError = true).map { artist ->
                 SearchResultItem(
                     name = artist.name,
                     artworkUrl = artist.artworkUrl,
@@ -100,7 +102,7 @@ class SearchRepository @Inject constructor(
                     entityId = artist.browseId,
                 )
             }
-            SearchTab.ALBUMS -> innerTube.searchAlbums(query).map { album ->
+            SearchTab.ALBUMS -> innerTube.searchAlbums(query, throwOnError = true).map { album ->
                 SearchResultItem(
                     name = album.name,
                     artist = album.artist,
@@ -109,7 +111,7 @@ class SearchRepository @Inject constructor(
                     entityId = album.browseId,
                 )
             }
-            SearchTab.PLAYLISTS -> innerTube.searchPlaylists(query).map { playlist ->
+            SearchTab.PLAYLISTS -> innerTube.searchPlaylists(query, throwOnError = true).map { playlist ->
                 SearchResultItem(
                     name = playlist.title,
                     artist = playlist.author,
@@ -141,7 +143,9 @@ class SearchRepository @Inject constructor(
     ): String? = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext null
         val query = "$title $artist official video".trim()
-        val videos = runCatching { innerTube.searchVideos(query, limit = 10) }.getOrDefault(emptyList())
+        val videos = com.neonsong.app.util.cancellableRunCatching {
+            innerTube.searchVideos(query, limit = 10)
+        }.getOrDefault(emptyList())
         if (videos.isEmpty()) return@withContext null
 
         val targetSeconds = targetDurationMs?.let { it / 1000 }
@@ -259,6 +263,8 @@ class SearchRepository @Inject constructor(
             val related = if (!videoId.isNullOrBlank()) {
                 try {
                     innerTube.fetchRelatedSongs(videoId, limit = limit * 2, prefetchStreams = false)
+                } catch (c: CancellationException) {
+                    throw c
                 } catch (_: Exception) {
                     emptyList()
                 }

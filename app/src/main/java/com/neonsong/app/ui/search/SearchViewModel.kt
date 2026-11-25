@@ -9,7 +9,9 @@ import com.neonsong.app.data.search.SearchResultItem
 import com.neonsong.app.data.search.SearchTab
 import com.neonsong.app.playback.MusicPlayer
 import com.neonsong.app.playback.PlayableTrack
+import com.neonsong.app.util.cancellableRunCatching
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,7 +21,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-enum class SearchStatus { IDLE, LOADING, EMPTY, RESULTS }
+enum class SearchStatus { IDLE, LOADING, EMPTY, RESULTS, ERROR }
 
 @Immutable
 data class SearchUiState(
@@ -30,6 +32,7 @@ data class SearchUiState(
     val suggestions: List<String> = emptyList(),
     val recentSearches: List<String> = emptyList(),
     val isShowingSuggestions: Boolean = false,
+    val errorMessage: String? = null,
 )
 
 /**
@@ -47,6 +50,7 @@ class SearchViewModel @Inject constructor(
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
 
     private var debounceJob: Job? = null
+    private var searchJob: Job? = null
     private var suggestionsJob: Job? = null
     private var searchQueueJob: Job? = null
     private var lastIssuedQuery: String = ""
@@ -60,8 +64,9 @@ class SearchViewModel @Inject constructor(
     }
 
     fun setQuery(query: String) {
-        _uiState.update { it.copy(query = query, isShowingSuggestions = query.isNotBlank()) }
+        _uiState.update { it.copy(query = query, isShowingSuggestions = query.isNotBlank(), errorMessage = null) }
         debounceJob?.cancel()
+        searchJob?.cancel()
         suggestionsJob?.cancel()
 
         if (query.isBlank()) {
@@ -71,6 +76,7 @@ class SearchViewModel @Inject constructor(
                     results = emptyList(),
                     suggestions = emptyList(),
                     isShowingSuggestions = false,
+                    errorMessage = null,
                 )
             }
             return
@@ -99,14 +105,16 @@ class SearchViewModel @Inject constructor(
                 tab = tab,
                 isShowingSuggestions = false,
                 results = emptyList(),
+                errorMessage = null,
                 status = if (it.query.isBlank()) SearchStatus.IDLE else SearchStatus.LOADING,
             )
         }
         val q = _uiState.value.query
         if (q.isNotBlank()) {
             debounceJob?.cancel()
+            searchJob?.cancel()
             suggestionsJob?.cancel()
-            viewModelScope.launch { runSearch(q, saveToHistory = false) }
+            searchJob = viewModelScope.launch { runSearch(q, saveToHistory = false) }
         }
     }
 
@@ -120,15 +128,17 @@ class SearchViewModel @Inject constructor(
         val trimmed = query.trim()
         if (trimmed.isBlank()) return
         debounceJob?.cancel()
+        searchJob?.cancel()
         suggestionsJob?.cancel()
         historyRepository.add(trimmed)
         _uiState.update {
             it.copy(
                 query = trimmed,
                 isShowingSuggestions = false,
+                errorMessage = null,
             )
         }
-        viewModelScope.launch { runSearch(trimmed, saveToHistory = true) }
+        searchJob = viewModelScope.launch { runSearch(trimmed, saveToHistory = true) }
     }
 
     fun removeRecentSearch(query: String) {
@@ -158,19 +168,21 @@ class SearchViewModel @Inject constructor(
                 // Start immediately. Similar song radio queue loads and extends infinitely.
                 musicPlayer.play(selected, sourceLabel = "Search", startRadio = true)
             }
-            SearchTab.ARTISTS, SearchTab.ALBUMS -> viewModelScope.launch {
-                val tracks = runCatching { repository.songsFor(item) }.getOrDefault(emptyList())
-                if (tracks.isNotEmpty()) {
-                    musicPlayer.playQueue(tracks.map { track ->
-                        PlayableTrack(
-                            title = track.title,
-                            artist = track.artist.takeUnless { it == "Unknown artist" } ?: item.artist ?: item.name,
-                            album = track.album ?: if (tab == SearchTab.ALBUMS) item.name else null,
-                            artworkUrl = track.artworkUrl ?: item.artworkUrl,
-                            videoId = track.videoId,
-                            durationMs = track.durationSeconds?.takeIf { it > 0 }?.times(1_000L),
-                        )
-                    }, sourceLabel = "Search")
+            SearchTab.ARTISTS, SearchTab.ALBUMS -> {
+                searchQueueJob = viewModelScope.launch {
+                    val tracks = cancellableRunCatching { repository.songsFor(item) }.getOrDefault(emptyList())
+                    if (tracks.isNotEmpty()) {
+                        musicPlayer.playQueue(tracks.map { track ->
+                            PlayableTrack(
+                                title = track.title,
+                                artist = track.artist.takeUnless { it == "Unknown artist" } ?: item.artist ?: item.name,
+                                album = track.album ?: if (tab == SearchTab.ALBUMS) item.name else null,
+                                artworkUrl = track.artworkUrl ?: item.artworkUrl,
+                                videoId = track.videoId,
+                                durationMs = track.durationSeconds?.takeIf { it > 0 }?.times(1_000L),
+                            )
+                        }, sourceLabel = "Search")
+                    }
                 }
             }
             SearchTab.PLAYLISTS, SearchTab.USERS -> Unit
@@ -180,7 +192,7 @@ class SearchViewModel @Inject constructor(
     private suspend fun runSearch(query: String, saveToHistory: Boolean) {
         val tab = _uiState.value.tab
         lastIssuedQuery = query
-        _uiState.update { it.copy(status = SearchStatus.LOADING) }
+        _uiState.update { it.copy(status = SearchStatus.LOADING, errorMessage = null) }
         if (saveToHistory) {
             historyRepository.add(query)
         }
@@ -193,16 +205,26 @@ class SearchViewModel @Inject constructor(
                 it.copy(
                     status = if (results.isEmpty()) SearchStatus.EMPTY else SearchStatus.RESULTS,
                     results = results,
+                    errorMessage = null,
                 )
             }
+        } catch (c: CancellationException) {
+            throw c
         } catch (e: Exception) {
             if (lastIssuedQuery != query || _uiState.value.query != query || _uiState.value.tab != tab) return
-            _uiState.update { it.copy(status = SearchStatus.EMPTY, results = emptyList()) }
+            _uiState.update {
+                it.copy(
+                    status = SearchStatus.ERROR,
+                    results = emptyList(),
+                    errorMessage = e.message ?: "Search failed. Check your connection.",
+                )
+            }
         }
     }
 
     fun clearQuery() {
         debounceJob?.cancel()
+        searchJob?.cancel()
         suggestionsJob?.cancel()
         _uiState.update {
             it.copy(
@@ -211,6 +233,7 @@ class SearchViewModel @Inject constructor(
                 results = emptyList(),
                 suggestions = emptyList(),
                 isShowingSuggestions = false,
+                errorMessage = null,
             )
         }
     }

@@ -82,6 +82,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -118,6 +119,7 @@ import com.neonsong.app.ui.theme.rememberLayerBackdrop
 import com.neonsong.app.ui.theme.GlassFilledIconActionButton as FilledIconButton
 import com.neonsong.app.ui.theme.GlassIconActionButton as IconButton
 import com.neonsong.app.ui.theme.GlassTextActionButton as TextButton
+import com.neonsong.app.ui.theme.LiquidGlassButton
 import com.neonsong.app.ui.theme.LiquidGlassChip
 import com.neonsong.app.ui.theme.liquidGlassSurface
 import com.neonsong.app.ui.theme.rememberLiquidTouchInteraction
@@ -385,6 +387,29 @@ fun SearchScreen(
                                             "No results found for \"${state.query}\"",
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
+                                    }
+                                }
+                                SearchStatus.ERROR -> Box(
+                                    Modifier.fillMaxSize().padding(horizontal = 24.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            Icons.Filled.Search,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(44.dp),
+                                        )
+                                        Spacer(Modifier.height(10.dp))
+                                        Text(
+                                            state.errorMessage ?: "Search failed. Check your connection.",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = TextAlign.Center,
+                                        )
+                                        Spacer(Modifier.height(12.dp))
+                                        LiquidGlassButton(onClick = { viewModel.searchNow() }) {
+                                            Text("Retry")
+                                        }
                                     }
                                 }
                                 SearchStatus.RESULTS -> {

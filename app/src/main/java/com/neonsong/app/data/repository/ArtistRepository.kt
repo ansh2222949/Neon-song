@@ -8,6 +8,8 @@ import com.neonsong.app.data.model.ArtistSummaryItem
 import com.neonsong.app.data.music.InnerTubeMusicApi
 import com.neonsong.app.data.network.LastFmApiService
 import com.neonsong.app.playback.PlayableTrack
+import com.neonsong.app.util.asJsonObjectList
+import com.neonsong.app.util.cancellableRunCatching
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -46,7 +48,7 @@ class ArtistRepository @Inject constructor(
 
             // 1. Resolve browseId if missing
             if (targetBrowseId == null) {
-                val searchResults = runCatching { innerTube.searchArtists(cleanName, limit = 5) }.getOrNull().orEmpty()
+                val searchResults = cancellableRunCatching { innerTube.searchArtists(cleanName, limit = 5) }.getOrNull().orEmpty()
                 val match = searchResults.firstOrNull { it.name.equals(cleanName, ignoreCase = true) }
                     ?: searchResults.firstOrNull()
                 targetBrowseId = match?.browseId
@@ -57,11 +59,11 @@ class ArtistRepository @Inject constructor(
             coroutineScope {
             // Load InnerTube artist data in parallel with Last.fm metadata
             val innerTubeDeferred = async {
-                runCatching { resolvedId?.let { innerTube.fetchArtistPage(it, artistNameFallback = cleanName, onLoaded = onLoaded) } }.getOrNull()
+                cancellableRunCatching { resolvedId?.let { innerTube.fetchArtistPage(it, artistNameFallback = cleanName, onLoaded = onLoaded) } }.getOrNull()
             }
 
             val lastFmDeferred = async {
-                runCatching { fetchLastFmArtistInfo(cleanName) }.getOrNull()
+                cancellableRunCatching { fetchLastFmArtistInfo(cleanName) }.getOrNull()
             }
 
             val ytData = innerTubeDeferred.await()
@@ -71,7 +73,7 @@ class ArtistRepository @Inject constructor(
             val finalName = ytData?.name?.takeIf(String::isNotBlank)?.let { com.neonsong.app.util.ArtistHelper.primaryArtist(it).trim() }
                 ?: cleanName.ifBlank { "Artist" }
             if (!ArtworkNormalizer.isRealImage(ytData?.artworkUrl) && searchArtwork == null) {
-                searchArtwork = runCatching {
+                searchArtwork = cancellableRunCatching {
                     innerTube.searchArtists(cleanName, limit = 5)
                         .firstOrNull { it.name.equals(cleanName, ignoreCase = true) }
                         ?.artworkUrl?.takeIf(ArtworkNormalizer::isRealImage)
@@ -87,7 +89,7 @@ class ArtistRepository @Inject constructor(
 
             // Search only when the artist page has no playable songs.
             if (topSongs.isEmpty() && finalName.isNotBlank()) {
-                val songs = runCatching { innerTube.searchSongs(finalName, limit = 30) }.getOrDefault(emptyList())
+                val songs = cancellableRunCatching { innerTube.searchSongs(finalName, limit = 30) }.getOrDefault(emptyList())
                 val existingIds = topSongs.mapNotNull { it.videoId }.toSet()
                 val existingTitles = topSongs.map { it.title.lowercase().trim() }.toSet()
                 val additionalTracks = songs
@@ -157,7 +159,7 @@ class ArtistRepository @Inject constructor(
     )
 
     private suspend fun fetchLastFmArtistInfo(artistName: String): LastFmArtistMeta? {
-        val session = runCatching { sessionPreferences.session.first() }.getOrNull()
+        val session = cancellableRunCatching { sessionPreferences.session.first() }.getOrNull()
         // No shared key: without a personal key the YT Music path below is used.
         val apiKey = session?.apiKey?.takeIf(String::isNotBlank) ?: return null
 
@@ -195,22 +197,22 @@ class ArtistRepository @Inject constructor(
             }
         }
 
-        val tags = artistObj["tags"]?.jsonObject?.get("tag")?.jsonArray?.mapNotNull {
-            it.jsonObject["name"]?.jsonPrimitive?.contentOrNull
-        }.orEmpty()
+        val tags = artistObj["tags"]?.jsonObject?.get("tag").asJsonObjectList().mapNotNull {
+            it["name"]?.jsonPrimitive?.contentOrNull
+        }
 
-        val images = artistObj["image"]?.jsonArray?.mapNotNull { it.jsonObject }
-        val artworkUrl = images?.lastOrNull {
+        val images = artistObj["image"].asJsonObjectList()
+        val artworkUrl = images.lastOrNull {
             it["#text"]?.jsonPrimitive?.contentOrNull?.isNotBlank() == true
         }?.get("#text")?.jsonPrimitive?.contentOrNull
 
-        val similar = artistObj["similar"]?.jsonObject?.get("artist")?.jsonArray?.flatMap { elem ->
-            val name = elem.jsonObject["name"]?.jsonPrimitive?.contentOrNull ?: return@flatMap emptyList()
-            val img = elem.jsonObject["image"]?.jsonArray?.lastOrNull()?.jsonObject?.get("#text")?.jsonPrimitive?.contentOrNull
+        val similar = artistObj["similar"]?.jsonObject?.get("artist").asJsonObjectList().flatMap { elem ->
+            val name = elem["name"]?.jsonPrimitive?.contentOrNull ?: return@flatMap emptyList()
+            val img = elem["image"].asJsonObjectList().lastOrNull()?.get("#text")?.jsonPrimitive?.contentOrNull
             com.neonsong.app.util.ArtistHelper.splitArtists(name).map { singleName ->
                 ArtistSummaryItem(name = singleName, artworkUrl = img)
             }
-        }.orEmpty().distinctBy { it.name.lowercase().trim() }
+        }.distinctBy { it.name.lowercase().trim() }
 
         return LastFmArtistMeta(
             bio = bio,
@@ -227,14 +229,14 @@ class ArtistRepository @Inject constructor(
     ): List<PlayableTrack> = withContext(Dispatchers.IO) {
         val cleanArtist = artistName.trim()
         val seedVideoId = seedTrack?.videoId?.takeIf(String::isNotBlank)
-            ?: runCatching {
+            ?: cancellableRunCatching {
                 innerTube.searchSongs("$cleanArtist songs", limit = 5, prefetchStreams = false)
                     .firstOrNull { it.artist.contains(cleanArtist, ignoreCase = true) || cleanArtist.contains(it.artist, ignoreCase = true) }
                     ?.videoId
             }.getOrNull()
 
         val related = if (!seedVideoId.isNullOrBlank()) {
-            runCatching {
+            cancellableRunCatching {
                 innerTube.fetchRelatedSongs(seedVideoId, limit = 30, prefetchStreams = false)
             }.getOrDefault(emptyList())
         } else {

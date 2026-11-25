@@ -26,6 +26,7 @@ import com.neonsong.app.data.repository.HomeRepository
 import com.neonsong.app.data.ytmusic.YtMusicAuthManager
 import com.neonsong.app.playback.MusicPlayer
 import com.neonsong.app.playback.PlayableTrack
+import com.neonsong.app.util.cancellableRunCatching
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -200,7 +201,7 @@ class FeedViewModel @Inject constructor(
 
         playbackLaunchJob?.cancel()
         playbackLaunchJob = viewModelScope.launch(Dispatchers.IO) {
-            val related = runCatching {
+            val related = cancellableRunCatching {
                 innerTube.fetchRelatedSongs(seed.videoId, limit = 30, prefetchStreams = false)
             }.getOrDefault(emptyList())
             ensureActive()
@@ -230,8 +231,8 @@ class FeedViewModel @Inject constructor(
                     isRefreshing = refreshing,
                     error = null,
                     selectedChip = if (refreshing) null else it.selectedChip,
-                    isChipLoading = if (refreshing) false else it.isChipLoading,
-                    isLoadingMore = if (refreshing) false else it.isLoadingMore,
+                    isChipLoading = false,
+                    isLoadingMore = false,
                     pagedShelves = if (refreshing) emptyList() else it.pagedShelves,
                     chipShelves = if (refreshing) emptyList() else it.chipShelves,
                     chipContinuationToken = if (refreshing) null else it.chipContinuationToken,
@@ -259,9 +260,12 @@ class FeedViewModel @Inject constructor(
                 ensureActive()
                 if (ytAuth.connection.value != connection ||
                     sessionPreferences.session.value.username.takeIf(String::isNotBlank) != username
-                ) return@launch
+                ) {
+                    _uiState.update { it.copy(isLoading = false, isRefreshing = false) }
+                    return@launch
+                }
 
-                val stats = runCatching { homeRepository.fetchStats().getOrNull() }.getOrNull()
+                val stats = cancellableRunCatching { homeRepository.fetchStats().getOrNull() }.getOrNull()
                 _uiState.update {
                     it.copy(
                         isLoading = false,
@@ -286,7 +290,7 @@ class FeedViewModel @Inject constructor(
                 }
             } finally {
                 if (feedJob === self) {
-                    _uiState.update { it.copy(isRefreshing = false) }
+                    _uiState.update { it.copy(isLoading = false, isRefreshing = false) }
                 }
             }
         }
@@ -341,6 +345,9 @@ class FeedViewModel @Inject constructor(
                     )
                 }
             } catch (cancellation: CancellationException) {
+                if (requestGeneration == currentGen) {
+                    _uiState.update { it.copy(isChipLoading = false) }
+                }
                 throw cancellation
             } catch (_: Exception) {
                 ensureActive()
@@ -413,6 +420,9 @@ class FeedViewModel @Inject constructor(
                 }
             } catch (cancellation: CancellationException) {
                 seenContinuationTokens.remove(token)
+                if (requestGeneration == currentGen) {
+                    _uiState.update { it.copy(isLoadingMore = false) }
+                }
                 throw cancellation
             } catch (_: Exception) {
                 seenContinuationTokens.remove(token)
@@ -573,7 +583,7 @@ class FeedViewModel @Inject constructor(
         if (playlistId.isBlank()) return
         playbackLaunchJob?.cancel()
         playbackLaunchJob = viewModelScope.launch(Dispatchers.IO) {
-            val result = runCatching { innerTube.fetchPlaylist(playlistId, maxTracks = 100) }.getOrNull()
+            val result = cancellableRunCatching { innerTube.fetchPlaylist(playlistId, maxTracks = 100) }.getOrNull()
             ensureActive()
             val tracks = result?.tracks.orEmpty()
             if (tracks.isNotEmpty()) {
@@ -593,11 +603,11 @@ class FeedViewModel @Inject constructor(
             playlistId = found?.id?.takeIf(String::isNotBlank)
         }
         if (playlistId == null) {
-            val mixes = runCatching { innerTube.fetchHomeMixes() }.getOrDefault(emptyList())
+            val mixes = cancellableRunCatching { innerTube.fetchHomeMixes() }.getOrDefault(emptyList())
             playlistId = mixes.firstOrNull { it.title.contains("Discover Mix", ignoreCase = true) }?.id?.takeIf(String::isNotBlank)
         }
         if (playlistId == null) {
-            val search = runCatching { innerTube.searchPlaylists("Discover Mix") }.getOrDefault(emptyList())
+            val search = cancellableRunCatching { innerTube.searchPlaylists("Discover Mix") }.getOrDefault(emptyList())
             playlistId = (search.firstOrNull { it.title.contains("Discover Mix", ignoreCase = true) }?.id
                 ?: search.firstOrNull()?.id)?.takeIf(String::isNotBlank)
         }
@@ -620,7 +630,7 @@ class FeedViewModel @Inject constructor(
             val playlistId = resolveDiscoverMixPlaylistId(tile)
             ensureActive()
             if (!playlistId.isNullOrBlank()) {
-                val result = runCatching { innerTube.fetchPlaylist(playlistId, maxTracks = 100) }.getOrNull()
+                val result = cancellableRunCatching { innerTube.fetchPlaylist(playlistId, maxTracks = 100) }.getOrNull()
                 ensureActive()
                 val tracks = result?.tracks.orEmpty()
                 if (tracks.isNotEmpty()) {
@@ -641,7 +651,7 @@ class FeedViewModel @Inject constructor(
         playbackLaunchJob = viewModelScope.launch(Dispatchers.IO) {
             val playlistId = tile?.playlistId?.takeIf(String::isNotBlank)
             val tracks = if (playlistId != null) {
-                runCatching { innerTube.fetchPlaylist(playlistId, maxTracks = 100) }.getOrNull()?.tracks.orEmpty()
+                cancellableRunCatching { innerTube.fetchPlaylist(playlistId, maxTracks = 100) }.getOrNull()?.tracks.orEmpty()
             } else {
                 emptyList()
             }

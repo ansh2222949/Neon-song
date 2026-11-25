@@ -2,6 +2,9 @@ package com.neonsong.app.data.ytmusic
 
 import android.util.Log
 import java.security.MessageDigest
+import com.neonsong.app.util.cancellableRunCatching
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,14 +29,25 @@ class YtMusicAuthManager @Inject constructor(
     private val preferences: YtMusicPreferences,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val connectionLoaded = CompletableDeferred<Unit>()
 
     private val _connection = MutableStateFlow(YtConnection.DISCONNECTED)
     val connection: StateFlow<YtConnection> = _connection.asStateFlow()
 
     init {
         scope.launch {
-            runCatching { preferences.connection.collect { _connection.value = it } }
-                .onFailure { Log.w(TAG, "Failed to observe YT connection", it) }
+            try {
+                preferences.connection.collect {
+                    _connection.value = it
+                    if (!connectionLoaded.isCompleted) connectionLoaded.complete(Unit)
+                }
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to observe YT connection", t)
+            } finally {
+                if (!connectionLoaded.isCompleted) connectionLoaded.complete(Unit)
+            }
         }
     }
 
@@ -50,8 +64,8 @@ class YtMusicAuthManager @Inject constructor(
     }
 
     suspend fun awaitLoadedConnection(): YtConnection {
-        val persisted = preferences.connection.first()
-        return connection.first { it == persisted }
+        connectionLoaded.await()
+        return connection.value
     }
 
     /**
@@ -84,6 +98,7 @@ class YtMusicAuthManager @Inject constructor(
             channelHandle = channelHandle,
             photoUrl = photoUrl,
         )
+        if (!connectionLoaded.isCompleted) connectionLoaded.complete(Unit)
         preferences.saveConnection(cookies, name, channelHandle, photoUrl)
     }
 
@@ -143,6 +158,10 @@ class YtMusicAuthManager @Inject constructor(
             )
             Log.i(TAG, "Auto-refreshed YouTube Music session cookies from CookieManager")
             true
+        } catch (c: CancellationException) {
+            throw c
+        } catch (c: CancellationException) {
+            throw c
         } catch (e: Throwable) {
             Log.w(TAG, "Could not auto-refresh cookies from CookieManager", e)
             false

@@ -9,6 +9,8 @@ import java.util.Locale
 import com.neonsong.app.data.music.potoken.BotGuardTokenGenerator
 import com.neonsong.app.data.ytmusic.YtMusicAuthManager
 import com.neonsong.app.data.ytmusic.YtConnection
+import com.neonsong.app.util.cancellableRunCatching
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
@@ -166,6 +168,7 @@ data class YtOwnedPlaylist(
     val id: String,
     val title: String,
     val items: List<YtOwnedPlaylistItem> = emptyList(),
+    val isComplete: Boolean = true,
 )
 
 /**
@@ -294,7 +297,7 @@ class InnerTubeMusicApi @Inject constructor(
             else -> "VL$rawId"
         }
 
-        val rootResult = runCatching { fetchPlaylistRoot(browseId) }
+        val rootResult = cancellableRunCatching { fetchPlaylistRoot(browseId) }
         val (root, authenticatedAs) = rootResult.getOrNull() ?: run {
             val cause = rootResult.exceptionOrNull()?.javaClass?.simpleName
                 ?: "null-response"
@@ -366,7 +369,7 @@ class InnerTubeMusicApi @Inject constructor(
                 truncated = true
                 break
             }
-            val nextPage = runCatching {
+            val nextPage = cancellableRunCatching {
                 browseContinuation(currentToken, authenticated = authenticatedAs)
             }.getOrNull()
             if (nextPage == null) {
@@ -443,28 +446,28 @@ class InnerTubeMusicApi @Inject constructor(
     private suspend fun fetchPlaylistRoot(browseId: String): Pair<JsonElement, Boolean>? {
         val isLiked = com.neonsong.app.data.playlist.PlaylistImportManager.isYtLikedId(browseId)
         if (ytAuth.connection.value.isConnected) {
-            runCatching { browseRoot(browseId, authenticated = true) }.getOrNull()?.let {
+            cancellableRunCatching { browseRoot(browseId, authenticated = true) }.getOrNull()?.let {
                 if (parseSongRenderers(it).isNotEmpty()) return it to true
             }
             if (isLiked) {
-                runCatching { browseRoot("FEmusic_liked_videos", authenticated = true) }.getOrNull()?.let {
+                cancellableRunCatching { browseRoot("FEmusic_liked_videos", authenticated = true) }.getOrNull()?.let {
                     if (parseSongRenderers(it).isNotEmpty()) return it to true
                 }
                 if (browseId != "LM") {
-                    runCatching { browseRoot("LM", authenticated = true) }.getOrNull()?.let {
+                    cancellableRunCatching { browseRoot("LM", authenticated = true) }.getOrNull()?.let {
                         if (parseSongRenderers(it).isNotEmpty()) return it to true
                     }
                 }
             }
         }
-        runCatching { browseRoot(browseId, authenticated = false) }.getOrNull()?.let {
+        cancellableRunCatching { browseRoot(browseId, authenticated = false) }.getOrNull()?.let {
             if (parseSongRenderers(it).isNotEmpty()) return it to false
         }
         // RDCLAK / RD-prefixed IDs (radio/mix) or Liked Music fall back to the "next" endpoint
         if (browseId.startsWith("RDCLAK") || browseId.startsWith("RD") || isLiked) {
             val playlistId = if (isLiked) "LM" else browseId.removePrefix("VL")
             val auth = ytAuth.connection.value.isConnected
-            runCatching { fetchPlaylistViaNext(playlistId, authenticated = auth) }.getOrNull()?.let {
+            cancellableRunCatching { fetchPlaylistViaNext(playlistId, authenticated = auth) }.getOrNull()?.let {
                 return it to auth
             }
         }
@@ -595,7 +598,7 @@ class InnerTubeMusicApi @Inject constructor(
         val seenTokens = mutableSetOf<String>()
         var page = 0
         while (!token.isNullOrBlank() && page < 20 && seenTokens.add(token)) {
-            val nextPage = runCatching { browseContinuation(token, authenticated = true) }.getOrNull() ?: break
+            val nextPage = cancellableRunCatching { browseContinuation(token, authenticated = true) }.getOrNull() ?: break
             summaries += parsePlaylistRenderers(nextPage)
             token = genericContinuationToken(nextPage)
             page++
@@ -614,14 +617,14 @@ class InnerTubeMusicApi @Inject constructor(
         if (!ytAuth.connection.value.isConnected) return@withContext YtMusicTasteSignals()
         kotlinx.coroutines.coroutineScope {
             val recent = async {
-                runCatching { parseSongRenderers(browseRoot(YT_HISTORY_BROWSE_ID, authenticated = true)) }
+                cancellableRunCatching { parseSongRenderers(browseRoot(YT_HISTORY_BROWSE_ID, authenticated = true)) }
                     .getOrDefault(emptyList())
                     .distinctBy { it.videoId }
                     .take(recentLimit.coerceIn(0, 50))
             }
             val liked = async {
-                runCatching {
-                    val root = runCatching { browseRoot(YT_LIKED_BROWSE_ID, authenticated = true) }
+                cancellableRunCatching {
+                    val root = cancellableRunCatching { browseRoot(YT_LIKED_BROWSE_ID, authenticated = true) }
                         .getOrNull()?.takeIf { parseSongRenderers(it).isNotEmpty() }
                         ?: browseRoot("FEmusic_liked_videos", authenticated = true)
                     parseSongRenderers(root)
@@ -631,7 +634,7 @@ class InnerTubeMusicApi @Inject constructor(
                     .take(likedLimit.coerceIn(0, 50))
             }
             val feed = async {
-                runCatching {
+                cancellableRunCatching {
                     parseHomeFeedSongs(browseRoot(YT_HOME_BROWSE_ID, authenticated = true))
                 }
                     .getOrDefault(emptyList())
@@ -647,7 +650,7 @@ class InnerTubeMusicApi @Inject constructor(
     }
 
     suspend fun fetchNewReleases(): List<YouTubePlaylistSummary> = withContext(Dispatchers.IO) {
-        runCatching {
+        cancellableRunCatching {
             val root = browseRoot(YT_NEW_RELEASES_BROWSE_ID, authenticated = ytAuth.connection.value.isConnected)
             parsePlaylistRenderers(root)
         }.getOrDefault(emptyList())
@@ -687,7 +690,7 @@ class InnerTubeMusicApi @Inject constructor(
 
 
     suspend fun fetchCharts(): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
-        runCatching {
+        cancellableRunCatching {
             val root = browseRoot(YT_CHARTS_BROWSE_ID, authenticated = false)
             parseSongRenderers(root)
         }.getOrDefault(emptyList())
@@ -695,7 +698,7 @@ class InnerTubeMusicApi @Inject constructor(
 
     suspend fun fetchHomeMixes(): List<YouTubePlaylistSummary> = withContext(Dispatchers.IO) {
         val isAuth = ytAuth.connection.value.isConnected
-        runCatching {
+        cancellableRunCatching {
             val root = browseRoot(YT_HOME_BROWSE_ID, authenticated = isAuth)
             parsePlaylistRenderers(root)
         }.getOrDefault(emptyList())
@@ -703,7 +706,7 @@ class InnerTubeMusicApi @Inject constructor(
 
     suspend fun fetchHomeSongs(): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
         val isAuth = ytAuth.connection.value.isConnected
-        runCatching {
+        cancellableRunCatching {
             val root = browseRoot(YT_HOME_BROWSE_ID, authenticated = isAuth)
             parseHomeFeedSongs(root)
         }.getOrDefault(emptyList())
@@ -711,13 +714,17 @@ class InnerTubeMusicApi @Inject constructor(
 
     suspend fun fetchHomeShelves(): List<HomeShelf> = withContext(Dispatchers.IO) {
         val isAuth = ytAuth.connection.value.isConnected
-        val root = runCatching {
-            browseRoot(YT_HOME_BROWSE_ID, authenticated = isAuth)
-        }.recoverCatching { error ->
-            if (isAuth) browseRoot(YT_HOME_BROWSE_ID, authenticated = false) else throw error
+        val root = cancellableRunCatching {
+            try {
+                browseRoot(YT_HOME_BROWSE_ID, authenticated = isAuth)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (error: Throwable) {
+                if (isAuth) browseRoot(YT_HOME_BROWSE_ID, authenticated = false) else throw error
+            }
         }.getOrNull()
 
-        if (root == null) emptyList() else runCatching { parseHomeShelves(root) }.getOrDefault(emptyList())
+        if (root == null) emptyList() else cancellableRunCatching { parseHomeShelves(root) }.getOrDefault(emptyList())
     }
 
     /**
@@ -725,19 +732,24 @@ class InnerTubeMusicApi @Inject constructor(
      * and continuation token for pagination. Reuses the existing shelf parser.
      * Uses the same authenticated/guest handling with automatic fallback to guest mode on auth failure.
      */
-    suspend fun fetchHomePage(): HomePage = withContext(Dispatchers.IO) {
+    suspend fun fetchHomePage(throwOnError: Boolean = false): HomePage = withContext(Dispatchers.IO) {
         val isAuth = ytAuth.connection.value.isConnected
-        val root = runCatching {
-            browseRoot(YT_HOME_BROWSE_ID, authenticated = isAuth)
-        }.recoverCatching { error ->
-            if (isAuth) browseRoot(YT_HOME_BROWSE_ID, authenticated = false) else throw error
-        }.getOrNull()
+        val rootResult = cancellableRunCatching {
+            try {
+                browseRoot(YT_HOME_BROWSE_ID, authenticated = isAuth)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (error: Throwable) {
+                if (isAuth) browseRoot(YT_HOME_BROWSE_ID, authenticated = false) else throw error
+            }
+        }
+        val root = if (throwOnError) rootResult.getOrThrow() else rootResult.getOrNull()
 
         if (root == null) return@withContext HomePage()
 
-        val shelves = runCatching { parseHomeShelves(root) }.getOrDefault(emptyList())
-        val chips = runCatching { parseHomeChips(root) }.getOrDefault(emptyList())
-        val continuationToken = runCatching { parseHomeContinuationToken(root) }.getOrNull()
+        val shelves = cancellableRunCatching { parseHomeShelves(root) }.getOrDefault(emptyList())
+        val chips = cancellableRunCatching { parseHomeChips(root) }.getOrDefault(emptyList())
+        val continuationToken = cancellableRunCatching { parseHomeContinuationToken(root) }.getOrNull()
 
         HomePage(
             shelves = shelves,
@@ -754,17 +766,17 @@ class InnerTubeMusicApi @Inject constructor(
     suspend fun fetchHomeContinuation(token: String): HomePage = withContext(Dispatchers.IO) {
         if (token.isBlank()) return@withContext HomePage()
         val isAuth = ytAuth.connection.value.isConnected
-        val root = runCatching {
+        val root = try {
             browseContinuation(token, authenticated = isAuth)
-        }.recoverCatching { error ->
+        } catch (c: CancellationException) {
+            throw c
+        } catch (error: Throwable) {
             if (isAuth) browseContinuation(token, authenticated = false) else throw error
-        }.getOrNull()
+        }
 
-        if (root == null) return@withContext HomePage()
-
-        val shelves = runCatching { parseHomeContinuationShelves(root) }.getOrDefault(emptyList())
-            .ifEmpty { runCatching { parseHomeShelves(root) }.getOrDefault(emptyList()) }
-        val nextToken = runCatching { parseHomeContinuationToken(root) }.getOrNull()
+        val shelves = cancellableRunCatching { parseHomeContinuationShelves(root) }.getOrDefault(emptyList())
+            .ifEmpty { cancellableRunCatching { parseHomeShelves(root) }.getOrDefault(emptyList()) }
+        val nextToken = cancellableRunCatching { parseHomeContinuationToken(root) }.getOrNull()
 
         HomePage(
             shelves = shelves,
@@ -783,16 +795,16 @@ class InnerTubeMusicApi @Inject constructor(
         val params = chip.params?.takeIf { it.isNotBlank() }
         val isAuth = ytAuth.connection.value.isConnected
 
-        val root = runCatching {
+        val root = try {
             browseRoot(browseId, authenticated = isAuth, params = params)
-        }.recoverCatching { error ->
+        } catch (c: CancellationException) {
+            throw c
+        } catch (error: Throwable) {
             if (isAuth) browseRoot(browseId, authenticated = false, params = params) else throw error
-        }.getOrNull()
+        }
 
-        if (root == null) return@withContext HomePage()
-
-        val shelves = runCatching { parseHomeShelves(root) }.getOrDefault(emptyList())
-        val continuationToken = runCatching { parseHomeContinuationToken(root) }.getOrNull()
+        val shelves = cancellableRunCatching { parseHomeShelves(root) }.getOrDefault(emptyList())
+        val continuationToken = cancellableRunCatching { parseHomeContinuationToken(root) }.getOrNull()
 
         HomePage(
             shelves = shelves,
@@ -917,7 +929,7 @@ class InnerTubeMusicApi @Inject constructor(
     suspend fun fetchAccountInfo(): YtAccountInfo? = withContext(Dispatchers.IO) {
         if (!ytAuth.connection.value.isConnected) return@withContext null
         val config = getWebConfig()
-        val root = runCatching {
+        val root = cancellableRunCatching {
             post(
                 url = "$MUSIC_API/account/account_menu?key=${config.apiKey}&prettyPrint=false",
                 body = buildJsonObject {
@@ -959,11 +971,11 @@ class InnerTubeMusicApi @Inject constructor(
     suspend fun fetchAvailableChannels(): List<YtChannelOption> = withContext(Dispatchers.IO) {
         if (!ytAuth.connection.value.isConnected) return@withContext emptyList()
         val config = getWebConfig()
-        val switcherRoot = runCatching { fetchAccountSwitcherRoot(config) }.getOrNull()
+        val switcherRoot = cancellableRunCatching { fetchAccountSwitcherRoot(config) }.getOrNull()
         val switcherOptions = switcherRoot?.let(::parseAccountSwitcherChannels).orEmpty()
         if (switcherOptions.isNotEmpty()) return@withContext markActiveChannel(switcherOptions)
 
-        val root = runCatching {
+        val root = cancellableRunCatching {
             post(
                 url = "$MUSIC_API/account/account_menu?key=${config.apiKey}&prettyPrint=false",
                 body = buildJsonObject {
@@ -1218,7 +1230,7 @@ class InnerTubeMusicApi @Inject constructor(
         val cleanTitle = title.replace("<", "(").replace(">", ")").take(150)
             .ifBlank { "Neon Song Playlist" }
         val config = getWebConfig()
-        val root = runCatching {
+        val root = cancellableRunCatching {
             post(
                 url = "$MUSIC_API/playlist/create?key=${config.apiKey}&prettyPrint=false",
                 body = buildJsonObject {
@@ -1255,7 +1267,7 @@ class InnerTubeMusicApi @Inject constructor(
         val config = getWebConfig()
         // HTTP success is authoritative for this endpoint; some responses omit
         // the "status" field entirely, so don't require it.
-        runCatching {
+        cancellableRunCatching {
             post(
                 url = "$MUSIC_API/playlist/delete?key=${config.apiKey}&prettyPrint=false",
                 body = buildJsonObject {
@@ -1313,6 +1325,7 @@ class InnerTubeMusicApi @Inject constructor(
     suspend fun fetchOwnedPlaylist(
         playlistIdOrUrl: String,
         stopAfterVideoId: String? = null,
+        throwOnError: Boolean = false,
     ): YtOwnedPlaylist? = withContext(Dispatchers.IO) {
         if (!ytAuth.connection.value.isConnected) return@withContext null
         val rawId = extractPlaylistId(playlistIdOrUrl)
@@ -1322,11 +1335,16 @@ class InnerTubeMusicApi @Inject constructor(
             else -> "VL$rawId"
         }
 
-        val rootResult = runCatching { browseRoot(browseId, authenticated = true) }
+        val rootResult = cancellableRunCatching { browseRoot(browseId, authenticated = true) }
+        val fallbackResult = if (rootResult.isFailure && browseId != rawId) {
+            cancellableRunCatching { browseRoot(rawId, authenticated = true) }
+        } else null
         val root = rootResult.getOrNull()
-            ?: (if (browseId != rawId) runCatching { browseRoot(rawId, authenticated = true) }.getOrNull() else null)
+            ?: fallbackResult?.getOrNull()
             ?: run {
-                android.util.Log.w(PLAYLIST_LOG_TAG, "fetchOwnedPlaylist failed for browseId=$browseId", rootResult.exceptionOrNull())
+                val error = fallbackResult?.exceptionOrNull() ?: rootResult.exceptionOrNull()
+                android.util.Log.w(PLAYLIST_LOG_TAG, "fetchOwnedPlaylist failed for browseId=$browseId", error)
+                if (throwOnError && error != null) throw error
                 return@withContext null
             }
 
@@ -1366,22 +1384,34 @@ class InnerTubeMusicApi @Inject constructor(
         var token = containers.firstNotNullOfOrNull(::playlistTrackContinuationToken)
         val seenTokens = mutableSetOf<String>()
         var page = 0
+        var truncated = false
         fun targetFound() = stopAfterVideoId != null && items.any {
             it.videoId == stopAfterVideoId && !it.setVideoId.isNullOrBlank()
         }
         while (!targetFound() && !token.isNullOrBlank() && page < MAX_CONTINUATION_PAGES) {
             val currentToken = token ?: break
-            if (!seenTokens.add(currentToken)) break
-            val nextPage = runCatching { browseContinuation(currentToken, authenticated = true) }
-                .getOrNull() ?: break
+            if (!seenTokens.add(currentToken)) {
+                truncated = true
+                break
+            }
+            val nextPageResult = cancellableRunCatching { browseContinuation(currentToken, authenticated = true) }
+            val nextPage = nextPageResult.getOrNull()
+            if (nextPage == null) {
+                if (throwOnError) {
+                    nextPageResult.exceptionOrNull()?.let { throw it }
+                }
+                truncated = true
+                break
+            }
             val pageContainers = playlistTrackContainers(nextPage)
             val effectivePageContainers = if (pageContainers.isNotEmpty()) pageContainers else listOf(nextPage)
             effectivePageContainers.forEach(::absorb)
             token = effectivePageContainers.firstNotNullOfOrNull(::playlistTrackContinuationToken)
             page++
         }
+        if (!targetFound() && !token.isNullOrBlank()) truncated = true
 
-        YtOwnedPlaylist(id = rawId, title = title, items = items)
+        YtOwnedPlaylist(id = rawId, title = title, items = items, isComplete = !truncated)
     }
 
     private suspend fun editRemotePlaylist(playlistId: String, actions: List<JsonElement>): Boolean =
@@ -1389,7 +1419,7 @@ class InnerTubeMusicApi @Inject constructor(
             if (!ytAuth.connection.value.isConnected) return@withContext false
             val cleanId = playlistId.removePrefix("VL")
             val config = getWebConfig()
-            runCatching {
+            cancellableRunCatching {
                 val root = post(
                     url = "$MUSIC_API/browse/edit_playlist?key=${config.apiKey}&prettyPrint=false",
                     body = buildJsonObject {
@@ -1531,6 +1561,7 @@ class InnerTubeMusicApi @Inject constructor(
         query: String,
         limit: Int = 30,
         prefetchStreams: Boolean = false,
+        throwOnError: Boolean = false,
     ): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
         val config = getWebConfig()
@@ -1550,10 +1581,14 @@ class InnerTubeMusicApi @Inject constructor(
             )
             return parseSongRenderers(root)
         }
-        val filtered = runCatching { runSearch("EgWKAQIIAWoKEAkQBRAKEAMQBA==") }.getOrDefault(emptyList())
+        val filteredResult = cancellableRunCatching { runSearch("EgWKAQIIAWoKEAkQBRAKEAMQBA==") }
+        if (throwOnError && filteredResult.isFailure) throw filteredResult.exceptionOrNull()!!
+        val filtered = filteredResult.getOrDefault(emptyList())
         // Unfiltered POST only when the filtered search came back empty (rare miss).
         val results = if (filtered.isEmpty()) {
-            runCatching { runSearch(null) }.getOrDefault(emptyList())
+            val fallbackResult = cancellableRunCatching { runSearch(null) }
+            if (throwOnError && fallbackResult.isFailure) throw fallbackResult.exceptionOrNull()!!
+            fallbackResult.getOrDefault(emptyList())
         } else {
             filtered
         }
@@ -1592,9 +1627,9 @@ class InnerTubeMusicApi @Inject constructor(
             )
             return parseSongRenderers(root)
         }
-        val filtered = runCatching { runSearch("EgWKAQIQAWoKEAkQBRAKEAMQBA==") }.getOrDefault(emptyList())
+        val filtered = cancellableRunCatching { runSearch("EgWKAQIQAWoKEAkQBRAKEAMQBA==") }.getOrDefault(emptyList())
         val results = if (filtered.isEmpty()) {
-            runCatching { runSearch(null) }.getOrDefault(emptyList())
+            cancellableRunCatching { runSearch(null) }.getOrDefault(emptyList())
         } else {
             filtered
         }
@@ -1634,11 +1669,11 @@ class InnerTubeMusicApi @Inject constructor(
         results
     }
 
-    suspend fun searchArtists(query: String, limit: Int = 30): List<YouTubeMusicEntity> =
-        searchEntities(query, YouTubeMusicEntityKind.ARTIST, ARTIST_SEARCH_FILTER, limit)
+    suspend fun searchArtists(query: String, limit: Int = 30, throwOnError: Boolean = false): List<YouTubeMusicEntity> =
+        searchEntities(query, YouTubeMusicEntityKind.ARTIST, ARTIST_SEARCH_FILTER, limit, throwOnError)
 
-    suspend fun searchAlbums(query: String, limit: Int = 30): List<YouTubeMusicEntity> =
-        searchEntities(query, YouTubeMusicEntityKind.ALBUM, ALBUM_SEARCH_FILTER, limit)
+    suspend fun searchAlbums(query: String, limit: Int = 30, throwOnError: Boolean = false): List<YouTubeMusicEntity> =
+        searchEntities(query, YouTubeMusicEntityKind.ALBUM, ALBUM_SEARCH_FILTER, limit, throwOnError)
 
     /** Loads and parses full artist details including top songs, albums, singles, and similar artists. */
     suspend fun fetchArtistPage(
@@ -1648,7 +1683,7 @@ class InnerTubeMusicApi @Inject constructor(
     ): com.neonsong.app.data.model.ArtistPageData? = withContext(Dispatchers.IO) {
         if (browseId.isBlank()) return@withContext null
         val config = getWebConfig()
-        val root = runCatching {
+        val root = cancellableRunCatching {
             post(
                 url = "$MUSIC_API/browse?key=${config.apiKey}&prettyPrint=false",
                 body = buildJsonObject {
@@ -1739,7 +1774,7 @@ class InnerTubeMusicApi @Inject constructor(
                         val moreParams = moreEndpoint?.string("params")
 
                         val fullTracks = if (!moreBrowseId.isNullOrBlank()) {
-                            runCatching {
+                            cancellableRunCatching {
                                 browseSongs(moreBrowseId, params = moreParams, limit = 100).map { track ->
                                     com.neonsong.app.playback.PlayableTrack(
                                         title = track.title,
@@ -1809,7 +1844,7 @@ class InnerTubeMusicApi @Inject constructor(
         if (browseId.isBlank()) return@withContext null
         val normalizedBrowseId = if (browseId.startsWith("PL") || browseId.startsWith("OLAK")) "VL$browseId" else browseId
         val config = getWebConfig()
-        val root = runCatching {
+        val root = cancellableRunCatching {
             post(
                 url = "$MUSIC_API/browse?key=${config.apiKey}&prettyPrint=false",
                 body = buildJsonObject {
@@ -2000,7 +2035,7 @@ class InnerTubeMusicApi @Inject constructor(
         while (!token.isNullOrBlank() && page < maxPages && (limit == null || songs.size < limit)) {
             val currentToken = token ?: break
             if (!seenTokens.add(currentToken)) break
-            val nextPage = runCatching {
+            val nextPage = cancellableRunCatching {
                 browseContinuation(currentToken, authenticated = false)
             }.getOrNull() ?: break
             val containers = playlistTrackContainers(nextPage)
@@ -2020,10 +2055,11 @@ class InnerTubeMusicApi @Inject constructor(
         kind: YouTubeMusicEntityKind,
         filter: String,
         limit: Int,
+        throwOnError: Boolean = false,
     ): List<YouTubeMusicEntity> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
         val config = getWebConfig()
-        val root = runCatching {
+        val rootResult = cancellableRunCatching {
             post(
                 url = "$MUSIC_API/search?key=${config.apiKey}&prettyPrint=false",
                 body = buildJsonObject {
@@ -2035,14 +2071,19 @@ class InnerTubeMusicApi @Inject constructor(
                 clientVersion = config.clientVersion,
                 userAgent = WEB_USER_AGENT,
             )
-        }.getOrNull() ?: return@withContext emptyList()
+        }
+        val root = if (throwOnError) rootResult.getOrThrow() else rootResult.getOrNull() ?: return@withContext emptyList()
         parseEntityRenderers(root, kind).take(limit)
     }
 
-    suspend fun searchPlaylists(query: String, limit: Int = 30): List<YouTubePlaylistSummary> = withContext(Dispatchers.IO) {
+    suspend fun searchPlaylists(
+        query: String,
+        limit: Int = 30,
+        throwOnError: Boolean = false,
+    ): List<YouTubePlaylistSummary> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
         val config = getWebConfig()
-        val root = runCatching {
+        val rootResult = cancellableRunCatching {
             post(
                 url = "$MUSIC_API/search?key=${config.apiKey}&prettyPrint=false",
                 body = buildJsonObject {
@@ -2054,7 +2095,8 @@ class InnerTubeMusicApi @Inject constructor(
                 clientVersion = config.clientVersion,
                 userAgent = WEB_USER_AGENT,
             )
-        }.getOrNull() ?: return@withContext emptyList()
+        }
+        val root = if (throwOnError) rootResult.getOrThrow() else rootResult.getOrNull() ?: return@withContext emptyList()
         parsePlaylistRenderers(root).take(limit)
     }
 
@@ -2931,16 +2973,16 @@ class InnerTubeMusicApi @Inject constructor(
      *  first playback's fast path can attach visitor data without an extra
      *  blocking fetch. Safe to call from a startup coroutine; never throws. */
     suspend fun preWarmPlayback() {
-        val config = runCatching { getWebConfig() }.getOrNull()
+        val config = cancellableRunCatching { getWebConfig() }.getOrNull()
         val visitor = config?.visitorData ?: FALLBACK_TOKEN_SESSION
-        runCatching { BotGuardTokenGenerator.preWarm(visitor) }
+        cancellableRunCatching { BotGuardTokenGenerator.preWarm(visitor) }
     }
 
     private suspend fun getWebConfig(): WebConfig {
         webConfig?.let { return it }
         return configMutex.withLock {
             webConfig?.let { return@withLock it }
-            val config = runCatching { fetchWebConfig() }
+            val config = cancellableRunCatching { fetchWebConfig() }
                 .getOrElse { WebConfig(FALLBACK_WEB_KEY, FALLBACK_WEB_VERSION, null) }
             webConfig = config
             config

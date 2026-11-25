@@ -11,12 +11,14 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.annotation.MainThread
+import com.neonsong.app.util.cancellableRunCatching
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -96,7 +98,7 @@ object BotGuardTokenGenerator {
         val ctx = appContext ?: return
         if (permanentlyBroken || sessionId.isBlank() || !hasUsableWebView()) return
         if (System.currentTimeMillis() < bootstrapCooldownUntilMs) return
-        runCatching {
+        com.neonsong.app.util.cancellableRunCatching {
             withTimeoutOrNull(COLD_START_TIMEOUT_MS) {
                 ensureEngineReady(ctx, sessionId)
             }
@@ -181,7 +183,7 @@ object BotGuardTokenGenerator {
                 val newSessionToken = try {
                     newEngine.mint(sessionId)
                 } catch (error: Throwable) {
-                    withContext(Dispatchers.Main) {
+                    withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) {
                         newEngine.close()
                     }
                     throw error
