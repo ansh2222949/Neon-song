@@ -39,7 +39,7 @@ import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Subscriptions
-import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -108,9 +108,9 @@ private fun HomeSection.icon(): ImageVector = when (this) {
     HomeSection.MIXES -> Icons.Filled.Shuffle
     HomeSection.SPOTLIGHT -> Icons.Filled.Star
     HomeSection.TOP_ARTISTS -> Icons.Filled.People
-    HomeSection.HEAVY_ROTATION -> Icons.Filled.TrendingUp
+    HomeSection.HEAVY_ROTATION -> Icons.AutoMirrored.Filled.TrendingUp
     HomeSection.ALBUMS -> Icons.Filled.LibraryMusic
-    HomeSection.CHARTS -> Icons.Filled.TrendingUp
+    HomeSection.CHARTS -> Icons.AutoMirrored.Filled.TrendingUp
     HomeSection.NEW_RELEASES -> Icons.Filled.NewReleases
     HomeSection.FRIENDS -> Icons.Filled.People
 }

@@ -17,7 +17,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Group
@@ -289,7 +291,7 @@ object SettingsSearchIndex {
                         "loudness", "normalization", "volume", "replaygain", "lufs", "track volume",
                         "leveling", "equal volume", "album loudness", "gain"
                     ),
-                    icon = Icons.Filled.VolumeUp,
+                    icon = Icons.AutoMirrored.Filled.VolumeUp,
                     iconContainer = { MaterialTheme.colorScheme.secondaryContainer },
                     iconTint = { MaterialTheme.colorScheme.onSecondaryContainer },
                     parentTab = SettingsTab.AUDIO,
@@ -340,7 +342,7 @@ object SettingsSearchIndex {
                         "system audio effects", "wavelet", "dolby system", "external eq", "audio fx",
                         "dsp apps", "system equalizer", "sound enhancer"
                     ),
-                    icon = Icons.Filled.VolumeUp,
+                    icon = Icons.AutoMirrored.Filled.VolumeUp,
                     iconContainer = { MaterialTheme.colorScheme.tertiaryContainer },
                     iconTint = { MaterialTheme.colorScheme.onTertiaryContainer },
                     parentTab = SettingsTab.AUDIO,
@@ -757,7 +759,7 @@ object SettingsSearchIndex {
                         "sync playlists", "playlist selection", "choose playlists", "mirror playlists",
                         "synced playlists", "filter sync"
                     ),
-                    icon = Icons.Filled.FormatListBulleted,
+                    icon = Icons.AutoMirrored.Filled.FormatListBulleted,
                     iconContainer = { MaterialTheme.colorScheme.tertiaryContainer },
                     iconTint = { MaterialTheme.colorScheme.onTertiaryContainer },
                     parentTab = SettingsTab.YOUTUBE,
@@ -791,7 +793,7 @@ object SettingsSearchIndex {
                         "import youtube", "import playlist", "paste link", "yt import", "copy playlist",
                         "transfer youtube", "make local"
                     ),
-                    icon = Icons.Filled.QueueMusic,
+                    icon = Icons.AutoMirrored.Filled.QueueMusic,
                     iconContainer = { MaterialTheme.colorScheme.primaryContainer },
                     iconTint = { MaterialTheme.colorScheme.onPrimaryContainer },
                     parentTab = SettingsTab.YOUTUBE,
@@ -906,7 +908,7 @@ object SettingsSearchIndex {
                         "spotify", "spotify login", "spotify auth", "spotify account", "pkce",
                         "spotify playlists", "spotify liked songs", "sync spotify", "isrc",
                     ),
-                    icon = Icons.Filled.QueueMusic,
+                    icon = Icons.AutoMirrored.Filled.QueueMusic,
                     iconContainer = { Color(0xFF1DB954).copy(alpha = 0.16f) },
                     iconTint = { Color(0xFF1DB954) },
                     parentTab = SettingsTab.LIBRARY,
@@ -923,7 +925,7 @@ object SettingsSearchIndex {
                         "import youtube", "import playlist", "yt music import", "paste playlist url",
                         "transfer youtube playlists"
                     ),
-                    icon = Icons.Filled.QueueMusic,
+                    icon = Icons.AutoMirrored.Filled.QueueMusic,
                     iconContainer = { MaterialTheme.colorScheme.primaryContainer },
                     iconTint = { MaterialTheme.colorScheme.onPrimaryContainer },
                     parentTab = SettingsTab.LIBRARY,
@@ -940,7 +942,7 @@ object SettingsSearchIndex {
                         "import spotify", "import apple music", "transfer playlist", "spotify to neonsong",
                         "apple to neonsong", "playlist converter", "public link"
                     ),
-                    icon = Icons.Filled.QueueMusic,
+                    icon = Icons.AutoMirrored.Filled.QueueMusic,
                     iconContainer = { MaterialTheme.colorScheme.secondaryContainer },
                     iconTint = { MaterialTheme.colorScheme.onSecondaryContainer },
                     parentTab = SettingsTab.LIBRARY,

@@ -105,7 +105,11 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Group
@@ -379,7 +383,7 @@ enum class SettingsTab(
     LIBRARY(
         title = "Library & Content",
         subtitle = "Home layout, Playlist imports, Downloads, Exclusions",
-        icon = Icons.Filled.QueueMusic,
+        icon = Icons.AutoMirrored.Filled.QueueMusic,
         eyebrow = "LIBRARY ARCHITECTURE",
         heroSummary = "Feed Shelves Layout • Playlist Importers • Offline Cache • Exclusions",
     ),
@@ -624,7 +628,7 @@ fun SettingsScreen(
 
     @OptIn(ExperimentalFoundationApi::class)
     CompositionLocalProvider(
-        androidx.compose.foundation.LocalOverscrollConfiguration provides null,
+        androidx.compose.foundation.LocalOverscrollFactory provides null,
     ) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -816,7 +820,7 @@ fun SettingsScreen(
                                                         },
                                                     )
                                                     1 -> SettingsActionCard(
-                                                        icon = Icons.Filled.QueueMusic,
+                                                        icon = Icons.AutoMirrored.Filled.QueueMusic,
                                                         iconContainer = Color(0xFF1DB954).copy(alpha = 0.16f),
                                                         iconTint = Color(0xFF1DB954),
                                                         title = "Spotify Account & Sync",
@@ -908,7 +912,7 @@ fun SettingsScreen(
                                                         },
                                                     )
                                                     else -> SettingsActionCard(
-                                                        icon = Icons.Filled.QueueMusic,
+                                                        icon = Icons.AutoMirrored.Filled.QueueMusic,
                                                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                                         iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                                         title = "Library & Content",
@@ -1130,7 +1134,7 @@ fun SettingsScreen(
                                                         isHighlighted = (highlightedSettingId == "audio.usb_exclusive"),
                                                     )
                                                     1 -> SettingsActionCard(
-                                                        icon = Icons.Filled.VolumeUp,
+                                                        icon = Icons.AutoMirrored.Filled.VolumeUp,
                                                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                                         iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                                         title = "Loudness Normalization",
@@ -1150,7 +1154,7 @@ fun SettingsScreen(
                                                         isHighlighted = (highlightedSettingId == "audio.equalizer"),
                                                     )
                                                     3 -> SettingsToggleCard(
-                                                        icon = Icons.Filled.VolumeUp,
+                                                        icon = Icons.AutoMirrored.Filled.VolumeUp,
                                                         iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                                         iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                                         title = "System Audio Effects",
@@ -1598,7 +1602,7 @@ fun SettingsScreen(
                                                         )
                                                     } else {
                                                         SettingsActionCard(
-                                                            icon = Icons.Filled.QueueMusic,
+                                                            icon = Icons.AutoMirrored.Filled.QueueMusic,
                                                             iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                                             iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                                             title = "Import from YouTube Music",
@@ -1616,7 +1620,7 @@ fun SettingsScreen(
                                                             "$selectedCount of ${allPlaylists.size} playlists selected"
                                                         }
                                                         SettingsActionCard(
-                                                            icon = Icons.Filled.FormatListBulleted,
+                                                            icon = Icons.AutoMirrored.Filled.FormatListBulleted,
                                                             iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                                             iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                                             title = stringResource(R.string.settings_select_playlists),
@@ -1645,7 +1649,7 @@ fun SettingsScreen(
                                                         )
                                                     }
                                                     5 -> SettingsActionCard(
-                                                        icon = Icons.Filled.QueueMusic,
+                                                        icon = Icons.AutoMirrored.Filled.QueueMusic,
                                                         iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                                         iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                                         title = stringResource(R.string.settings_make_local),
@@ -1754,7 +1758,7 @@ fun SettingsScreen(
                                             ExpressiveGroup(rowCount = 4) { index, position ->
                                                 when (index) {
                                                     0 -> SettingsActionCard(
-                                                        icon = Icons.Filled.QueueMusic,
+                                                        icon = Icons.AutoMirrored.Filled.QueueMusic,
                                                         iconContainer = Color(0xFF1DB954).copy(alpha = 0.16f),
                                                         iconTint = Color(0xFF1DB954),
                                                         title = "Spotify Account & Library Sync",
@@ -1771,7 +1775,7 @@ fun SettingsScreen(
                                                         },
                                                     )
                                                     1 -> SettingsActionCard(
-                                                        icon = Icons.Filled.QueueMusic,
+                                                        icon = Icons.AutoMirrored.Filled.QueueMusic,
                                                         iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                                         iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                                         title = "Import from YouTube Music",
@@ -1781,7 +1785,7 @@ fun SettingsScreen(
                                                         isHighlighted = (highlightedSettingId == "library.import_yt"),
                                                     )
                                                     2 -> SettingsActionCard(
-                                                        icon = Icons.Filled.QueueMusic,
+                                                        icon = Icons.AutoMirrored.Filled.QueueMusic,
                                                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                                         iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                                         title = "Import from Spotify / Apple Music (URL)",
@@ -1876,7 +1880,7 @@ fun SettingsScreen(
                                                         HomeSection.TOP_ARTISTS -> Icons.Filled.Group
                                                         HomeSection.HEAVY_ROTATION -> Icons.Filled.Favorite
                                                         HomeSection.ALBUMS -> Icons.Filled.Album
-                                                        HomeSection.CHARTS -> Icons.Filled.TrendingUp
+                                                        HomeSection.CHARTS -> Icons.AutoMirrored.Filled.TrendingUp
                                                         HomeSection.NEW_RELEASES -> Icons.Filled.NewReleases
                                                         HomeSection.FRIENDS -> Icons.Filled.Group
                                                     }

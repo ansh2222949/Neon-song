@@ -30,7 +30,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
@@ -189,7 +189,7 @@ fun SpotifyIntegrationSheet(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.QueueMusic,
+                        imageVector = Icons.AutoMirrored.Filled.QueueMusic,
                         contentDescription = "Spotify",
                         tint = SpotifyGreen,
                         modifier = Modifier.size(26.dp),
@@ -704,7 +704,7 @@ fun SpotifyIntegrationSheet(
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Filled.QueueMusic,
+                                            imageVector = Icons.AutoMirrored.Filled.QueueMusic,
                                             contentDescription = null,
                                             tint = SpotifyGreen,
                                             modifier = Modifier.size(20.dp),

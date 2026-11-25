@@ -27,7 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FormatQuote
-import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Icon
@@ -322,7 +322,7 @@ fun PlayerFloatingDock(
                         },
                     ) {
                         Icon(
-                            Icons.Filled.QueueMusic,
+                            Icons.AutoMirrored.Filled.QueueMusic,
                             contentDescription = "Queue",
                             modifier = Modifier.size(if (compact) 19.dp else 21.dp),
                         )

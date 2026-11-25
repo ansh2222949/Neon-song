@@ -55,8 +55,8 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.PlaylistAdd
-import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
 import com.neonsong.app.ui.common.GlassAlertDialog as AlertDialog
@@ -2509,7 +2509,7 @@ private fun DownloadedTrackCard(
                     )
                     DropdownMenuItem(
                         text = { Text("Play Next") },
-                        leadingIcon = { Icon(Icons.Filled.PlaylistAdd, contentDescription = null) },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null) },
                         onClick = {
                             menuExpanded = false
                             onPlayNext()
@@ -2517,7 +2517,7 @@ private fun DownloadedTrackCard(
                     )
                     DropdownMenuItem(
                         text = { Text("Add to Queue") },
-                        leadingIcon = { Icon(Icons.Filled.QueueMusic, contentDescription = null) },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null) },
                         onClick = {
                             menuExpanded = false
                             onAddToQueue()

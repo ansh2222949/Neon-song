@@ -90,11 +90,17 @@ fun EdgeToEdgeDialogWindow() {
         targetWindow?.let { w ->
             runCatching {
                 WindowCompat.setDecorFitsSystemWindows(w, false)
-                w.navigationBarColor = android.graphics.Color.TRANSPARENT
-                w.statusBarColor = android.graphics.Color.TRANSPARENT
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    w.isNavigationBarContrastEnforced = false
-                    w.isStatusBarContrastEnforced = false
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                    @Suppress("DEPRECATION")
+                    run {
+                        w.navigationBarColor = android.graphics.Color.TRANSPARENT
+                        w.statusBarColor = android.graphics.Color.TRANSPARENT
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        w.isNavigationBarContrastEnforced = false
+                        @Suppress("DEPRECATION")
+                        w.isStatusBarContrastEnforced = false
+                    }
                 }
                 if (isDialog) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

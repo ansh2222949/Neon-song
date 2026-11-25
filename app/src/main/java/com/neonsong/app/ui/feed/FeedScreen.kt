@@ -67,7 +67,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.ThumbUp
-import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -2472,7 +2472,7 @@ private fun ChartTrackCard(
                         name = track.title,
                         artist = primaryArtistName,
                         embeddedUrl = track.artworkUrl,
-                        fallbackIcon = Icons.Filled.TrendingUp,
+                        fallbackIcon = Icons.AutoMirrored.Filled.TrendingUp,
                         decodeSizePx = 160,
                         crossfade = false,
                         enable3DGlass = false,

@@ -724,7 +724,6 @@ private fun PlaylistCard(
     isSelected: Boolean = false,
     onLongClick: () -> Unit = {},
 ) {
-    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val isThisPlaylistPlaying = isPlaying && playbackSource == playlist.title
     var menuExpanded by remember { mutableStateOf(false) }

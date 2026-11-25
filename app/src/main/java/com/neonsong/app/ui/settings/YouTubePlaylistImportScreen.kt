@@ -47,7 +47,7 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
 import com.neonsong.app.ui.theme.GlassActionButton as Button
@@ -86,7 +86,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -130,7 +130,7 @@ fun YouTubePlaylistImportScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
     val keyboard = LocalSoftwareKeyboardController.current
     val haptic = LocalHapticFeedback.current
     val isDark = LocalIsDarkTheme.current
@@ -215,7 +215,7 @@ fun YouTubePlaylistImportScreen(
                             val selected = state.selectedTab == tab
                             val icon = when (tab) {
                                 ImportTab.LIBRARY -> Icons.Filled.LibraryMusic
-                                ImportTab.SEARCH -> Icons.Filled.QueueMusic
+                                ImportTab.SEARCH -> Icons.AutoMirrored.Filled.QueueMusic
                                 ImportTab.LINK -> Icons.Filled.Link
                                 ImportTab.CSV -> Icons.Filled.Description
                             }
@@ -371,7 +371,7 @@ fun YouTubePlaylistImportScreen(
                                         }
                                     } else {
                                         IconButton(onClick = {
-                                            val text = clipboard.getText()?.text.orEmpty()
+                                            val text = clipboard.nativeClipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
                                             if (text.isNotBlank()) {
                                                 viewModel.onQueryChange(text)
                                                 viewModel.search(text)
@@ -510,7 +510,7 @@ fun YouTubePlaylistImportScreen(
                                             }
                                         } else {
                                             IconButton(onClick = {
-                                                val text = clipboard.getText()?.text.orEmpty()
+                                                val text = clipboard.nativeClipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
                                                 if (text.isNotBlank()) {
                                                     viewModel.onDirectLinkChange(text)
                                                     viewModel.resolveDirectLink(text)
