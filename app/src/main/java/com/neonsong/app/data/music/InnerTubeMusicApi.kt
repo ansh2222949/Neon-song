@@ -207,6 +207,7 @@ class InnerTubeMusicApi @Inject constructor(
     @Volatile private var cachedAuthScopeKey: Pair<Long, String>? = null
     @Volatile private var cachedAuthScopeValue: String = ANONYMOUS_AUTH_SCOPE
     @Volatile private var webConfig: WebConfig? = null
+    @Volatile private var webConfigRetryAfterMs: Long = 0L
 
     fun invalidateCache(videoId: String) {
         streamCache.keys.removeIf { it.videoId == videoId }
@@ -2326,7 +2327,7 @@ class InnerTubeMusicApi @Inject constructor(
                         playerPoToken = null,
                         gvsPoToken = null,
                         authScope = authScope,
-                        probeCandidates = false,
+                        probeCandidates = true,
                         allowCipherFormats = false,
                         maxAttempts = 1,
                     )
@@ -2335,11 +2336,16 @@ class InnerTubeMusicApi @Inject constructor(
                 throw cancellation
             } catch (error: Exception) {
                 failed = true
+                failedClientsUntil[clientFailureKey(videoId, client.key, authScope)] =
+                    System.currentTimeMillis() + CLIENT_COOLDOWN_MS
+                if (lastSuccessfulClientName == client.name) {
+                    lastSuccessfulClientName = null
+                }
                 noteAttempt("client=${client.name} outcome=error ${resolutionFailureDetail(error)}")
                 null
             }
             if (stream != null) {
-                noteAttempt("client=${client.name} outcome=direct-url itag=${stream.itag ?: -1}")
+                noteAttempt("client=${client.name} outcome=probed-url itag=${stream.itag ?: -1}")
                 lastSuccessfulClientName = client.name
                 return stream
             }
@@ -2363,7 +2369,7 @@ class InnerTubeMusicApi @Inject constructor(
         // to every cold song.
         val fallback = async { racePlayableFallback(videoId, authScope, now, startedAt) }
         val fast = resolveDirectUrlFastPath(videoId, authScope)
-        if (fast != null && probeStream(fast, "direct-fast-probe")) {
+        if (fast != null) {
             fallback.cancel()
             cacheResolvedStream(fast, now)
             lastResolvedStreams[resolutionKey(videoId, authScope)] = fast
@@ -2435,7 +2441,17 @@ class InnerTubeMusicApi @Inject constructor(
                     )
                     return@launch
                 }
-                if (probeStream(candidate, "innertubex-probe")) channel.trySend(candidate)
+                if (probeStream(candidate, "innertubex-probe")) {
+                    channel.trySend(candidate)
+                } else {
+                    noteAttempt("client=INNERTUBEX outcome=probe-failed itag=${candidate.itag ?: -1}")
+                    logStreamEvent("innertubex-probe-failed", candidate)
+                    innerTubeXExtractor.reportPlaybackFailure(
+                        videoId = videoId,
+                        authScope = authScope,
+                        clientProfile = candidate.clientProfile,
+                    )
+                }
             },
             launch(Dispatchers.IO) {
                 var failed = false
@@ -2499,8 +2515,9 @@ class InnerTubeMusicApi @Inject constructor(
                 put("client", buildJsonObject {
                     put("clientName", client.name)
                     put("clientVersion", client.version)
-                    put("hl", "en")
-                    put("gl", "US")
+                    val (hl, gl) = getEffectiveHlGl()
+                    put("hl", hl)
+                    put("gl", gl)
                     if (!visitorData.isNullOrBlank()) put("visitorData", visitorData)
                     if (!client.osName.isNullOrBlank()) put("osName", client.osName)
                     if (!client.osVersion.isNullOrBlank()) put("osVersion", client.osVersion)
@@ -2717,10 +2734,17 @@ class InnerTubeMusicApi @Inject constructor(
         return "$base${separator}${Uri.encode("pot")}=${Uri.encode(token)}$fragment"
     }
 
-    private fun streamExpiryEpochMs(url: String): Long? = url.toHttpUrlOrNull()
-        ?.queryParameter("expire")
-        ?.toLongOrNull()
-        ?.times(1_000L)
+    private fun streamExpiryEpochMs(url: String): Long? {
+        val parsed = url.toHttpUrlOrNull()
+        val queryExpire = parsed?.queryParameter("expire")?.toLongOrNull()
+        if (queryExpire != null) return queryExpire * 1_000L
+        val pathExpire = Regex("""/expire/(\d+)""")
+            .find(parsed?.encodedPath ?: url)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toLongOrNull()
+        return pathExpire?.times(1_000L)
+    }
 
     private fun clientFailureKey(videoId: String, clientKey: String, authScope: String): String =
         "$videoId|$clientKey|$authScope"
@@ -2850,8 +2874,15 @@ class InnerTubeMusicApi @Inject constructor(
             failedClientsUntil.entries.removeIf { it.value <= now }
         }
         if (lastResolvedStreams.size > MAX_LAST_RESOLVED_ENTRIES) {
-            lastResolvedStreams.entries.removeIf { !it.value.isFresh(0L, now) }
-            if (lastResolvedStreams.size > MAX_LAST_RESOLVED_ENTRIES) lastResolvedStreams.clear()
+            lastResolvedStreams.entries.removeIf { (_, stream) ->
+                stream.expiresAtEpochMs?.let { exp -> exp - now <= URL_EXPIRY_MARGIN_MS } ?: false
+            }
+            if (lastResolvedStreams.size > MAX_LAST_RESOLVED_ENTRIES) {
+                lastResolvedStreams.entries
+                    .sortedBy { it.value.expiresAtEpochMs ?: Long.MAX_VALUE }
+                    .take(lastResolvedStreams.size - MAX_LAST_RESOLVED_ENTRIES)
+                    .forEach { lastResolvedStreams.remove(it.key, it.value) }
+            }
         }
         if (streamCache.size <= MAX_STREAM_CACHE_ENTRIES) return
         streamCache.entries.removeIf { !it.value.stream.isFresh(it.value.cachedAtEpochMs, now) }
@@ -2973,19 +3004,31 @@ class InnerTubeMusicApi @Inject constructor(
      *  first playback's fast path can attach visitor data without an extra
      *  blocking fetch. Safe to call from a startup coroutine; never throws. */
     suspend fun preWarmPlayback() {
-        val config = cancellableRunCatching { getWebConfig() }.getOrNull()
-        val visitor = config?.visitorData ?: FALLBACK_TOKEN_SESSION
-        cancellableRunCatching { BotGuardTokenGenerator.preWarm(visitor) }
+        cancellableRunCatching { getWebConfig() }
     }
 
     private suspend fun getWebConfig(): WebConfig {
         webConfig?.let { return it }
+        val now = System.currentTimeMillis()
+        if (now < webConfigRetryAfterMs) {
+            return WebConfig(FALLBACK_WEB_KEY, FALLBACK_WEB_VERSION, null)
+        }
         return configMutex.withLock {
             webConfig?.let { return@withLock it }
-            val config = cancellableRunCatching { fetchWebConfig() }
-                .getOrElse { WebConfig(FALLBACK_WEB_KEY, FALLBACK_WEB_VERSION, null) }
-            webConfig = config
-            config
+            val currentNow = System.currentTimeMillis()
+            if (currentNow < webConfigRetryAfterMs) {
+                return@withLock WebConfig(FALLBACK_WEB_KEY, FALLBACK_WEB_VERSION, null)
+            }
+            val fetched = cancellableRunCatching { fetchWebConfig() }.getOrNull()
+            if (fetched != null) {
+                webConfig = fetched
+                webConfigRetryAfterMs = 0L
+                fetched
+            } else {
+                // Retry after a short cooldown instead of pinning fallback config forever.
+                webConfigRetryAfterMs = System.currentTimeMillis() + 30_000L
+                WebConfig(FALLBACK_WEB_KEY, FALLBACK_WEB_VERSION, null)
+            }
         }
     }
 

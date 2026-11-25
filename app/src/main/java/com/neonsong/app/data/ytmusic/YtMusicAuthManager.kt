@@ -136,7 +136,7 @@ class YtMusicAuthManager @Inject constructor(
             val combined = when {
                 musicCookies.isBlank() -> ytCookies
                 ytCookies.isBlank() -> musicCookies
-                else -> "$musicCookies; $ytCookies"
+                else -> "$ytCookies; $musicCookies"
             }
             if (combined.isBlank()) return false
             val cookies = parseCookieHeader(combined)
@@ -147,9 +147,16 @@ class YtMusicAuthManager @Inject constructor(
             val current = connection.value
             if (current.isConnected && current.cookies == cookies) return false
 
+            val updatedName = current.accountName.ifBlank { "Google account" }
+            // Update in-memory connection synchronously so immediate HTTP retries
+            // read the refreshed cookies instead of waiting for async DataStore collection.
+            _connection.value = current.copy(
+                cookies = cookies,
+                accountName = updatedName,
+            )
             preferences.saveConnection(
                 cookies = cookies,
-                accountName = current.accountName.ifBlank { "Google account" },
+                accountName = updatedName,
                 channelHandle = current.channelHandle,
                 photoUrl = current.photoUrl,
                 onBehalfOfUser = current.onBehalfOfUser,
@@ -158,8 +165,6 @@ class YtMusicAuthManager @Inject constructor(
             )
             Log.i(TAG, "Auto-refreshed YouTube Music session cookies from CookieManager")
             true
-        } catch (c: CancellationException) {
-            throw c
         } catch (c: CancellationException) {
             throw c
         } catch (e: Throwable) {

@@ -4240,7 +4240,11 @@ class MusicPlayer @Inject constructor(
         } ?: true
         if (!preparedMatches && prepared != null) {
             preparedStreams.remove(prepared.cacheKey)
-            track.playbackIdentity()?.let { streamResolver.cache.invalidate(it) }
+            prepared.youtubeCandidate?.videoId?.takeIf { it.isNotBlank() }?.let { innerTube.invalidateCache(it) }
+            track.playbackIdentity()?.let {
+                streamResolver.cache.invalidate(it)
+                innerTube.invalidateCache(it.youtubeVideoId)
+            }
         }
         if (preparedMatches && mediaItem.localConfiguration?.uri?.scheme != "neonsong" && prepared?.isExpired() != true) {
             // Already resolved: publish quality synchronously so the badge is
@@ -6616,6 +6620,8 @@ class MusicPlayer @Inject constructor(
         val entry = streamResolver.resolvePlayback(identity, track.durationMs)
         if (entry.youtubeVideoId != matchId) {
             streamResolver.cache.invalidate(identity)
+            innerTube.invalidateCache(matchId)
+            innerTube.invalidateCache(entry.youtubeVideoId)
             throw java.io.IOException("Rejected mismatched stream requested=$matchId resolved=${entry.youtubeVideoId}")
         }
         return entry.toPlayerStream()
@@ -6628,6 +6634,8 @@ class MusicPlayer @Inject constructor(
     ): ResolvedStream {
         if (!entry.matches(identity)) {
             streamResolver.cache.invalidate(identity)
+            innerTube.invalidateCache(identity.youtubeVideoId)
+            innerTube.invalidateCache(entry.youtubeVideoId)
             throw java.io.IOException(
                 "Rejected mismatched stream requested=${identity.youtubeVideoId} resolved=${entry.youtubeVideoId}",
             )
