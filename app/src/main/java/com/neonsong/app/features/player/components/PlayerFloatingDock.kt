@@ -63,6 +63,7 @@ import com.neonsong.app.ui.theme.LiquidGlassPreset
 import com.neonsong.app.ui.theme.LiquidGlassSurface
 import com.neonsong.app.ui.theme.LocalLiquidGlass
 import com.neonsong.app.ui.theme.SquircleShape
+import com.neonsong.app.ui.theme.bounceScale
 import com.neonsong.app.ui.theme.liquidGlassChrome
 import com.neonsong.app.ui.theme.liquidGlassContainerColor
 import com.neonsong.app.util.LocalHapticManager
@@ -79,23 +80,6 @@ fun PlayerModeButton(
     modifier: Modifier = Modifier,
 ) {
     val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    androidx.compose.runtime.LaunchedEffect(pressed) {
-        if (pressed) {
-            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-        }
-    }
-    val scale by animateFloatAsState(
-        if (pressed) 0.92f else 1f,
-        spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy, stiffness = androidx.compose.animation.core.Spring.StiffnessLow),
-        label = "modePress",
-    )
-    val alpha by animateFloatAsState(
-        if (pressed) 0.70f else 1f,
-        spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy, stiffness = androidx.compose.animation.core.Spring.StiffnessLow),
-        label = "modeAlpha",
-    )
     val container by animateColorAsState(
         if (active) Color.White.copy(alpha = 0.22f)
         else liquidGlassContainerColor(background),
@@ -120,12 +104,8 @@ fun PlayerModeButton(
         contentColor = content,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
+        interactionSource = interaction,
         modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                this.alpha = alpha
-            }
             .semantics {
                 selected = active
                 stateDescription = description
@@ -148,23 +128,6 @@ private fun AppleDockPillItem(
 ) {
     val primary = MaterialTheme.colorScheme.primary
     val interaction = remember { MutableInteractionSource() }
-    val isPressed by interaction.collectIsPressedAsState()
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    androidx.compose.runtime.LaunchedEffect(isPressed) {
-        if (isPressed && enabled) {
-            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-        }
-    }
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.92f else 1.0f,
-        animationSpec = spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy, stiffness = androidx.compose.animation.core.Spring.StiffnessLow),
-        label = "dockItemScale",
-    )
-    val alpha by animateFloatAsState(
-        targetValue = if (isPressed) 0.70f else 1.0f,
-        animationSpec = spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy, stiffness = androidx.compose.animation.core.Spring.StiffnessLow),
-        label = "dockItemAlpha",
-    )
     val pillBg by animateColorAsState(
         targetValue = if (active) {
             primary.copy(alpha = 0.22f)
@@ -195,11 +158,12 @@ private fun AppleDockPillItem(
         border = if (active) BorderStroke(0.75.dp, effectiveActiveTint.copy(alpha = 0.42f)) else null,
         modifier = Modifier
             .height(if (compact) 36.dp else 40.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                this.alpha = alpha
-            },
+            .bounceScale(
+                interactionSource = interaction,
+                enabled = enabled,
+                scaleDown = 0.92f,
+                alphaDown = 0.70f,
+            ),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = if (compact) 10.dp else 13.dp),

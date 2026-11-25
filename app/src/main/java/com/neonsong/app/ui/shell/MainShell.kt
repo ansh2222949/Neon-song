@@ -203,8 +203,8 @@ fun MainShell(
     val feedIndex = remember { tabs.indexOf(MainTab.FEED) }
 
     val musicPlayer = LocalMusicPlayer.current
-    val playerState by musicPlayer.state.collectAsStateWithLifecycle()
-    val hasActiveTrack = playerState.current != null || LocalMiniPlayerScrollClearance.current > 0.dp
+    val chromeState by musicPlayer.chromeState.collectAsStateWithLifecycle()
+    val hasActiveTrack = chromeState.current != null || LocalMiniPlayerScrollClearance.current > 0.dp
 
     val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val dockHeight = 68.dp

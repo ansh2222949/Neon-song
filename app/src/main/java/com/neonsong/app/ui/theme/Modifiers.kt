@@ -59,7 +59,7 @@ fun Modifier.bounceClick(
         }
     }
 
-    val scale by animateFloatAsState(
+    val scaleState = animateFloatAsState(
         targetValue = if (isPressed && enabled) scaleDown else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
@@ -68,7 +68,7 @@ fun Modifier.bounceClick(
         label = "bounceClickScale",
     )
 
-    val alpha by animateFloatAsState(
+    val alphaState = animateFloatAsState(
         targetValue = if (isPressed && enabled) alphaDown else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
@@ -79,9 +79,10 @@ fun Modifier.bounceClick(
 
     return this
         .graphicsLayer {
-            scaleX = scale
-            scaleY = scale
-            this.alpha = alpha
+            val s = scaleState.value
+            scaleX = s
+            scaleY = s
+            this.alpha = alphaState.value
         }
         .clickable(
             interactionSource = actualSource,
@@ -112,7 +113,7 @@ fun Modifier.bounceScale(
         }
     }
 
-    val scale by animateFloatAsState(
+    val scaleState = animateFloatAsState(
         targetValue = if (isPressed && enabled) scaleDown else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
@@ -121,7 +122,7 @@ fun Modifier.bounceScale(
         label = "bounceScale",
     )
 
-    val alpha by animateFloatAsState(
+    val alphaState = animateFloatAsState(
         targetValue = if (isPressed && enabled) alphaDown else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
@@ -131,9 +132,10 @@ fun Modifier.bounceScale(
     )
 
     return this.graphicsLayer {
-        scaleX = scale
-        scaleY = scale
-        this.alpha = alpha
+        val s = scaleState.value
+        scaleX = s
+        scaleY = s
+        this.alpha = alphaState.value
     }
 }
 
@@ -157,46 +159,14 @@ fun AnimatedIconButton(
     alphaDown: Float = 0.70f,
     content: @Composable () -> Unit,
 ) {
-    val actualSource = interactionSource ?: remember { MutableInteractionSource() }
-    val isPressed by actualSource.collectIsPressedAsState()
-    val haptic = LocalHapticFeedback.current
-
-    LaunchedEffect(isPressed) {
-        if (isPressed && enabled) {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        }
-    }
-
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed && enabled) scaleDown else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessLow,
-        ),
-        label = "animatedIconButtonScale",
-    )
-
-    val alpha by animateFloatAsState(
-        targetValue = if (isPressed && enabled) alphaDown else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessLow,
-        ),
-        label = "animatedIconButtonAlpha",
-    )
-
     Box(
         modifier = modifier
             .defaultMinSize(minWidth = 40.dp, minHeight = 40.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                this.alpha = alpha
-            }
-            .clickable(
-                interactionSource = actualSource,
-                indication = null,
+            .bounceClick(
                 enabled = enabled,
+                scaleDown = scaleDown,
+                alphaDown = alphaDown,
+                interactionSource = interactionSource,
                 role = Role.Button,
                 onClick = onClick,
             ),

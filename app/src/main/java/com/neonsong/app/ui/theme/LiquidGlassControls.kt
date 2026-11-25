@@ -212,7 +212,6 @@ private fun GlassButtonCore(
         variant == GlassControlVariant.CHROMELESS -> {
             modifier
                 .clip(shape)
-                .liquidTouchEffect(interaction = touch, accent = contentColor, enabled = enabled)
                 .bounceClick(
                     enabled = enabled,
                     scaleDown = 0.94f,
@@ -228,7 +227,7 @@ private fun GlassButtonCore(
                 .liquidGlass(
                     backdrop = backdrop,
                     shape = shape,
-                    interactive = enabled,
+                    interactive = false,
                     highlight = Highlight(width = borderWidth),
                     accentTint = accent,
                     lensIntensity = lens,
@@ -406,7 +405,6 @@ private fun GlassIconButtonCore(
         variant == GlassControlVariant.CHROMELESS -> {
             modifier
                 .clip(shape)
-                .liquidTouchEffect(interaction = touch, accent = contentColor, enabled = enabled)
                 .bounceClick(
                     enabled = enabled,
                     scaleDown = 0.90f,
@@ -420,7 +418,7 @@ private fun GlassIconButtonCore(
                 .liquidGlass(
                     backdrop = backdrop,
                     shape = shape,
-                    interactive = enabled,
+                    interactive = false,
                     highlight = Highlight(width = borderWidth),
                     accentTint = accent,
                     lensIntensity = lens,
@@ -473,20 +471,20 @@ fun GlassCircularProgressIndicator(
     strokeWidth: Dp = 4.dp,
     strokeCap: StrokeCap = StrokeCap.Round,
 ) {
-    val value = progress?.invoke()?.coerceIn(0f, 1f)
-    val rotation = if (value == null) {
+    val rotationState = if (progress == null) {
         val transition = rememberInfiniteTransition(label = "glassCircularProgress")
-        val animatedRotation by transition.animateFloat(
+        transition.animateFloat(
             initialValue = 0f,
             targetValue = 360f,
             animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
             label = "glassCircularProgressRotation",
         )
-        animatedRotation
     } else {
-        0f
+        null
     }
     Canvas(modifier) {
+        val value = progress?.invoke()?.coerceIn(0f, 1f)
+        val rotation = rotationState?.value ?: 0f
         val width = strokeWidth.toPx().coerceAtMost(size.minDimension * 0.25f)
         val inset = width / 2f
         val arcSize = Size(
@@ -553,20 +551,20 @@ fun GlassLinearProgressIndicator(
     trackColor: Color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
     strokeCap: StrokeCap = StrokeCap.Round,
 ) {
-    val value = progress?.invoke()?.coerceIn(0f, 1f)
-    val segmentStart = if (value == null) {
+    val segmentStartState = if (progress == null) {
         val transition = rememberInfiniteTransition(label = "glassLinearProgress")
-        val animatedStart by transition.animateFloat(
+        transition.animateFloat(
             initialValue = -0.35f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(tween(1_000, easing = LinearEasing)),
             label = "glassLinearProgressTravel",
         )
-        animatedStart
     } else {
-        0f
+        null
     }
     Canvas(modifier.defaultMinSize(minHeight = 5.dp)) {
+        val value = progress?.invoke()?.coerceIn(0f, 1f)
+        val segmentStart = segmentStartState?.value ?: 0f
         val barHeight = size.height.coerceAtLeast(1f)
         val corner = CornerRadius(barHeight / 2f, barHeight / 2f)
 
