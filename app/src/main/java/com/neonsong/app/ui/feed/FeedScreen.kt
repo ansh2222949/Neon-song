@@ -448,7 +448,7 @@ fun FeedScreen(
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 18.dp)
+                                            .padding(horizontal = NeonSpacing.ScreenHorizontal)
                                             .padding(top = 2.dp),
                                         verticalArrangement = Arrangement.spacedBy(2.dp),
                                     ) {
@@ -1176,7 +1176,7 @@ fun FeedScreen(
                 .align(Alignment.BottomCenter)
                 .adaptiveContentWidth(maxWidth = 600.dp)
                 .safeHorizontalContentPadding()
-                .padding(bottom = FloatingNavDefaults.contentBottomPadding()),
+                .padding(bottom = LocalBottomChromePadding.current),
         )
     }
 
@@ -2954,7 +2954,7 @@ private fun FeedEmptyState(
             .fillMaxSize()
             .safeHorizontalContentPadding()
             .verticalScroll(rememberScrollState())
-            .padding(bottom = FloatingNavDefaults.contentBottomPadding())
+            .padding(bottom = LocalBottomChromePadding.current)
             .padding(horizontal = 32.dp, vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,

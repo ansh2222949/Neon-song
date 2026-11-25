@@ -26,6 +26,16 @@ object NeonSpacing {
     val SectionGap = 28.dp
     val CardGap = 14.dp
     val CardInner = 16.dp
+    val HeroRadius = 28.dp
+    val SectionRadius = 24.dp
+    val CardRadius = 18.dp
+    val ThumbRadius = 10.dp
+
+    fun concentricRadius(
+        outerRadius: androidx.compose.ui.unit.Dp,
+        insetPadding: androidx.compose.ui.unit.Dp,
+        minRadius: androidx.compose.ui.unit.Dp = 6.dp,
+    ): androidx.compose.ui.unit.Dp = (outerRadius - insetPadding).coerceAtLeast(minRadius)
 }
 
 // MainShell iski value provide karega, aur har LazyColumn bottom padding mein ise padhega

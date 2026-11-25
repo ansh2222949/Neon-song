@@ -721,8 +721,8 @@ fun SettingsScreen(
                         LazyColumn(
                             state = listState,
                             contentPadding = PaddingValues(
-                                start = 16.dp,
-                                end = 16.dp,
+                                start = NeonSpacing.ScreenHorizontal,
+                                end = NeonSpacing.ScreenHorizontal,
                                 top = headerTopPadding + 12.dp + if (isSearchBarVisible) 68.dp else 0.dp,
                                 bottom = bottomPadding,
                             ),
@@ -4002,8 +4002,8 @@ private fun SettingsSearchResultsList(
     val bottomPadding = LocalBottomChromePadding.current
     LazyColumn(
         contentPadding = PaddingValues(
-            start = 16.dp,
-            end = 16.dp,
+            start = NeonSpacing.ScreenHorizontal,
+            end = NeonSpacing.ScreenHorizontal,
             top = topPadding + 8.dp,
             bottom = bottomPadding,
         ),

@@ -189,7 +189,7 @@ fun AutoEqScreen(onBack: () -> Unit, viewModel: AutoEqViewModel = hiltViewModel(
                 LinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = com.neonsong.app.ui.theme.NeonSpacing.ScreenHorizontal),
                 )
             }
 
@@ -199,7 +199,7 @@ fun AutoEqScreen(onBack: () -> Unit, viewModel: AutoEqViewModel = hiltViewModel(
                     .fillMaxSize()
                     .weight(1f),
                 contentPadding = contentPadding,
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(com.neonsong.app.ui.theme.NeonSpacing.CardGap),
             ) {
         item { ProfileCard(state, onSearch = { searchOpen = true }, viewModel = viewModel) }
 

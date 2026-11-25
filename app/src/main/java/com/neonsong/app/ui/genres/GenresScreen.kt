@@ -304,7 +304,11 @@ private fun GenreDetailSheet(
                 }
             }
 
-            LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(bottom = 12.dp)) {
+            LazyColumn(
+                state = listState,
+                contentPadding = PaddingValues(bottom = 16.dp + safeDrawingBottomPadding()),
+                modifier = Modifier.fillMaxSize(),
+            ) {
                 items(state.detailTracks, key = { it.key }) { track ->
                     GenreTrackRow(
                         track = track,

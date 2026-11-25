@@ -38,10 +38,10 @@ object CardTokens {
 
     /** Squircle corner radius for covers (16dp). */
     val coverCornerRadius: Dp = 16.dp
-    val thumbCornerRadius: Dp = 10.dp
+    val thumbCornerRadius: Dp = com.neonsong.app.ui.theme.NeonSpacing.ThumbRadius
 
-    /** Consistent horizontal gap between cards in a feed row (10-12dp). */
-    val cardGap: Dp = 12.dp
+    /** Consistent horizontal gap between cards in a feed row. */
+    val cardGap: Dp = com.neonsong.app.ui.theme.NeonSpacing.CardGap
 
     /** Reduced vertical gap between feed sections (halved from legacy 40dp to 16dp). */
     val sectionGap: Dp = 16.dp

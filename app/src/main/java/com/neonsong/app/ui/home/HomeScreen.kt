@@ -310,8 +310,8 @@ fun HomeScreen(
                 LazyColumn(
                     state = listState,
                     contentPadding = PaddingValues(
-                        start = 16.dp,
-                        end = 16.dp,
+                        start = NeonSpacing.ScreenHorizontal,
+                        end = NeonSpacing.ScreenHorizontal,
                         top = topPadding,
                         bottom = bottomPadding,
                     ),
@@ -344,7 +344,6 @@ fun HomeScreen(
                                 }
                             },
                         )
-                        Spacer(Modifier.height(14.dp))
                     }
 
                     // Optional Error Banner
@@ -353,7 +352,6 @@ fun HomeScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(bottom = 12.dp)
                                     .liquidGlassSurface(
                                         shape = RoundedCornerShape(16.dp),
                                         borderWidth = 0.8.dp,
@@ -391,7 +389,6 @@ fun HomeScreen(
                             onOpenDownloads = onOpenDownloads,
                             isViewingFriend = uiState.isViewingFriend,
                         )
-                        Spacer(Modifier.height(16.dp))
                     }
 
                     // 3. Optional Local Mode Banner
@@ -399,7 +396,6 @@ fun HomeScreen(
                         item(key = "local_stats_banner", contentType = "banner") {
                             LocalStatsBanner(
                                 onOpenSettings = onOpenSettings,
-                                modifier = Modifier.padding(bottom = 14.dp),
                             )
                         }
                     }
@@ -422,7 +418,6 @@ fun HomeScreen(
                                 },
                                 onOpenGenres = onOpenGenres,
                             )
-                            Spacer(Modifier.height(22.dp))
                         }
                     }
 
