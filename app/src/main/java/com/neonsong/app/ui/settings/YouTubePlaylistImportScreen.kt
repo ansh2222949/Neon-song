@@ -195,7 +195,7 @@ fun YouTubePlaylistImportScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = contentPadding.calculateTopPadding())
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .padding(horizontal = com.neonsong.app.ui.theme.NeonSpacing.ScreenHorizontal, vertical = 4.dp)
                         .liquidGlassSurface(
                             shape = tabBarShape,
                             borderWidth = 0.85.dp,

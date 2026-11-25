@@ -146,8 +146,13 @@ fun GenerateScreen(
         com.neonsong.app.ui.common.WithoutPlatformOverscroll {
         LazyColumn(
             state = listState,
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = FloatingNavDefaults.contentBottomPadding()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(
+                start = com.neonsong.app.ui.theme.NeonSpacing.ScreenHorizontal,
+                end = com.neonsong.app.ui.theme.NeonSpacing.ScreenHorizontal,
+                top = 16.dp,
+                bottom = com.neonsong.app.ui.theme.LocalBottomChromePadding.current,
+            ),
+            verticalArrangement = Arrangement.spacedBy(com.neonsong.app.ui.theme.NeonSpacing.CardGap),
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)

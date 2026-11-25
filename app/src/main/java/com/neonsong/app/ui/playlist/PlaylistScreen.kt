@@ -249,7 +249,7 @@ fun PlaylistScreen(
             ) {
                 val playlistRows = remember(state.playlists) { state.playlists.chunked(2) }
                 val bottomPadding = LocalBottomChromePadding.current
-                val topPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 12.dp
+                val topPadding = 12.dp
 
                 LazyColumn(
                     contentPadding = PaddingValues(top = topPadding, bottom = bottomPadding),
@@ -258,7 +258,7 @@ fun PlaylistScreen(
                 ) {
                     if (state.isGenerating) {
                         item(key = "generationProgress", contentType = "generationProgress") {
-                            Box(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                            Box(Modifier.padding(horizontal = NeonSpacing.ScreenHorizontal, vertical = 8.dp)) {
                                 com.neonsong.app.ui.common.GenerationProgressCard(message = state.generatingMessage)
                             }
                         }
@@ -275,7 +275,7 @@ fun PlaylistScreen(
                                 color = MaterialTheme.colorScheme.primaryContainer,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                                    .padding(horizontal = NeonSpacing.ScreenHorizontal, vertical = 8.dp)
                                     .shadow(
                                         elevation = 8.dp,
                                         shape = SquircleShape(16.dp),
@@ -445,7 +445,7 @@ fun PlaylistScreen(
                 shape = ExpressivePillShape,
                 color = MaterialTheme.colorScheme.inverseSurface,
                 modifier = Modifier.align(Alignment.BottomCenter)
-                    .padding(bottom = FloatingNavDefaults.contentBottomPadding() + 12.dp),
+                    .padding(bottom = LocalBottomChromePadding.current),
             ) {
                 Text(msg, color = MaterialTheme.colorScheme.inverseOnSurface, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
             }

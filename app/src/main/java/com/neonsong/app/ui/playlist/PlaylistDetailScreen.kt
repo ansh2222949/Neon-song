@@ -408,10 +408,10 @@ fun PlaylistDetailScreen(
         LazyColumn(
             state = listState,
             contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
+                start = com.neonsong.app.ui.theme.NeonSpacing.ScreenHorizontal,
+                end = com.neonsong.app.ui.theme.NeonSpacing.ScreenHorizontal,
                 top = 0.dp,
-                bottom = FloatingNavDefaults.contentBottomPadding(),
+                bottom = com.neonsong.app.ui.theme.LocalBottomChromePadding.current,
             ),
             verticalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier
@@ -1207,7 +1207,7 @@ fun PlaylistDetailScreen(
             exit = fadeOut() + scaleOut(),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = FloatingNavDefaults.contentBottomPadding() + 12.dp),
+                .padding(bottom = com.neonsong.app.ui.theme.LocalBottomChromePadding.current),
         ) {
             Surface(
                 shape = ExpressivePillShape,
@@ -1245,7 +1245,7 @@ fun PlaylistDetailScreen(
                 shadowElevation = 8.dp,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = FloatingNavDefaults.contentBottomPadding() + 12.dp),
+                    .padding(bottom = com.neonsong.app.ui.theme.LocalBottomChromePadding.current),
             ) {
                 Text(
                     msg,

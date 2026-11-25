@@ -26,12 +26,12 @@ import androidx.compose.ui.unit.sp
 import com.neonsong.app.ui.theme.LocalIsDarkTheme
 
 object NeonTokens {
-    val ScreenPadding = 16.dp
+    val ScreenPadding = com.neonsong.app.ui.theme.NeonSpacing.ScreenHorizontal
     val SectionGap = 18.dp
-    val HeroRadius = 28.dp
-    val SectionRadius = 24.dp
-    val CardRadius = 18.dp
-    val ThumbRadius = 12.dp
+    val HeroRadius = com.neonsong.app.ui.theme.NeonSpacing.HeroRadius
+    val SectionRadius = com.neonsong.app.ui.theme.NeonSpacing.SectionRadius
+    val CardRadius = com.neonsong.app.ui.theme.NeonSpacing.CardRadius
+    val ThumbRadius = com.neonsong.app.ui.theme.NeonSpacing.ThumbRadius
 
     fun <T> smoothSpring() = spring<T>(
         dampingRatio = 0.78f,

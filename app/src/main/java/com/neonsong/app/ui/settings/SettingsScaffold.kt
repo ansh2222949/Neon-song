@@ -28,12 +28,12 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.neonsong.app.ui.common.ExpressiveHeader
 import com.neonsong.app.ui.common.NeonLivingCanvas
-import com.neonsong.app.ui.player.LocalMiniPlayerScrollClearance
 import com.neonsong.app.ui.player.LocalMusicPlayer
-import com.neonsong.app.ui.shell.FloatingNavDefaults
 import com.neonsong.app.ui.theme.Backdrop
+import com.neonsong.app.ui.theme.LocalBottomChromePadding
 import com.neonsong.app.ui.theme.LocalIsDarkTheme
 import com.neonsong.app.ui.theme.LocalLiquidGlassBackdrop
+import com.neonsong.app.ui.theme.NeonSpacing
 import com.neonsong.app.ui.theme.isLiquidGlassBackdropSupported
 import com.neonsong.app.ui.theme.liquidGlassSource
 import com.neonsong.app.ui.theme.rememberLayerBackdrop
@@ -73,14 +73,13 @@ fun SettingsGlassScaffold(
         if (headerHeightPx > 0f) with(density) { headerHeightPx.toDp() } else statusBarTopDp + 64.dp
     }
 
-    val navBottomPadding = FloatingNavDefaults.contentBottomPadding()
-    val miniClearance = LocalMiniPlayerScrollClearance.current
-    val contentPadding = remember(headerTopPadding, navBottomPadding, miniClearance) {
+    val bottomChromePadding = LocalBottomChromePadding.current
+    val contentPadding = remember(headerTopPadding, bottomChromePadding) {
         PaddingValues(
-            start = 16.dp,
-            end = 16.dp,
+            start = NeonSpacing.ScreenHorizontal,
+            end = NeonSpacing.ScreenHorizontal,
             top = headerTopPadding + 12.dp,
-            bottom = maxOf(navBottomPadding, miniClearance) + 24.dp,
+            bottom = bottomChromePadding,
         )
     }
 

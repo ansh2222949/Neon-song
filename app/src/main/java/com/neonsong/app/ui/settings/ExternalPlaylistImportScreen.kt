@@ -343,8 +343,8 @@ fun ExternalPlaylistImportScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .adaptiveContentWidth(maxWidth = 600.dp)
-                    .padding(bottom = 20.dp + LocalMiniPlayerScrollClearance.current)
-                    .padding(horizontal = 20.dp),
+                    .padding(bottom = com.neonsong.app.ui.theme.LocalBottomChromePadding.current)
+                    .padding(horizontal = com.neonsong.app.ui.theme.NeonSpacing.ScreenHorizontal),
             ) {
                 Button(
                     onClick = {

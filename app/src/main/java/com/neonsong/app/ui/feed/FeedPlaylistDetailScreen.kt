@@ -267,7 +267,12 @@ private fun PlaylistContent(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Surface(
-                        shape = RoundedCornerShape(NeonTokens.CardRadius + 4.dp),
+                        shape = com.neonsong.app.ui.theme.SquircleShape(
+                            com.neonsong.app.ui.theme.NeonSpacing.concentricRadius(
+                                com.neonsong.app.ui.theme.NeonSpacing.HeroRadius,
+                                8.dp,
+                            ),
+                        ),
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         shadowElevation = 12.dp,
                         modifier = Modifier.size(heroCoverSize),
