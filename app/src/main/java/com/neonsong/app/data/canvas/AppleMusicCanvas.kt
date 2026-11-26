@@ -47,6 +47,11 @@ object AppleMusicCanvas {
             searchCatalog(client, bearer, "$primaryArtist $title", cleanTitle, cleanArtist, album)?.let { return it }
         }
 
+        // Pass 3: Album motion artwork fallback when album metadata is known
+        if (!album.isNullOrBlank()) {
+            searchAlbum(client, album, cleanArtist)?.let { return it }
+        }
+
         return null
     }
 
@@ -65,7 +70,6 @@ object AppleMusicCanvas {
                 .addQueryParameter("types", "songs")
                 .addQueryParameter("limit", "10")
                 .addQueryParameter("extend", "editorialVideo")
-                .addQueryParameter("include", "albums")
                 .build()
                 .toString()
 
@@ -81,9 +85,12 @@ object AppleMusicCanvas {
                 val s = score(song, title, artist, album) ?: return@mapNotNull null
                 s to song
             }.sortedByDescending { it.first }
+                .takeWhile { it.first >= MIN_SCORE }
 
-            for ((hitScore, song) in ranked) {
-                if (hitScore < MIN_SCORE) break
+            if (ranked.isEmpty()) continue
+
+            // Fast check for song-level inline editorialVideo
+            for ((_, song) in ranked) {
                 val attributes = song["attributes"]?.jsonObject ?: continue
                 val songName = attributes["name"]?.jsonPrimitive?.contentOrNull
                 val songArtist = attributes["artistName"]?.jsonPrimitive?.contentOrNull
@@ -103,9 +110,21 @@ object AppleMusicCanvas {
                         )
                     }
                 }
+            }
 
-                val albumId = albumId(song) ?: continue
-                fetchAlbum(client, store, albumId, bearer, songName, songArtist)?.let { return it }
+            // Batch lookup up to 8 unique album IDs in ONE request instead of N sequential calls
+            val candidateAlbums = ranked.mapNotNull { (_, song) ->
+                val aid = albumId(song) ?: return@mapNotNull null
+                val attrs = song["attributes"]?.jsonObject
+                Triple(
+                    aid,
+                    attrs?.get("name")?.jsonPrimitive?.contentOrNull,
+                    attrs?.get("artistName")?.jsonPrimitive?.contentOrNull,
+                )
+            }.distinctBy { it.first }.take(8)
+
+            if (candidateAlbums.isNotEmpty()) {
+                fetchAlbumsBatch(client, store, candidateAlbums, bearer)?.let { return it }
             }
         }
         return null
@@ -286,41 +305,51 @@ object AppleMusicCanvas {
             .takeIf { it.isNotBlank() && it.all(Char::isDigit) }
     }
 
-    private fun fetchAlbum(
+    private fun fetchAlbumsBatch(
         client: OkHttpClient,
         store: String,
-        albumId: String,
+        candidates: List<Triple<String, String?, String?>>,
         bearer: String,
-        songTitle: String?,
-        songArtist: String?,
     ): CanvasArtwork? {
-        val url = "$AMP/$store/albums/$albumId".toHttpUrl().newBuilder()
+        val idsParam = candidates.joinToString(",") { it.first }
+        val url = "$AMP/$store/albums".toHttpUrl().newBuilder()
+            .addQueryParameter("ids", idsParam)
             .addQueryParameter("extend", "editorialVideo")
             .build()
             .toString()
 
         val body = get(client, url, bearer) ?: return null
-        val album = runCatching {
-            json.parseToJsonElement(body).jsonObject["data"]?.jsonArray?.firstOrNull()?.jsonObject
+        val albums = runCatching {
+            json.parseToJsonElement(body).jsonObject["data"]?.jsonArray
         }.getOrNull() ?: return null
 
-        val attributes = album["attributes"]?.jsonObject ?: return null
-        val albumName = attributes["name"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (isCompilation(albumName)) return null
+        val byId = albums.mapNotNull { elem ->
+            val obj = elem as? JsonObject ?: return@mapNotNull null
+            val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            id to obj
+        }.toMap()
 
-        val video = attributes["editorialVideo"]?.jsonObject ?: return null
-        val assets = motionUrls(video) ?: return null
+        for ((id, songTitle, songArtist) in candidates) {
+            val album = byId[id] ?: continue
+            val attributes = album["attributes"]?.jsonObject ?: continue
+            val albumName = attributes["name"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            if (isCompilation(albumName)) continue
 
-        Log.d(TAG, "Motion artwork found on album '$albumName' ($albumId)")
-        return CanvasArtwork(
-            url = assets.primary,
-            fallbackUrl = assets.alternate,
-            tallUrl = assets.tall,
-            title = songTitle,
-            artist = songArtist ?: attributes["artistName"]?.jsonPrimitive?.contentOrNull,
-            album = albumName,
-            source = CanvasSource.APPLE,
-        )
+            val video = attributes["editorialVideo"]?.jsonObject ?: continue
+            val assets = motionUrls(video) ?: continue
+
+            Log.d(TAG, "Motion artwork found on batched album '$albumName' ($id)")
+            return CanvasArtwork(
+                url = assets.primary,
+                fallbackUrl = assets.alternate,
+                tallUrl = assets.tall,
+                title = songTitle,
+                artist = songArtist ?: attributes["artistName"]?.jsonPrimitive?.contentOrNull,
+                album = albumName,
+                source = CanvasSource.APPLE,
+            )
+        }
+        return null
     }
 
     private data class MotionUrls(

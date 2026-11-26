@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -41,8 +42,8 @@ data class ThemePrefs(
     val amoled: Boolean = false,
     /** iOS-style liquid-glass materials. Enabled by default for modern glass UI. */
     val liquidGlass: Boolean = true,
-    val md3NavBar: Boolean = false,
-    val hideNavTabs: Boolean = false,
+    /** Corner-radius scale multiplier (0.6x .. 1.4x) driving [NeonCornerTokens] and [Shapes]. */
+    val cornerScale: Float = 1.0f,
 )
 
 @Singleton
@@ -56,8 +57,7 @@ class ThemePreferences @Inject constructor(
         val ACCENT_MODE = stringPreferencesKey("lw_accentMode")
         val AMOLED = booleanPreferencesKey("lw_amoled")
         val LIQUID_GLASS = booleanPreferencesKey("lw_liquidGlass")
-        val MD3_NAV_BAR = booleanPreferencesKey("lw_md3NavBar")
-        val HIDE_NAV_TABS = booleanPreferencesKey("lw_hideNavTabs")
+        val CORNER_SCALE = floatPreferencesKey("lw_cornerScale")
     }
 
     val prefs: Flow<ThemePrefs> = dataStore.data
@@ -70,15 +70,20 @@ class ThemePreferences @Inject constructor(
                 accentMode = AccentMode.fromStorage(p.readSafely(Keys.ACCENT_MODE)),
                 amoled = p.readSafely(Keys.AMOLED) ?: false,
                 liquidGlass = p.readSafely(Keys.LIQUID_GLASS) ?: true,
-                md3NavBar = p.readSafely(Keys.MD3_NAV_BAR) ?: false,
-                hideNavTabs = p.readSafely(Keys.HIDE_NAV_TABS) ?: false,
+                cornerScale = com.neonsong.app.ui.theme.clampCornerScale(
+                    p.readSafely(Keys.CORNER_SCALE) ?: 1.0f,
+                ),
             )
         }
 
     suspend fun setThemeMode(mode: ThemeMode) {
         dataStore.edit {
             it[Keys.THEME_MODE] = mode.storageValue
-            it[Keys.AMOLED] = mode == ThemeMode.AMOLED
+            if (mode == ThemeMode.AMOLED) {
+                it[Keys.AMOLED] = true
+            } else if (mode == ThemeMode.LIGHT || mode == ThemeMode.DARK) {
+                it[Keys.AMOLED] = false
+            }
         }
     }
 
@@ -95,18 +100,21 @@ class ThemePreferences @Inject constructor(
     }
 
     suspend fun setAmoled(enabled: Boolean) {
-        dataStore.edit { it[Keys.AMOLED] = enabled }
+        dataStore.edit {
+            it[Keys.AMOLED] = enabled
+            if (!enabled && it[Keys.THEME_MODE] == ThemeMode.AMOLED.storageValue) {
+                it[Keys.THEME_MODE] = ThemeMode.DARK.storageValue
+            }
+        }
     }
 
     suspend fun setLiquidGlass(enabled: Boolean) {
         dataStore.edit { it[Keys.LIQUID_GLASS] = enabled }
     }
 
-    suspend fun setMd3NavBar(enabled: Boolean) {
-        dataStore.edit { it[Keys.MD3_NAV_BAR] = enabled }
-    }
-
-    suspend fun setHideNavTabs(enabled: Boolean) {
-        dataStore.edit { it[Keys.HIDE_NAV_TABS] = enabled }
+    suspend fun setCornerScale(scale: Float) {
+        dataStore.edit {
+            it[Keys.CORNER_SCALE] = com.neonsong.app.ui.theme.clampCornerScale(scale)
+        }
     }
 }

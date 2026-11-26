@@ -29,6 +29,9 @@ interface ThemeProvider {
     /** Toggle liquid glass blur and specular sheen rendering. */
     suspend fun setLiquidGlass(enabled: Boolean)
 
+    /** Set corner-radius scale multiplier (0.6f .. 1.4f). */
+    suspend fun setCornerScale(scale: Float)
+
     /** Toggle dynamic artwork-driven accent colors. */
     suspend fun setDynamicNowPlaying(enabled: Boolean)
 }

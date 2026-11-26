@@ -31,4 +31,12 @@ class ThemeViewModel @Inject constructor(
     fun setThemeMode(mode: com.neonsong.app.data.local.ThemeMode) = viewModelScope.launch {
         themeRepository.setThemeMode(mode)
     }
+
+    fun setLiquidGlass(enabled: Boolean) = viewModelScope.launch {
+        themeRepository.setLiquidGlass(enabled)
+    }
+
+    fun setCornerScale(scale: Float) = viewModelScope.launch {
+        themeRepository.setCornerScale(scale)
+    }
 }

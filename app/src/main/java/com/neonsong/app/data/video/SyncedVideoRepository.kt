@@ -81,10 +81,11 @@ class SyncedVideoRepository @Inject constructor(
      */
     private fun cleanTrackTitle(title: String): String {
         var cleaned = title
-            .replace(Regex("\\((?i)(official|audio|lyric|lyrics|video|hd|4k|hq|full\\s*song|from\\s+[^)]+|feat\\.?[^)]+|ft\\.?[^)]+|featuring[^)]+|remastered[^)]*)\\)"), " ")
-            .replace(Regex("\\[(?i)(official|audio|lyric|lyrics|video|hd|4k|hq|full\\s*song|from\\s+[^\\]]+|feat\\.?[^\\]]+|ft\\.?[^\\]]+|remastered[^\\]]*)]"), " ")
+            .replace(Regex("\\((?i)(official|audio|lyric|lyrics|video|hd|4k|hq|full\\s*song|from\\s+[^)]+|feat\\.?[^)]+|ft\\.?[^)]+|featuring[^)]+|remastered[^)]*|single\\s*version|album\\s*version|radio\\s*edit)\\)"), " ")
+            .replace(Regex("\\[(?i)(official|audio|lyric|lyrics|video|hd|4k|hq|full\\s*song|from\\s+[^\\]]+|feat\\.?[^\\]]+|ft\\.?[^\\]]+|remastered[^\\]]*|single\\s*version|album\\s*version)]"), " ")
             .replace(Regex("(?i)\\b(feat\\.?|ft\\.?|featuring)\\b.*$"), " ")
             .replace(Regex("\\s*[|•—–]\\s*.*$"), " ")
+            .replace(Regex("\\s+-\\s+(?i)(single|from\\s+.*|remaster.*|stereo|mono|explicit)$"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
         if (cleaned.length < 2) cleaned = title.trim()
@@ -92,7 +93,7 @@ class SyncedVideoRepository @Inject constructor(
     }
 
     private fun primaryArtists(artist: String): List<String> =
-        artist.split(Regex("\\s*(?:,|&|\\bx\\b|(?i)\\bfeat\\.?\\b|(?i)\\bft\\.?\\b|(?i)\\band\\b)\\s*"))
+        artist.split(Regex("\\s*(?:,|&|\\bx\\b|(?i)\\bfeat\\.?\\b|(?i)\\bft\\.?\\b|(?i)\\band\\b|(?i)\\bwith\\b)\\s*"))
             .map { it.trim() }
             .filter { it.length >= 2 }
             .distinct()
@@ -346,18 +347,19 @@ class SyncedVideoRepository @Inject constructor(
         trackArtist: String,
         preferredId: String?,
         targetDurationMs: Long?,
+        trackAlbum: String? = null,
     ): List<ScoredCandidate> {
         val cleanTitle = cleanTrackTitle(trackTitle)
         val artistQuery = primaryArtists(trackArtist).take(2).joinToString(" ").ifBlank { trackArtist }
         val hasSpecialVariant = detectVariantTags(trackTitle).isNotEmpty()
 
         val primaryQuery = if (hasSpecialVariant) {
-            "$cleanTitle $artistQuery video"
+            "$cleanTitle $artistQuery official video"
         } else {
             "$cleanTitle $artistQuery official music video"
         }
         val primaryResults = runCatching {
-            innerTube.searchVideos(primaryQuery, limit = 12)
+            innerTube.searchVideos(primaryQuery, limit = 15)
         }.getOrDefault(emptyList())
 
         var ranked = rankedMusicVideoCandidates(
@@ -366,13 +368,24 @@ class SyncedVideoRepository @Inject constructor(
             candidates = primaryResults,
             preferredVideoId = preferredId,
             targetDurationMs = targetDurationMs,
+            trackAlbum = trackAlbum,
         )
 
-        // If first query didn't produce a strong Official MV match, run a clean fallback query and merge
-        if (ranked.isEmpty() || ranked.first().score < 22.0) {
-            val fallbackQuery = "$cleanTitle $artistQuery"
+        // If first query didn't produce a strong explicit Official MV match, query movie/video-song or clean title+artist and merge
+        val needsFallback = ranked.isEmpty() ||
+            ranked.first().score < 28.0 ||
+            !ranked.first().isExplicitOfficialMv
+        if (needsFallback) {
+            val cleanAlbum = trackAlbum?.let(::cleanTrackTitle)?.takeIf {
+                it.length >= 3 && !it.equals(cleanTitle, ignoreCase = true)
+            }
+            val fallbackQuery = if (cleanAlbum != null) {
+                "$cleanTitle $artistQuery $cleanAlbum video song"
+            } else {
+                "$cleanTitle $artistQuery"
+            }
             val fallbackResults = runCatching {
-                innerTube.searchVideos(fallbackQuery, limit = 12)
+                innerTube.searchVideos(fallbackQuery, limit = 15)
             }.getOrDefault(emptyList())
             val merged = (primaryResults + fallbackResults).distinctBy { it.videoId }
             ranked = rankedMusicVideoCandidates(
@@ -381,6 +394,7 @@ class SyncedVideoRepository @Inject constructor(
                 candidates = merged,
                 preferredVideoId = preferredId,
                 targetDurationMs = targetDurationMs,
+                trackAlbum = trackAlbum,
             )
         }
         return ranked
@@ -436,6 +450,7 @@ class SyncedVideoRepository @Inject constructor(
         trackArtist: String,
         videoId: String?,
         targetDurationMs: Long? = null,
+        trackAlbum: String? = null,
     ) {
         val trackKey = trackCacheKey(trackTitle, trackArtist, videoId)
         val now = System.currentTimeMillis()
@@ -444,7 +459,7 @@ class SyncedVideoRepository @Inject constructor(
 
         prefetchScope.launch {
             runCatching {
-                resolveVideo(trackTitle, trackArtist, videoId, targetDurationMs)
+                resolveVideo(trackTitle, trackArtist, videoId, targetDurationMs, trackAlbum)
             }
         }
     }
@@ -454,6 +469,7 @@ class SyncedVideoRepository @Inject constructor(
         trackArtist: String,
         videoId: String?,
         targetDurationMs: Long? = null,
+        trackAlbum: String? = null,
     ): Result<SyncedVideoStreamBundle> = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val trackKey = trackCacheKey(trackTitle, trackArtist, videoId)
@@ -484,6 +500,7 @@ class SyncedVideoRepository @Inject constructor(
                     trackArtist = trackArtist,
                     videoId = videoId,
                     targetDurationMs = targetDurationMs,
+                    trackAlbum = trackAlbum,
                 )
             } finally {
                 inFlightRequests.remove(trackKey)
@@ -505,6 +522,7 @@ class SyncedVideoRepository @Inject constructor(
         trackArtist: String,
         videoId: String?,
         targetDurationMs: Long?,
+        trackAlbum: String? = null,
     ): Result<SyncedVideoStreamBundle> = coroutineScope {
         try {
             val now = System.currentTimeMillis()
@@ -531,7 +549,7 @@ class SyncedVideoRepository @Inject constructor(
             }
 
             val searchDeferred = async {
-                searchAndRank(trackTitle, trackArtist, preferredId, targetDurationMs)
+                searchAndRank(trackTitle, trackArtist, preferredId, targetDurationMs, trackAlbum)
             }
 
             val directBundle = directDeferred?.await()
@@ -674,9 +692,9 @@ class SyncedVideoRepository @Inject constructor(
             "hd", "4k", "hq", "full", "song", "feat", "ft", "featuring", "by", "the",
         )
         val STATIC_VIDEO_MARKERS = listOf(
-            "lyric", "lyrics", "official audio", "audio only", "(audio)", "[audio]",
-            "audio version", "visualizer", "art track", "provided to youtube by", "full album",
-            "jukebox", "mashup", "whatsapp status", "status video", "ringtone",
+            "lyric", "lyrics", "lyrical", "official audio", "audio only", "(audio)", "[audio]",
+            "audio version", "full audio", "visualizer", "art track", "provided to youtube by", "full album",
+            "jukebox", "mashup", "whatsapp status", "status video", "ringtone", "1 hour", "loop",
             "8d audio", "3d audio", "bass boosted", "reaction", "fan made", "fanmade",
             "static image", "still image", "poster", "teaser", "trailer", "promo",
             "behind the scenes", "making of", "interview", "dance cover", "choreography",

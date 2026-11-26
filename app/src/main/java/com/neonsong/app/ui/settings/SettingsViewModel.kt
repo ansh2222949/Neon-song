@@ -260,10 +260,13 @@ class SettingsViewModel @Inject constructor(
         .withSettingsFallback("scrobbler preferences", ScrobblerSettings())
         .stateIn(viewModelScope, SettingsSharing, ScrobblerSettings())
 
-    /** Experimental 15-band equalizer state (Settings → Experimental). */
+    /** Experimental 16-band equalizer state (Settings → Experimental). */
     val equalizer: StateFlow<EqualizerSettings> = equalizerPreferences.settings
         .withSettingsFallback("equalizer preferences", EqualizerSettings())
         .stateIn(viewModelScope, SettingsSharing, EqualizerSettings())
+    private val _liveEqGains = MutableStateFlow(EqualizerSettings().gainsDb)
+    /** Real-time 16-band EQ gains updated continuously during slider drag & preset taps. */
+    val liveEqGains: StateFlow<List<Float>> = _liveEqGains.asStateFlow()
     private var immediateEqGains = EqualizerSettings().gainsDb.toFloatArray()
     private var immediateEqEnabled = false
 
@@ -303,14 +306,13 @@ class SettingsViewModel @Inject constructor(
 
     private val eqPreviews = Channel<Pair<Boolean, FloatArray>>(Channel.CONFLATED)
 
-    private suspend fun applyNativeAudio(block: (NativeAudioEngine) -> Unit) =
-        withContext(Dispatchers.Default) { block(audioEngine.get()) }
-
     init {
         viewModelScope.launch {
             for ((enabled, gains) in eqPreviews) {
                 try {
-                    applyNativeAudio { it.setEqualizer(enabled, gains) }
+                    withContext(Dispatchers.Default) {
+                        musicPlayer.syncEqualizerPreview(enabled, gains)
+                    }
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
@@ -326,6 +328,7 @@ class SettingsViewModel @Inject constructor(
             equalizer.collect {
                 immediateEqEnabled = it.enabled
                 immediateEqGains = it.gainsDb.toFloatArray()
+                _liveEqGains.value = it.gainsDb
             }
         }
         viewModelScope.launch {
@@ -467,8 +470,13 @@ class SettingsViewModel @Inject constructor(
     fun setThemeMode(mode: ThemeMode) = launchSettingsAction("update theme mode") { themeRepository.setThemeMode(mode) }
     fun setAmoled(enabled: Boolean) = launchSettingsAction("update AMOLED mode") { themeRepository.setAmoled(enabled) }
     fun setLiquidGlass(enabled: Boolean) = launchSettingsAction("update Liquid Glass") { themeRepository.setLiquidGlass(enabled) }
-    fun setMd3NavBar(enabled: Boolean) = launchSettingsAction("update MD3 Navigation Bar") { themeRepository.setMd3NavBar(enabled) }
-    fun setHideNavTabs(enabled: Boolean) = launchSettingsAction("update Hide Navigation Tabs") { themeRepository.setHideNavTabs(enabled) }
+    fun setCornerScale(scale: Float) = launchSettingsAction("update corner radius scale") { themeRepository.setCornerScale(scale) }
+    fun setAppIcon(@androidx.annotation.DrawableRes resId: Int) {
+        com.neonsong.app.ui.common.NeonBrand.AppIconRes = resId
+        launchSettingsAction("update app icon") {
+            settingsPreferences.setAppIconKey(com.neonsong.app.ui.common.NeonBrand.keyForRes(resId))
+        }
+    }
     fun setAccentMode(mode: AccentMode) = launchSettingsAction("update accent mode") { themeRepository.setMode(mode) }
     fun setManualAccent(color: Color) = launchSettingsAction("update accent color") { themeRepository.setManualAccent(color) }
     fun openColorWheel() = _uiState.update { it.copy(showColorWheel = true) }
@@ -507,27 +515,27 @@ class SettingsViewModel @Inject constructor(
     fun setDownloadQuality(quality: Int) = launchSettingsAction("update download quality") { settingsPreferences.setDownloadQuality(quality) }
     fun setDolbyAtmosMode(mode: String) = launchSettingsAction("update dolby atmos mode") { settingsPreferences.setDolbyAtmosMode(mode) }
     fun setStudioMasterClarity(enabled: Boolean) {
-        // Apply immediately; DataStore persists the same state for future engine instances.
+        // Apply immediately across primary & standby engines; DataStore persists for future instances.
         launchSettingsAction("update Studio Master Clarity") {
-            applyNativeAudio { it.setStudioMasterClarity(enabled) }
+            withContext(Dispatchers.Default) { musicPlayer.syncStudioMasterClarity(enabled) }
             settingsPreferences.setStudioMasterClarity(enabled)
             if (enabled) {
                 // Enabling DSP clarity disables Bit-Perfect mode
                 settingsPreferences.setBitPerfectEnabled(false)
-                applyNativeAudio { it.setBitPerfect(false) }
+                withContext(Dispatchers.Default) { musicPlayer.syncBitPerfectMode(false) }
                 com.neonsong.app.playback.usb.UsbExclusivePrefs.setEnabled(context, false)
             }
         }
     }
     fun setBitPerfectEnabled(enabled: Boolean) {
         launchSettingsAction("update Bit-Perfect mode") {
-            applyNativeAudio { it.setBitPerfect(enabled) }
+            withContext(Dispatchers.Default) { musicPlayer.syncBitPerfectMode(enabled) }
             settingsPreferences.setBitPerfectEnabled(enabled)
             com.neonsong.app.playback.usb.UsbExclusivePrefs.setEnabled(context, enabled)
             if (enabled) {
                 // When Bit-Perfect is turned on, automatically turn off Studio Master Clarity
                 settingsPreferences.setStudioMasterClarity(false)
-                applyNativeAudio { it.setStudioMasterClarity(false) }
+                withContext(Dispatchers.Default) { musicPlayer.syncStudioMasterClarity(false) }
             }
         }
     }
@@ -563,10 +571,10 @@ class SettingsViewModel @Inject constructor(
         }
         com.neonsong.app.playback.usb.UsbExclusivePrefs.setEnabled(context, enabled)
         if (enabled) {
-            applyNativeAudio { it.setBitPerfect(true) }
+            withContext(Dispatchers.Default) { musicPlayer.syncBitPerfectMode(true) }
             settingsPreferences.setBitPerfectEnabled(true)
             settingsPreferences.setStudioMasterClarity(false)
-            applyNativeAudio { it.setStudioMasterClarity(false) }
+            withContext(Dispatchers.Default) { musicPlayer.syncStudioMasterClarity(false) }
             _uiState.update { it.copy(toastMessage = "USB exclusive on — Bit-Perfect will use usbdevfs when a DAC is granted") }
         }
     }
@@ -575,12 +583,14 @@ class SettingsViewModel @Inject constructor(
 
     fun setClarityPreset(preset: Int) = launchSettingsAction("update clarity preset") {
         val safe = preset.coerceIn(0, 3)
-        applyNativeAudio { it.setClarityPreset(com.neonsong.app.playback.ClarityPresets.fromIndex(safe)) }
+        withContext(Dispatchers.Default) {
+            musicPlayer.syncClarityPreset(com.neonsong.app.playback.ClarityPresets.fromIndex(safe))
+        }
         settingsPreferences.setClarityPreset(safe)
     }
 
     fun setClarityAtmosBypass(enabled: Boolean) = launchSettingsAction("update clarity spatial bypass") {
-        applyNativeAudio { it.setClarityAtmosBypass(enabled) }
+        withContext(Dispatchers.Default) { musicPlayer.syncClarityAtmosBypass(enabled) }
         settingsPreferences.setClarityAtmosBypass(enabled)
     }
 
@@ -654,6 +664,9 @@ class SettingsViewModel @Inject constructor(
     fun setRotatingBackgroundEnabled(enabled: Boolean) = launchSettingsAction("update rotating background") {
         settingsPreferences.setRotatingBackgroundEnabled(enabled)
     }
+    fun setInlinePlayerLyricsEnabled(enabled: Boolean) = launchSettingsAction("update inline player lyrics") {
+        settingsPreferences.setInlinePlayerLyricsEnabled(enabled)
+    }
     fun setCanvasEnabled(enabled: Boolean) = launchSettingsAction("update canvas enabled setting") {
         settingsPreferences.setCanvasEnabled(enabled)
     }
@@ -686,6 +699,7 @@ class SettingsViewModel @Inject constructor(
         com.neonsong.app.data.local.EqualizerPresets.byName(name)?.let { preset ->
             immediateEqEnabled = true
             immediateEqGains = preset.gainsDb.toFloatArray()
+            _liveEqGains.value = preset.gainsDb
             eqPreviews.trySend(true to immediateEqGains.copyOf())
             launchSettingsAction("apply the equalizer preset") { equalizerPreferences.applyPreset(preset) }
         }
@@ -700,6 +714,7 @@ class SettingsViewModel @Inject constructor(
                 com.neonsong.app.data.local.EQ_MAX_GAIN_DB,
             )
         }
+        _liveEqGains.value = immediateEqGains.toList()
         eqPreviews.trySend(immediateEqEnabled to immediateEqGains.copyOf())
     }
 

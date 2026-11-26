@@ -60,6 +60,7 @@ class NativeProcessingAudioSink(
     @Volatile private var usbExclusive = false
     @Volatile private var autoMixEnabled = false
     @Volatile private var autoMixActive = !standbyAutoMixRole
+    @Volatile private var lastAutoMixSampleRateHz = 0
     @Volatile private var exclusiveStartFailed = false
     @Volatile private var exclusiveEnded = false
     private data class ExclusiveFallbackTarget(val targetHz: Int, val sourceHz: Int?)
@@ -111,8 +112,21 @@ class NativeProcessingAudioSink(
 
     /** Avoids a JNI availability query on every renderer callback. */
     fun setAutoMixEnabled(enabled: Boolean) {
-        autoMixEnabled = enabled && autoMixEngine?.isAvailable == true
+        val activeEngine = autoMixEngine?.takeIf { it.isAvailable }
+        autoMixEnabled = enabled && activeEngine != null
+        val mixRateHz = currentMixOutputSampleRateHz() ?: 0
+        if (autoMixEnabled && autoMixActive && mixRateHz > 0 &&
+            mixRateHz != lastAutoMixSampleRateHz && activeEngine?.state == AutoMixState.IDLE
+        ) {
+            runCatching { activeEngine.configure(mixRateHz) }
+            lastAutoMixSampleRateHz = mixRateHz
+        }
     }
+
+    /** Current processed or raw configured output rate in Hz, if any. */
+    fun currentMixOutputSampleRateHz(): Int? =
+        processedFormat?.sampleRate?.takeIf { it > 0 }
+            ?: configuredFormat?.sampleRate?.takeIf { it > 0 }
 
     override fun setListener(listener: AudioSink.Listener) {
         enhancedDelegate.setListener(listener)
@@ -315,6 +329,14 @@ class NativeProcessingAudioSink(
         val floatFormat = asFloatFormat(format, outputFormat)
         processedFormat = floatFormat
         outputChannelCount = outputFormat.channelCount
+        val mixEngine = autoMixEngine
+        if (autoMixEnabled && autoMixActive && mixEngine?.isAvailable == true &&
+            outputFormat.sampleRate > 0 && outputFormat.sampleRate != lastAutoMixSampleRateHz &&
+            mixEngine.state == AutoMixState.IDLE
+        ) {
+            runCatching { mixEngine.configure(outputFormat.sampleRate) }
+            lastAutoMixSampleRateHz = outputFormat.sampleRate
+        }
         try {
             processor.flush()
         } catch (error: Exception) {
@@ -1361,7 +1383,7 @@ class NativeProcessingAudioSink(
         clearPending()
         clearEndOfStream()
         exclusiveEnded = false
-        if (standbyAutoMixRole || (autoMixEnabled && !autoMixActive)) {
+        if (!autoMixActive && (standbyAutoMixRole || autoMixEnabled)) {
             runCatching { autoMixEngine?.reset() }
         }
         if (usbExclusive) {
@@ -1393,7 +1415,7 @@ class NativeProcessingAudioSink(
     override fun reset() {
         directEq.reset()
         directEqBuffer = null
-        if (standbyAutoMixRole || (autoMixEnabled && !autoMixActive)) {
+        if (!autoMixActive && (standbyAutoMixRole || autoMixEnabled)) {
             runCatching { autoMixEngine?.reset() }
         }
         standbyScratchDirectBuffer = null

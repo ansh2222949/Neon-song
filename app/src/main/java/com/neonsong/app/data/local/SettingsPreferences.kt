@@ -94,6 +94,11 @@ enum class PlayerFaceStyle(
         id = "card_only",
         title = "Studio Clean (Card Only)",
         subtitle = "Floating artwork card on a pure minimal dark background (Zero blur)",
+    ),
+    COMPACT(
+        id = "compact",
+        title = "Compact Studio",
+        subtitle = "Sleek compact artwork card paired with live lyrics & tight controls",
     );
 
     companion object {
@@ -149,6 +154,8 @@ enum class LyricsProvider(val id: String, val title: String, val subtitle: Strin
 data class MiscSettings(
     /** Optional local image shown as the user's Settings identity photo. */
     val settingsPhotoUri: String = "",
+    /** Persisted brand emblem key ([com.neonsong.app.ui.common.NeonBrand.KEY_BERU_3D] or [KEY_MONOCHROME_GLASS]). */
+    val appIconKey: String = com.neonsong.app.ui.common.NeonBrand.KEY_BERU_3D,
     /** When on, the app's accent color follows the dominant color of the
      *  currently-scrobbling track's artwork (Home's "now playing" track),
      *  updating live as that track changes. Falls back to the user's
@@ -228,6 +235,8 @@ data class MiscSettings(
     /** When true (default), animates fluid rotating artwork in the player and lyrics background.
      *  When false, uses a calm static blurred artwork background (especially recommended for Android 11 and below). */
     val rotatingBackgroundEnabled: Boolean = true,
+    /** When true, displays a compact Spotify-style live synced lyric snippet in the bottom-left corner of the player. */
+    val inlinePlayerLyricsEnabled: Boolean = false,
     /** When true (default), downloads fetch and save synced lyrics (.lrc companion files and embedded tags). */
     val downloadLyrics: Boolean = true,
     /** In-app language override tag: "system" (default), "en", "tr", "zh-Hans". */
@@ -359,6 +368,7 @@ class SettingsPreferences @Inject constructor(
     private object Keys {
         val DYNAMIC_NOW_PLAYING = booleanPreferencesKey("lw_dynamic_now_playing")
         val SETTINGS_PHOTO_URI = stringPreferencesKey("lw_settings_photo_uri")
+        val APP_ICON_KEY = stringPreferencesKey("lw_app_icon_key")
         val USE_CUSTOM_FONT = booleanPreferencesKey("lw_use_custom_font")
         val PINNED_FRIENDS = stringSetPreferencesKey("lw_pinned_friends")
         val PREFER_LOSSLESS_STREAMING = booleanPreferencesKey("lw_prefer_lossless_streaming")
@@ -386,6 +396,7 @@ class SettingsPreferences @Inject constructor(
         val WAVY_SEEKBAR_ENABLED = booleanPreferencesKey("lw_wavy_seekbar_enabled")
         val PLAYER_FACE_STYLE = stringPreferencesKey("lw_player_face_style")
         val ROTATING_BACKGROUND_ENABLED = booleanPreferencesKey("lw_rotating_background_enabled")
+        val INLINE_PLAYER_LYRICS_ENABLED = booleanPreferencesKey("lw_inline_player_lyrics_enabled")
         val DOWNLOAD_LYRICS = booleanPreferencesKey("lw_download_lyrics")
         val APP_LANGUAGE = stringPreferencesKey("lw_app_language")
         val DOWNLOAD_FOLDER = stringPreferencesKey("lw_download_folder")
@@ -427,6 +438,9 @@ class SettingsPreferences @Inject constructor(
         .map { p ->
             MiscSettings(
                 settingsPhotoUri = p.readSafely(Keys.SETTINGS_PHOTO_URI)?.takeIf { it.isNotBlank() }.orEmpty(),
+                appIconKey = com.neonsong.app.ui.common.NeonBrand.keyForRes(
+                    com.neonsong.app.ui.common.NeonBrand.resForKey(p.readSafely(Keys.APP_ICON_KEY)),
+                ),
                 dynamicNowPlayingEnabled = p.readSafely(Keys.DYNAMIC_NOW_PLAYING) ?: false,
                 useCustomFont = p.readSafely(Keys.USE_CUSTOM_FONT) ?: true,
                 pinnedFriends = p.readSafely(Keys.PINNED_FRIENDS) ?: emptySet(),
@@ -438,7 +452,7 @@ class SettingsPreferences @Inject constructor(
                 wifiStreamingQuality = p.readSafely(Keys.WIFI_STREAMING_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES }
                     ?: p.readSafely(Keys.LOSSLESS_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES } ?: 27,
                 downloadQuality = p.readSafely(Keys.DOWNLOAD_QUALITY)?.takeIf { it in DOWNLOAD_QUALITIES } ?: 27,
-                dolbyAtmosMode = p.readSafely(Keys.DOLBY_ATMOS_MODE) ?: "Automatic",
+                dolbyAtmosMode = normalizeDolbyAtmosMode(p.readSafely(Keys.DOLBY_ATMOS_MODE)),
                 systemEffectsMode = p.readSafely(Keys.SYSTEM_EFFECTS_MODE) ?: false,
                 buttonNowPlayingEnabled = p.readSafely(Keys.BUTTON_NOW_PLAYING_ENABLED) ?: false,
                 musicVideoEnabled = p.readSafely(Keys.MUSIC_VIDEO_ENABLED) ?: false,
@@ -460,6 +474,7 @@ class SettingsPreferences @Inject constructor(
                 wavySeekbarEnabled = p.readSafely(Keys.WAVY_SEEKBAR_ENABLED) ?: true,
                 playerFaceStyle = PlayerFaceStyle.fromId(p.readSafely(Keys.PLAYER_FACE_STYLE)),
                 rotatingBackgroundEnabled = p.readSafely(Keys.ROTATING_BACKGROUND_ENABLED) ?: true,
+                inlinePlayerLyricsEnabled = p.readSafely(Keys.INLINE_PLAYER_LYRICS_ENABLED) ?: false,
                 downloadLyrics = p.readSafely(Keys.DOWNLOAD_LYRICS) ?: true,
                 appLanguageTag = AppLanguage.fromTag(p.readSafely(Keys.APP_LANGUAGE)).tag,
                 downloadFolder = sanitizeDownloadFolderName(p.readSafely(Keys.DOWNLOAD_FOLDER)),
@@ -550,6 +565,32 @@ class SettingsPreferences @Inject constructor(
         }
     }
 
+    fun readAppIconKeySync(): String =
+        runCatching {
+            appContext.getSharedPreferences(BRAND_SYNC_FILE, Context.MODE_PRIVATE)
+                .getString(BRAND_ICON_SYNC_KEY, com.neonsong.app.ui.common.NeonBrand.KEY_BERU_3D)
+        }.getOrNull().let {
+            com.neonsong.app.ui.common.NeonBrand.keyForRes(
+                com.neonsong.app.ui.common.NeonBrand.resForKey(it),
+            )
+        }
+
+    suspend fun setAppIconKey(key: String) {
+        val safeKey = com.neonsong.app.ui.common.NeonBrand.keyForRes(
+            com.neonsong.app.ui.common.NeonBrand.resForKey(key),
+        )
+        com.neonsong.app.ui.common.NeonBrand.applyKey(safeKey)
+        dataStore.edit { it[Keys.APP_ICON_KEY] = safeKey }
+        withContext(Dispatchers.IO) {
+            runCatching {
+                appContext.getSharedPreferences(BRAND_SYNC_FILE, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(BRAND_ICON_SYNC_KEY, safeKey)
+                    .commit()
+            }
+        }
+    }
+
     suspend fun setUseCustomFont(enabled: Boolean) {
         dataStore.edit { it[Keys.USE_CUSTOM_FONT] = enabled }
     }
@@ -596,7 +637,7 @@ class SettingsPreferences @Inject constructor(
     }
 
     suspend fun setDolbyAtmosMode(mode: String) {
-        dataStore.edit { it[Keys.DOLBY_ATMOS_MODE] = mode }
+        dataStore.edit { it[Keys.DOLBY_ATMOS_MODE] = normalizeDolbyAtmosMode(mode) }
     }
 
     suspend fun setSystemEffectsMode(enabled: Boolean) {
@@ -850,8 +891,18 @@ class SettingsPreferences @Inject constructor(
         dataStore.edit { it[Keys.BUTTON_NOW_PLAYING_ENABLED] = enabled }
     }
 
+    suspend fun setInlinePlayerLyricsEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.INLINE_PLAYER_LYRICS_ENABLED] = enabled }
+    }
+
+    private fun normalizeDolbyAtmosMode(raw: String?): String =
+        DOLBY_ATMOS_MODES.firstOrNull { it.equals(raw?.trim(), ignoreCase = true) } ?: "Automatic"
+
     private companion object {
         val LOSSLESS_QUALITIES = setOf(-1, 4, 5, 6, 7, 27, 28)
         val DOWNLOAD_QUALITIES = setOf(-1, 4, 5, 6, 7, 27, 28)
+        val DOLBY_ATMOS_MODES = setOf("Automatic", "Always On", "Off")
+        const val BRAND_SYNC_FILE = "neonsong_brand_sync"
+        const val BRAND_ICON_SYNC_KEY = "app_icon_key"
     }
 }

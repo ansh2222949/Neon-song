@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -108,12 +109,17 @@ fun SyncedVideoSurface(
         viewModel.trackRequestKey(track.title, track.artist, effectiveVideoId)
     }
 
-    var sniffedFallbackUrl by remember(requestKey) { mutableStateOf<String?>(null) }
-    var isFirstFrameRendered by remember(requestKey) { mutableStateOf(false) }
-    var hasRetriedOnError by remember(requestKey) { mutableStateOf(false) }
-    var lastLoadedUrl by remember { mutableStateOf<String?>(null) }
-    var videoNaturalWidth by remember { mutableIntStateOf(16) }
-    var videoNaturalHeight by remember { mutableIntStateOf(9) }
+    // Include activeVideoId so even a resolved-MV swap rebuilds the surface cleanly.
+    val surfaceInstanceKey = remember(track.title, track.artist, effectiveVideoId) {
+        "$requestKey|$effectiveVideoId"
+    }
+
+    var sniffedFallbackUrl by remember(surfaceInstanceKey) { mutableStateOf<String?>(null) }
+    var isFirstFrameRendered by remember(surfaceInstanceKey) { mutableStateOf(false) }
+    var hasRetriedOnError by remember(surfaceInstanceKey) { mutableStateOf(false) }
+    var lastLoadedUrl by remember(surfaceInstanceKey) { mutableStateOf<String?>(null) }
+    var videoNaturalWidth by remember(surfaceInstanceKey) { mutableIntStateOf(16) }
+    var videoNaturalHeight by remember(surfaceInstanceKey) { mutableIntStateOf(9) }
 
     // Only accept Ready/Error belonging to THIS track (prevents old song stream bleeding into Next song!)
     val matchingReady = (uiState as? SyncedVideoUiState.Ready)?.takeIf { it.requestKey == requestKey }
@@ -127,10 +133,11 @@ fun SyncedVideoSurface(
         }
     }
 
-    val clockController = remember(requestKey) { SyncedVideoClockController() }
-    val activeRequestHeaders = remember { ConcurrentHashMap<String, String>() }
+    val clockController = remember(surfaceInstanceKey) { SyncedVideoClockController() }
+    val activeRequestHeaders = remember(surfaceInstanceKey) { ConcurrentHashMap<String, String>() }
 
-    val videoPlayer = remember(context) {
+    // Key ExoPlayer per track instance so Samsung/MediaCodec async surface state is always fresh on Next/Prev.
+    val videoPlayer = remember(context, surfaceInstanceKey) {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 /* minBufferMs = */ 15_000,
@@ -207,6 +214,7 @@ fun SyncedVideoSurface(
                         artist = latestTrack.artist,
                         videoId = latestVideoId.takeIf { it.isNotBlank() },
                         targetDurationMs = latestTrack.durationMs,
+                        trackAlbum = latestTrack.album,
                     )
                 }
             }
@@ -220,15 +228,13 @@ fun SyncedVideoSurface(
         }
     }
 
-    // On track change: immediately clear previous song's media item so Next song starts cleanly
-    LaunchedEffect(requestKey) {
+    // Resolve stream bundle cleanly whenever track changes (cancel & reload immediately on track skip)
+    LaunchedEffect(surfaceInstanceKey) {
         isFirstFrameRendered = false
         sniffedFallbackUrl = null
         hasRetriedOnError = false
         lastLoadedUrl = null
         clockController.reset()
-        videoPlayer.stop()
-        videoPlayer.clearMediaItems()
         val liveDuration = track.durationMs?.takeIf { it > 0L }
             ?: musicPlayer.progressState.value.durationMs.takeIf { it > 0L }
         viewModel.loadVideo(
@@ -236,6 +242,7 @@ fun SyncedVideoSurface(
             artist = track.artist,
             videoId = effectiveVideoId.takeIf { it.isNotBlank() },
             targetDurationMs = liveDuration,
+            trackAlbum = track.album,
         )
     }
 
@@ -243,10 +250,9 @@ fun SyncedVideoSurface(
     val activeStreamUrl = activeStream?.url?.takeIf { it.isNotBlank() } ?: sniffedFallbackUrl?.takeIf { it.isNotBlank() }
     val activeMimeType = activeStream?.mimeType?.substringBefore(';')?.trim()
 
-    LaunchedEffect(requestKey, activeStreamUrl) {
+    LaunchedEffect(surfaceInstanceKey, activeStreamUrl) {
         val url = activeStreamUrl?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
         if (lastLoadedUrl == url && videoPlayer.playbackState != Player.STATE_IDLE) {
-            // Stream already loaded & active -> ensure first-frame visibility isn't stuck false
             if (videoPlayer.playbackState == Player.STATE_READY) {
                 isFirstFrameRendered = true
             }
@@ -259,7 +265,6 @@ fun SyncedVideoSurface(
         activeRequestHeaders.clear()
         activeStream?.requestHeaders?.let { activeRequestHeaders.putAll(it) }
 
-        // Lead start position slightly (~180ms) while playing so first decoded frame lands right on audio!
         val startupLead = if (shouldPlayVideo) (180L * audioSpeed).toLong() else 0L
         val startPosMs = (musicPlayer.currentPositionMs().coerceAtLeast(0L) + startupLead)
         val itemBuilder = MediaItem.Builder().setUri(url)
@@ -272,7 +277,7 @@ fun SyncedVideoSurface(
     }
 
     // Zero-recomposition discontinuous seek detector (collects progressState inside LaunchedEffect)
-    LaunchedEffect(requestKey, videoPlayer, activeStreamUrl) {
+    LaunchedEffect(surfaceInstanceKey, videoPlayer, activeStreamUrl) {
         if (activeStreamUrl.isNullOrBlank()) return@LaunchedEffect
         var lastObservedAudioPosMs = musicPlayer.progressState.value.positionMs
         var lastObservedWallMs = SystemClock.elapsedRealtime()
@@ -286,7 +291,7 @@ fun SyncedVideoSurface(
             lastObservedAudioPosMs = prog.positionMs
             lastObservedWallMs = now
 
-            if (abs(actualDelta - expectedDelta) > 350L && videoPlayer.playbackState != Player.STATE_IDLE) {
+            if (isFirstFrameRendered && abs(actualDelta - expectedDelta) > 350L && videoPlayer.playbackState == Player.STATE_READY) {
                 clockController.reset()
                 val vDur = videoPlayer.duration
                 val target = prog.positionMs.coerceAtLeast(0L).let {
@@ -298,7 +303,7 @@ fun SyncedVideoSurface(
     }
 
     // 30Hz Audio-Master PLL Loop (pauses cleanly while audio buffers & clamps to video end)
-    LaunchedEffect(requestKey, videoPlayer, shouldPlayVideo, audioSpeed, activeStreamUrl) {
+    LaunchedEffect(surfaceInstanceKey, videoPlayer, shouldPlayVideo, audioSpeed, activeStreamUrl) {
         if (activeStreamUrl.isNullOrBlank()) return@LaunchedEffect
         var lastHardSeekAtMs = Long.MIN_VALUE
         while (isActive) {
@@ -311,6 +316,11 @@ fun SyncedVideoSurface(
                 videoPlayer.playWhenReady = effectivePlay
             }
             if (videoPlayer.playbackState == Player.STATE_READY && !pastVideoEnd) {
+                if (!isFirstFrameRendered && (videoPlayer.isPlaying || !effectivePlay) &&
+                    videoPlayer.videoSize.width > 0 && videoPlayer.currentPosition > 60L
+                ) {
+                    isFirstFrameRendered = true
+                }
                 val now = SystemClock.elapsedRealtime()
                 val latency = musicPlayer.presentationLatencyMs().takeIf { it > 0L } ?: 45L
                 val audibleAudioPos = clockController.getAudibleAudioTimestampMs(
@@ -355,36 +365,41 @@ fun SyncedVideoSurface(
         modifier = modifier.background(Color.Black),
         contentAlignment = Alignment.Center,
     ) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                TextureView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
-                    alpha = surfaceAlpha
-                    videoPlayer.setVideoTextureView(this)
-                    addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
-                        val w = right - left
-                        val h = bottom - top
-                        applyTextureTransform(this, videoNaturalWidth, videoNaturalHeight, w, h, videoScalingMode, transformMatrix)
+        key(surfaceInstanceKey) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    TextureView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        alpha = surfaceAlpha
+                        videoPlayer.setVideoTextureView(this)
+                        addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
+                            val w = right - left
+                            val h = bottom - top
+                            applyTextureTransform(this, videoNaturalWidth, videoNaturalHeight, w, h, videoScalingMode, transformMatrix)
+                        }
                     }
-                }
-            },
-            update = { textureView ->
-                textureView.alpha = surfaceAlpha
-                applyTextureTransform(
-                    textureView = textureView,
-                    vWidth = videoNaturalWidth,
-                    vHeight = videoNaturalHeight,
-                    viewWidth = textureView.width,
-                    viewHeight = textureView.height,
-                    mode = videoScalingMode,
-                    matrix = transformMatrix,
-                )
-            },
-        )
+                },
+                update = { textureView ->
+                    textureView.alpha = surfaceAlpha
+                    applyTextureTransform(
+                        textureView = textureView,
+                        vWidth = videoNaturalWidth,
+                        vHeight = videoNaturalHeight,
+                        viewWidth = textureView.width,
+                        viewHeight = textureView.height,
+                        mode = videoScalingMode,
+                        matrix = transformMatrix,
+                    )
+                },
+                onRelease = { textureView ->
+                    runCatching { videoPlayer.clearVideoTextureView(textureView) }
+                },
+            )
+        }
 
         AnimatedVisibility(
             visible = !isFirstFrameRendered,

@@ -100,7 +100,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.sign
 
-val LocalLiquidGlass = staticCompositionLocalOf { true }
+val LocalLiquidGlass = compositionLocalOf { true }
 val LocalLiquidGlassBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 val LocalLiquidGlassOverlayBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 val LocalLiquidGlassContentBrightness = compositionLocalOf { 0f }

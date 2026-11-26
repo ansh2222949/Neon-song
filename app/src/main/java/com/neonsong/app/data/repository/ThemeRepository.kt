@@ -46,12 +46,11 @@ data class ThemeUiState(
     /** Settings' "Use Application Font" toggle — see ui/theme/Type.kt for
      *  what turning it off falls back to. */
     val useCustomFont: Boolean = true,
-    /** Experimental liquid-glass materials (Settings → Experimental). When
-     *  true, container roles in [colorScheme] are semi-translucent and the
-     *  chrome surfaces get specular glass dressing. */
+    /** Liquid-glass materials (Appearance settings). When true, surfaces use
+     *  translucent refraction and specular highlights. */
     val liquidGlass: Boolean = true,
-    val md3NavBar: Boolean = false,
-    val hideNavTabs: Boolean = false,
+    /** Reactive corner-radius multiplier (0.6x .. 1.4x). */
+    val cornerScale: Float = 1.0f,
     /** True when the "Dynamic Now Playing" artwork override is currently
      *  driving the schemes. NeonSongTheme uses this so S+ system dynamic
      *  (wallpaper) only takes over when no now-playing color is active:
@@ -212,7 +211,7 @@ class ThemeRepository @Inject constructor(
         settingsPreferences.settings,
     ) { prefs: ThemePrefs, dynamic: String?, nowPlaying: String?, misc: MiscSettings ->
         val isAmoled = prefs.amoled || prefs.themeMode == ThemeMode.AMOLED
-        val isGlass = true
+        val isGlass = prefs.liquidGlass
         val nowPlayingActive = misc.dynamicNowPlayingEnabled && nowPlaying != null
         val (darkScheme, lightScheme) = when {
             nowPlayingActive -> {
@@ -260,8 +259,7 @@ class ThemeRepository @Inject constructor(
             accentColorHex = prefs.accentColor,
             useCustomFont = misc.useCustomFont,
             liquidGlass = isGlass,
-            md3NavBar = prefs.md3NavBar,
-            hideNavTabs = prefs.hideNavTabs,
+            cornerScale = prefs.cornerScale,
             isNowPlayingThemed = nowPlayingActive,
         )
     }.stateIn(
@@ -271,14 +269,13 @@ class ThemeRepository @Inject constructor(
             darkColorScheme = Md3SchemeBuilder.buildDarkScheme("#00E5FF", false, liquidGlass = true),
             lightColorScheme = Md3SchemeBuilder.buildLightScheme("#00E5FF", liquidGlass = true),
             themeMode = ThemeMode.SYSTEM,
-            colorScheme = Md3SchemeBuilder.buildDarkScheme("#00E5FF", false),
+            colorScheme = Md3SchemeBuilder.buildDarkScheme("#00E5FF", false, liquidGlass = true),
             amoled = false,
             mode = AccentMode.MANUAL,
             accentColorHex = "#00E5FF",
             useCustomFont = true,
             liquidGlass = true,
-            md3NavBar = false,
-            hideNavTabs = false,
+            cornerScale = 1.0f,
         ),
     )
 
@@ -302,9 +299,7 @@ class ThemeRepository @Inject constructor(
 
     suspend fun setLiquidGlass(enabled: Boolean) = themePreferences.setLiquidGlass(enabled)
 
-    suspend fun setMd3NavBar(enabled: Boolean) = themePreferences.setMd3NavBar(enabled)
-
-    suspend fun setHideNavTabs(enabled: Boolean) = themePreferences.setHideNavTabs(enabled)
+    suspend fun setCornerScale(scale: Float) = themePreferences.setCornerScale(scale)
 
     /** Turning this on used to just flip the DataStore flag and wait for
      *  Home's own poll loop to eventually call updateNowPlayingArtwork() —

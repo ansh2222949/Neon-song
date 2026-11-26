@@ -179,6 +179,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -230,6 +231,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.neonsong.app.R
@@ -246,11 +250,13 @@ import com.neonsong.app.data.local.LyricsUiVersion
 import com.neonsong.app.data.local.PlayerFaceStyle
 import com.neonsong.app.data.local.ThemeMode
 import com.neonsong.app.data.local.nativeDisplayName
+import com.neonsong.app.features.settings.AudioCodecSnapshot
+import com.neonsong.app.features.settings.SettingsLivePreviewCard
+import com.neonsong.app.features.settings.SettingsStudioHeroShell
 import com.neonsong.app.features.settings.about.AboutCard
 import com.neonsong.app.features.settings.appearance.AccentPresetGrid
 import com.neonsong.app.features.settings.appearance.AppearanceContent
 import com.neonsong.app.features.settings.appearance.ColorWheelSheet
-import com.neonsong.app.features.settings.audio.AudioStudioHero
 import com.neonsong.app.features.settings.audio.AutomixBarsRow
 import com.neonsong.app.features.settings.audio.ClarityPresetDialog
 import com.neonsong.app.features.settings.audio.CrossfadeDurationRow
@@ -418,16 +424,16 @@ private fun getTargetSectionIndex(settingId: String?): Int {
     val entry = SettingsSearchIndex.allEntries.firstOrNull { it.id == settingId } ?: return 0
     return when (entry.parentTab) {
         SettingsTab.AUDIO -> when (entry.section) {
-            "Output & Loudness" -> 2
-            "Audiophile DSP & Mastering" -> 3
-            else -> 1
+            "Output & Loudness" -> 1
+            "Audiophile DSP & Mastering" -> 2
+            else -> 0
         }
         SettingsTab.APPEARANCE -> when (entry.section) {
-            "Accent Color" -> 2
-            "App Icon & Brand Emblem" -> 3
-            "Player & Lyrics Experience", "Experimental & Features", "Experimental & Player" -> 4
-            "Canvas" -> 5
-            else -> 1
+            "Accent Color" -> 1
+            "App Icon & Brand Emblem" -> 2
+            "Player & Lyrics Experience", "Experimental & Features", "Experimental & Player" -> 3
+            "Canvas" -> 4
+            else -> 0
         }
         SettingsTab.LIBRARY -> when (entry.section) {
             "Playlist Importers", "Imports", "Imports & Addons" -> 2
@@ -483,6 +489,7 @@ fun SettingsScreen(
     val ytChannels by viewModel.ytChannels.collectAsStateWithLifecycle()
     val ytChannelsLoading by viewModel.ytChannelsLoading.collectAsStateWithLifecycle()
     val eq by viewModel.equalizer.collectAsStateWithLifecycle()
+    val liveEqGains by viewModel.liveEqGains.collectAsStateWithLifecycle()
     val usbExclusiveEnabled by viewModel.usbExclusiveEnabled.collectAsStateWithLifecycle()
     val loudness by viewModel.loudness.collectAsStateWithLifecycle()
     val updateInfo by viewModel.updateInfo.collectAsStateWithLifecycle()
@@ -491,9 +498,31 @@ fun SettingsScreen(
     val lastFmAuthUrl by viewModel.lastFmAuthUrl.collectAsStateWithLifecycle()
     val lastFmConnecting by viewModel.lastFmConnecting.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isBatteryOptimizationIgnored by remember(context) {
+        mutableStateOf(BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context))
+    }
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isBatteryOptimizationIgnored = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Live music player & song reactivity (replicated 1:1 from FeedScreen.kt)
     val musicPlayer = LocalMusicPlayer.current
+    val codecSnapshot by remember(musicPlayer) {
+        musicPlayer.state
+            .map { AudioCodecSnapshot(it.audioCodec, it.bitDepth, it.samplingRateKHz, it.isLossless, it.bitrateKbps) }
+            .distinctUntilChanged()
+    }.collectAsStateWithLifecycle(
+        initialValue = musicPlayer.state.value.let {
+            AudioCodecSnapshot(it.audioCodec, it.bitDepth, it.samplingRateKHz, it.isLossless, it.bitrateKbps)
+        },
+    )
     val activeTrackInfo by remember(musicPlayer) {
         musicPlayer.chromeState
             .map { Triple(it.current?.title, it.current?.artist, it.isPlaying) }
@@ -575,6 +604,7 @@ fun SettingsScreen(
     }
 
     var activeTab by rememberSaveable { mutableStateOf<SettingsTab?>(null) }
+    var isolateSongPalette by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(initialSection) {
         when (initialSection) {
             "audio_quality" -> showAudioQualityScreen = true
@@ -654,6 +684,7 @@ fun SettingsScreen(
                             AudioQualityTarget.WIFI_STREAMING -> misc.wifiStreamingQuality
                             AudioQualityTarget.DOWNLOADS -> misc.downloadQuality
                         },
+                        dolbyAtmosMode = misc.dolbyAtmosMode,
                         onSelectTier = { tier ->
                             when (target) {
                                 AudioQualityTarget.CELLULAR_STREAMING -> viewModel.setCellularStreamingQuality(tier.qualityId)
@@ -891,7 +922,7 @@ fun SettingsScreen(
                                                         position = position,
                                                         trailingBadge = {
                                                             SettingBadgeChip(
-                                                                text = if (misc.losslessQuality in listOf(6, 7, 27, 28)) "Lossless" else "Standard",
+                                                                text = if (misc.preferLosslessStreaming && (misc.wifiStreamingQuality in listOf(6, 7, 27, 28) || misc.cellularStreamingQuality in listOf(6, 7, 27, 28))) "Lossless" else "Standard",
                                                                 color = MaterialTheme.colorScheme.primary,
                                                             )
                                                         },
@@ -973,12 +1004,8 @@ fun SettingsScreen(
                                 }
 
                                 SettingsTab.AUDIO -> {
-                                    item(key = "audio_hero") {
-                                        SubPageGlassHeroCard(tab = SettingsTab.AUDIO)
-                                    }
                                     item(key = "audio_streaming_section") {
                                         SettingsGlassSection(title = stringResource(R.string.settings_section_audio), subtitle = "Streaming bit-depth, Auto DJ & playback transitions") {
-                                            val isIgnored = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
                                             val audioRows = buildList<@Composable (GroupPosition) -> Unit> {
                                                 add { position ->
                                                     val currentTier = AppleAudioQualityTier.fromQualityId(misc.wifiStreamingQuality)
@@ -1091,7 +1118,7 @@ fun SettingsScreen(
                                                         isHighlighted = (highlightedSettingId == "audio.download_lyrics"),
                                                     )
                                                 }
-                                                if (!isIgnored) {
+                                                if (!isBatteryOptimizationIgnored) {
                                                     add { position ->
                                                         SettingsActionCard(
                                                             icon = Icons.Filled.Bolt,
@@ -1350,18 +1377,15 @@ fun SettingsScreen(
                                 }
 
                                 SettingsTab.APPEARANCE -> {
-                                    item(key = "appearance_hero") {
-                                        SubPageGlassHeroCard(tab = SettingsTab.APPEARANCE)
-                                    }
                                     item(key = "appearance_modes_section") {
                                         AppearanceContent(
                                             themeUiState = theme,
                                             miscSettings = misc,
                                             highlightedSettingId = highlightedSettingId,
                                             onSelectThemeMode = { mode -> viewModel.setThemeMode(mode) },
-                                            onSetAmoled = { enabled ->
-                                                viewModel.setThemeMode(if (enabled) ThemeMode.AMOLED else ThemeMode.DARK)
-                                            },
+                                            onSetAmoled = viewModel::setAmoled,
+                                            onSetLiquidGlass = viewModel::setLiquidGlass,
+                                            onSetCornerScale = viewModel::setCornerScale,
                                             onSetDynamicColor = { enabled ->
                                                 viewModel.setAccentMode(if (enabled) AccentMode.DYNAMIC else AccentMode.MANUAL)
                                             },
@@ -1391,12 +1415,15 @@ fun SettingsScreen(
                                     }
                                     item(key = "appearance_brand_icon_section") {
                                         SettingsGlassSection(title = "App Icon & Brand Emblem", subtitle = "Choose your preferred home launcher mark") {
-                                            AppIconShowcaseSelector()
+                                            AppIconShowcaseSelector(
+                                                selectedIconRes = NeonBrand.resForKey(misc.appIconKey),
+                                                onSelectIcon = viewModel::setAppIcon,
+                                            )
                                         }
                                     }
                                     item(key = "appearance_player_section") {
                                         SettingsGlassSection(title = stringResource(R.string.settings_section_experimental), subtitle = "Lyrics renderer, fluid rotating background & player buttons") {
-                                            ExpressiveGroup(rowCount = 8) { index, position ->
+                                            ExpressiveGroup(rowCount = 9) { index, position ->
                                                 when (index) {
                                                     0 -> SettingsActionCard(
                                                         icon = Icons.Filled.Dashboard,
@@ -1472,6 +1499,17 @@ fun SettingsScreen(
                                                         onClick = { showLyricsSizeDialog = true },
                                                         position = position,
                                                         isHighlighted = (highlightedSettingId == "appearance.lyrics_size"),
+                                                    )
+                                                    7 -> SettingsToggleCard(
+                                                        icon = Icons.Filled.Lyrics,
+                                                        iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                                        iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                                        title = "Inline lyrics in player",
+                                                        subtitle = if (misc.inlinePlayerLyricsEnabled) "Single live glowing word-synced lyric line (Apple style)" else "Off • Open Lyrics tab to view full lyrics",
+                                                        checked = misc.inlinePlayerLyricsEnabled,
+                                                        onCheckedChange = viewModel::setInlinePlayerLyricsEnabled,
+                                                        position = position,
+                                                        isHighlighted = (highlightedSettingId == "appearance.inline_player_lyrics"),
                                                     )
                                                     else -> SettingsToggleCard(
                                                         icon = Icons.Filled.PlayCircle,
@@ -2104,43 +2142,78 @@ fun SettingsScreen(
                         }
                     }
 
-                    ExpressiveHeader(
-                        title = headerTitle,
-                        subtitle = headerSubtitle,
-                        backdrop = if (isGlassSupported) settingsBackdrop else null,
+                    val showStickyLivePreview = !isSearchBarVisible &&
+                        searchQuery.isBlank() &&
+                        (activeTab == SettingsTab.APPEARANCE || activeTab == SettingsTab.AUDIO)
+
+                    Column(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
+                            .fillMaxWidth()
                             .onGloballyPositioned { coordinates ->
                                 val newHeight = coordinates.size.height.toFloat()
                                 if (abs(headerHeightPx - newHeight) > 1f) {
                                     headerHeightPx = newHeight
                                 }
                             },
-                        onBack = {
-                            if (searchQuery.isNotBlank() || isSearchBarVisible) {
-                                viewModel.clearSearch()
-                                isSearchBarVisible = false
-                            } else if (activeTab != null) {
-                                activeTab = null
-                            } else {
-                                onBack()
+                    ) {
+                        ExpressiveHeader(
+                            title = headerTitle,
+                            subtitle = headerSubtitle,
+                            backdrop = if (isGlassSupported) settingsBackdrop else null,
+                            onBack = {
+                                if (searchQuery.isNotBlank() || isSearchBarVisible) {
+                                    viewModel.clearSearch()
+                                    isSearchBarVisible = false
+                                } else if (activeTab != null) {
+                                    activeTab = null
+                                } else {
+                                    onBack()
+                                }
+                            },
+                            actions = {
+                                HeaderActionIcon(
+                                    icon = if (isSearchBarVisible || searchQuery.isNotBlank()) Icons.Filled.Close else Icons.Filled.Search,
+                                    contentDescription = if (isSearchBarVisible || searchQuery.isNotBlank()) stringResource(R.string.settings_search_clear) else stringResource(R.string.settings_search_title),
+                                    onClick = {
+                                        if (isSearchBarVisible || searchQuery.isNotBlank()) {
+                                            viewModel.clearSearch()
+                                            isSearchBarVisible = false
+                                        } else {
+                                            isSearchBarVisible = true
+                                        }
+                                    },
+                                )
+                            },
+                        )
+
+                        AnimatedVisibility(
+                            visible = showStickyLivePreview,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut(),
+                        ) {
+                            activeTab?.let { previewTab ->
+                                SettingsLivePreviewCard(
+                                    tab = previewTab,
+                                    themeUiState = theme,
+                                    misc = misc,
+                                    eq = eq,
+                                    liveEqGains = liveEqGains,
+                                    usbExclusiveEnabled = usbExclusiveEnabled,
+                                    loudness = loudness,
+                                    codecSnapshot = codecSnapshot,
+                                    isolateSongPalette = isolateSongPalette,
+                                    onToggleIsolateSongPalette = { isolateSongPalette = !isolateSongPalette },
+                                    onOpenEqualizer = { showEqSheet = true },
+                                    backdrop = if (isGlassSupported) settingsBackdrop else null,
+                                    modifier = Modifier.padding(
+                                        horizontal = NeonSpacing.ScreenHorizontal,
+                                        vertical = 6.dp,
+                                    ),
+                                )
                             }
-                        },
-                        actions = {
-                            HeaderActionIcon(
-                                icon = if (isSearchBarVisible || searchQuery.isNotBlank()) Icons.Filled.Close else Icons.Filled.Search,
-                                contentDescription = if (isSearchBarVisible || searchQuery.isNotBlank()) stringResource(R.string.settings_search_clear) else stringResource(R.string.settings_search_title),
-                                onClick = {
-                                    if (isSearchBarVisible || searchQuery.isNotBlank()) {
-                                        viewModel.clearSearch()
-                                        isSearchBarVisible = false
-                                    } else {
-                                        isSearchBarVisible = true
-                                    }
-                                },
-                            )
-                        },
-                    )
+                        }
+                    }
                 }
             }
         }
@@ -2366,6 +2439,7 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 12.dp)
                     .navigationBarsPadding(),
             ) {
@@ -2390,7 +2464,56 @@ fun SettingsScreen(
                     modifier = Modifier.padding(horizontal = 2.dp),
                 )
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(14.dp))
+
+                // Direct Motion Video Artwork toggle inside Player Layout Style sheet
+                Surface(
+                    onClick = {
+                        hapticManager.toggle(!misc.canvasEnabled)
+                        viewModel.setCanvasEnabled(!misc.canvasEnabled)
+                    },
+                    shape = SquircleShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                    border = BorderStroke(
+                        1.dp,
+                        if (misc.canvasEnabled) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                        },
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.settings_canvas_enabled),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = if (misc.canvasEnabled) "On • Play Apple Music & live motion loops on cover" else "Off • Keep album artwork completely static",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Switch(
+                            checked = misc.canvasEnabled,
+                            onCheckedChange = { enabled ->
+                                hapticManager.toggle(enabled)
+                                viewModel.setCanvasEnabled(enabled)
+                            },
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
 
                 // Options List with Haptic feedback on tap
                 PlayerFaceStyle.entries.forEach { style ->
@@ -2664,31 +2787,14 @@ private fun SubPageGlassHeroCard(
     tab: SettingsTab,
     modifier: Modifier = Modifier,
 ) {
-    val isDark = LocalIsDarkTheme.current
     val primary = MaterialTheme.colorScheme.primary
-    val shadowPx = with(LocalDensity.current) { (if (isDark) 16.dp else 10.dp).toPx() }
-    val spotShadow = Color.Black.copy(alpha = 0.50f)
+    val shadowAccent = ArtworkPaletteCache.activeSongPalette.value?.primary ?: primary
 
-    Surface(
+    SettingsStudioHeroShell(
         shape = SettingsHeroShape,
-        color = Color.Transparent,
-        border = null,
-        tonalElevation = 0.dp,
-        modifier = modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                shadowElevation = shadowPx
-                shape = SettingsHeroShape
-                clip = false
-                val accent = ArtworkPaletteCache.activeSongPalette.value?.primary ?: primary
-                ambientShadowColor = accent.copy(alpha = 0.28f)
-                spotShadowColor = spotShadow
-            }
-            .liquidGlassChrome(
-                shape = SettingsHeroShape,
-                preset = LiquidGlassPreset.Card,
-                accentTint = primary.copy(alpha = 0.20f),
-            ),
+        accentTint = primary.copy(alpha = 0.20f),
+        shadowAccent = shadowAccent,
+        modifier = modifier,
     ) {
         Row(
             modifier = Modifier
@@ -3696,10 +3802,14 @@ private fun StorageLegendItem(color: Color, label: String) {
  * Interactive App Icon & Brand Showcase Selector.
  */
 @Composable
-private fun AppIconShowcaseSelector(modifier: Modifier = Modifier) {
+private fun AppIconShowcaseSelector(
+    selectedIconRes: Int,
+    onSelectIcon: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val hapticManager = LocalHapticManager.current
     val primary = MaterialTheme.colorScheme.primary
-    val currentIconRes = NeonBrand.AppIconRes
+    val currentIconRes = selectedIconRes
 
     val icons = remember {
         listOf(
@@ -3725,7 +3835,7 @@ private fun AppIconShowcaseSelector(modifier: Modifier = Modifier) {
                         interactive = true,
                         onClick = {
                             hapticManager.click()
-                            NeonBrand.AppIconRes = resId
+                            onSelectIcon(resId)
                         },
                     )
                     .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -4285,12 +4395,19 @@ private fun PlayerLayoutPreview(
         animationSpec = tween(350, easing = FastOutSlowInEasing),
         label = "cardAlpha",
     )
+    val cardScale by animateFloatAsState(
+        targetValue = if (style == PlayerFaceStyle.COMPACT) 0.70f else 1f,
+        animationSpec = tween(350, easing = FastOutSlowInEasing),
+        label = "cardScale",
+    )
     val heroHeightFraction by animateFloatAsState(
         targetValue = if (style == PlayerFaceStyle.FULLSCREEN_HERO) 0.52f else 0f,
         animationSpec = tween(350, easing = FastOutSlowInEasing),
         label = "heroHeight",
     )
-    val hasAmbientGlow = style == PlayerFaceStyle.DEFAULT || style == PlayerFaceStyle.BACKGROUND_ONLY
+    val hasAmbientGlow = style == PlayerFaceStyle.DEFAULT ||
+        style == PlayerFaceStyle.BACKGROUND_ONLY ||
+        style == PlayerFaceStyle.COMPACT
 
     val bgColor by animateColorAsState(
         targetValue = if (hasAmbientGlow) {
@@ -4355,14 +4472,15 @@ private fun PlayerLayoutPreview(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Bottom,
         ) {
-            // 3. Floating Artwork Card (Fades out in BACKGROUND_ONLY & FULLSCREEN_HERO)
+            // 3. Floating Artwork Card (Fades out in BACKGROUND_ONLY & FULLSCREEN_HERO; compact in COMPACT)
             Box(
                 modifier = Modifier
                     .size(88.dp)
                     .graphicsLayer {
                         alpha = cardAlpha
-                        scaleX = 0.88f + (0.12f * cardAlpha)
-                        scaleY = 0.88f + (0.12f * cardAlpha)
+                        val s = (0.88f + (0.12f * cardAlpha)) * cardScale
+                        scaleX = s
+                        scaleY = s
                     }
                     .clip(SquircleShape(14.dp))
                     .background(
@@ -4375,7 +4493,18 @@ private fun PlayerLayoutPreview(
                     ),
             )
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(if (style == PlayerFaceStyle.COMPACT) 6.dp else 14.dp))
+
+            if (style == PlayerFaceStyle.COMPACT) {
+                Box(
+                    Modifier
+                        .width(126.dp)
+                        .height(6.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
 
             // 4. Mock UI Controls (Title, Subtitle, Playback Buttons)
             Box(

@@ -82,6 +82,9 @@ class SettingsClearAllDataTest {
     private val playlistImportManager = mockk<com.neonsong.app.data.playlist.PlaylistImportManager>(relaxed = true)
     private val innerTube = mockk<com.neonsong.app.data.music.InnerTubeMusicApi>(relaxed = true)
     private val appUpdateManager = mockk<com.neonsong.app.data.update.AppUpdateManager>(relaxed = true)
+    private val spotifyAuthManager = mockk<com.neonsong.app.data.spotify.SpotifyAuthManager>(relaxed = true)
+    private val spotifyLibraryManager = mockk<com.neonsong.app.data.spotify.SpotifyLibraryManager>(relaxed = true)
+    private val spotifyIsrcMatcher = mockk<com.neonsong.app.data.spotify.SpotifyIsrcMatcher>(relaxed = true)
 
     private lateinit var viewModel: SettingsViewModel
     private val order = mutableListOf<String>()
@@ -146,6 +149,9 @@ class SettingsClearAllDataTest {
             playlistImportManager = playlistImportManager,
             innerTube = innerTube,
             appUpdateManager = appUpdateManager,
+            spotifyAuthManager = spotifyAuthManager,
+            spotifyLibraryManager = spotifyLibraryManager,
+            spotifyIsrcMatcher = spotifyIsrcMatcher,
             context = RuntimeEnvironment.getApplication(),
         )
     }

@@ -31,7 +31,7 @@ class SmartRouteProfileManager(
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private val routeMutex = Mutex()
 
-    @Volatile var autoSwitchEnabled: Boolean = prefs.getBoolean(KEY_AUTO_SWITCH_ENABLED, true)
+    @Volatile var autoSwitchEnabled: Boolean = true
         private set
 
     @Volatile var activeRouteKey: String = ""
@@ -39,7 +39,6 @@ class SmartRouteProfileManager(
 
     fun setAutoSwitchEnabled(enabled: Boolean) {
         autoSwitchEnabled = enabled
-        prefs.edit().putBoolean(KEY_AUTO_SWITCH_ENABLED, enabled).apply()
     }
 
     private fun hasWiredHeadphones(): Boolean = runCatching {
@@ -88,6 +87,9 @@ class SmartRouteProfileManager(
 
         scope.launch(Dispatchers.IO) {
             routeMutex.withLock {
+                // Persist active route clarity preset so SettingsPreferences, UI, and engine collectors stay unified
+                runCatching { settingsPreferences.setClarityPreset(targetClarityPreset.index) }
+
                 // 1. Save current EQ curve under the outgoing device key (if there was a prior route)
                 if (previousRouteKey.isNotEmpty()) {
                     runCatching {
