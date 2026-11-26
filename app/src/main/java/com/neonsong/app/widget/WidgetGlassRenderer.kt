@@ -156,4 +156,112 @@ object WidgetGlassRenderer {
 
         out
     }.getOrDefault(src)
+
+    /**
+     * Renders a full-bleed blurred album-art aura backdrop clipped by the launcher's
+     * system widget radius (`clipToOutline`), with rich ambient tint & dark contrast scrim.
+     */
+    fun renderAuraBackdrop(
+        sourceArt: Bitmap?,
+        widthPx: Int = 480,
+        heightPx: Int = 240,
+        accentColor: Int = 0xFF7C4DFF.toInt(),
+    ): Bitmap? = runCatching {
+        val w = widthPx.coerceIn(160, 560)
+        val h = heightPx.coerceIn(96, 360)
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val rect = RectF(0f, 0f, w.toFloat(), h.toFloat())
+
+        if (sourceArt != null && !sourceArt.isRecycled) {
+            val step1 = Bitmap.createScaledBitmap(sourceArt, 48, 48, true)
+            val step2 = Bitmap.createScaledBitmap(step1, 18, 18, true)
+            if (step1 !== sourceArt) step1.recycle()
+            val blurred = Bitmap.createScaledBitmap(step2, w, h, true)
+            if (step2 !== sourceArt) step2.recycle()
+            canvas.drawBitmap(blurred, 0f, 0f, paint)
+            if (blurred !== sourceArt) blurred.recycle()
+
+            val scrim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(
+                    0f, 0f, w.toFloat(), h.toFloat(),
+                    intArrayOf(
+                        ColorUtils.setAlphaComponent(accentColor, 95),
+                        Color.argb(165, 11, 13, 20),
+                        Color.argb(215, 7, 8, 13),
+                    ),
+                    floatArrayOf(0f, 0.48f, 1f),
+                    Shader.TileMode.CLAMP,
+                )
+            }
+            canvas.drawRect(rect, scrim)
+        } else {
+            val darkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(
+                    0f, 0f, w.toFloat(), h.toFloat(),
+                    intArrayOf(
+                        ColorUtils.blendARGB(0xFF191C2B.toInt(), accentColor, 0.38f),
+                        0xFF0D0F16.toInt(),
+                    ),
+                    null,
+                    Shader.TileMode.CLAMP,
+                )
+            }
+            canvas.drawRect(rect, darkPaint)
+        }
+        out
+    }.getOrNull()
+
+    /**
+     * Renders a crisp full-bleed square cover-art card with a smooth bottom gradient scrim
+     * designed specifically for One UI 2x2 media widgets.
+     */
+    fun renderSquareAlbumHero(
+        sourceArt: Bitmap?,
+        sizePx: Int = 320,
+        accentColor: Int = 0xFF7C4DFF.toInt(),
+    ): Bitmap? = runCatching {
+        val s = sizePx.coerceIn(160, 420)
+        val out = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val rect = RectF(0f, 0f, s.toFloat(), s.toFloat())
+        if (sourceArt != null && !sourceArt.isRecycled) {
+            val srcSize = minOf(sourceArt.width, sourceArt.height)
+            val left = (sourceArt.width - srcSize) / 2
+            val top = (sourceArt.height - srcSize) / 2
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+            canvas.drawBitmap(sourceArt, Rect(left, top, left + srcSize, top + srcSize), rect, paint)
+
+            // Subtle top + strong lower scrim so text and One UI controls pop with studio contrast
+            val scrim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(
+                    0f, 0f, 0f, s.toFloat(),
+                    intArrayOf(
+                        Color.argb(55, 0, 0, 0),
+                        Color.argb(30, 0, 0, 0),
+                        Color.argb(175, 10, 10, 16),
+                        Color.argb(235, 8, 9, 14),
+                    ),
+                    floatArrayOf(0f, 0.35f, 0.68f, 1f),
+                    Shader.TileMode.CLAMP,
+                )
+            }
+            canvas.drawRect(rect, scrim)
+        } else {
+            val fallbackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(
+                    0f, 0f, s.toFloat(), s.toFloat(),
+                    intArrayOf(
+                        ColorUtils.blendARGB(0xFF1F2233.toInt(), accentColor, 0.42f),
+                        0xFF0E1016.toInt(),
+                    ),
+                    null,
+                    Shader.TileMode.CLAMP,
+                )
+            }
+            canvas.drawRect(rect, fallbackPaint)
+        }
+        out
+    }.getOrNull()
 }

@@ -98,7 +98,9 @@ object WidgetUpdater {
         val standard = manager.getAppWidgetIds(ComponentName(context, NowPlayingWidgetReceiver::class.java))
         if (standard.isNotEmpty()) return@runCatching true
         val obsidian = manager.getAppWidgetIds(ComponentName(context, ObsidianGlassWidgetReceiver::class.java))
-        obsidian.isNotEmpty()
+        if (obsidian.isNotEmpty()) return@runCatching true
+        val aura = manager.getAppWidgetIds(ComponentName(context, AuraWidgetReceiver::class.java))
+        aura.isNotEmpty()
     }.getOrDefault(false)
 
     private val publishMutex = Mutex()
@@ -188,15 +190,16 @@ object WidgetUpdater {
         manager: AppWidgetManager,
         ids: IntArray,
         isObsidian: Boolean,
+        isAura: Boolean = false,
     ) {
         val app = context.applicationContext
         val art = memoryArtBitmap
         for (appWidgetId in ids) {
             runCatching {
-                val views = if (isObsidian) {
-                    ObsidianWidgetViews.build(app, appWidgetId, eqFrame = 0, progressOverride = null, memoryArt = art)
-                } else {
-                    WidgetViews.build(app, appWidgetId, eqFrame = 0, progressOverride = null, memoryArt = art)
+                val views = when {
+                    isAura -> AuraWidgetViews.build(app, appWidgetId, eqFrame = 0, progressOverride = null, memoryArt = art)
+                    isObsidian -> ObsidianWidgetViews.build(app, appWidgetId, eqFrame = 0, progressOverride = null, memoryArt = art)
+                    else -> WidgetViews.build(app, appWidgetId, eqFrame = 0, progressOverride = null, memoryArt = art)
                 }
                 manager.updateAppWidget(appWidgetId, views)
             }
@@ -216,7 +219,12 @@ object WidgetUpdater {
                 val views = ObsidianWidgetViews.build(context, appWidgetId, eqFrame, progressOverride, memoryArtBitmap)
                 runCatching { manager.updateAppWidget(appWidgetId, views) }
             }
-            ids.isNotEmpty() || obsidianIds.isNotEmpty()
+            val auraIds = manager.getAppWidgetIds(ComponentName(context, AuraWidgetReceiver::class.java))
+            for (appWidgetId in auraIds) {
+                val views = AuraWidgetViews.build(context, appWidgetId, eqFrame, progressOverride, memoryArtBitmap)
+                runCatching { manager.updateAppWidget(appWidgetId, views) }
+            }
+            ids.isNotEmpty() || obsidianIds.isNotEmpty() || auraIds.isNotEmpty()
         }.onFailure { Log.w(TAG, "widget push failed", it) }.getOrDefault(false)
 
     private fun pushProgressOnly(context: Context, progress: Float): Boolean =
@@ -232,7 +240,12 @@ object WidgetUpdater {
                 val partial = ObsidianWidgetViews.buildProgressOnly(context, appWidgetId, progress)
                 runCatching { manager.partiallyUpdateAppWidget(appWidgetId, partial) }
             }
-            ids.isNotEmpty() || obsidianIds.isNotEmpty()
+            val auraIds = manager.getAppWidgetIds(ComponentName(context, AuraWidgetReceiver::class.java))
+            for (appWidgetId in auraIds) {
+                val partial = AuraWidgetViews.buildProgressOnly(context, appWidgetId, progress)
+                runCatching { manager.partiallyUpdateAppWidget(appWidgetId, partial) }
+            }
+            ids.isNotEmpty() || obsidianIds.isNotEmpty() || auraIds.isNotEmpty()
         }.onFailure { Log.w(TAG, "widget partial progress push failed", it) }.getOrDefault(false)
 
     private fun readLiveFraction(context: Context, fallback: Float): Float = runCatching {

@@ -58,6 +58,7 @@ class AudioEffectsEngine @Inject constructor(
     @Volatile private var requestedSessionId = C.AUDIO_SESSION_ID_UNSET
     @Volatile private var fallbackRequired = false
     @Volatile private var equalizerSettings = EqualizerSettings()
+    @Volatile private var previewEqState: Pair<Boolean, FloatArray>? = null
     @Volatile private var studioClarityEnabled = false
     @Volatile private var bitPerfectActive = false
     @Volatile private var usbExclusiveActive = false
@@ -81,6 +82,7 @@ class AudioEffectsEngine @Inject constructor(
                 .distinctUntilChanged()
                 .collect { settings ->
                     equalizerSettings = settings
+                    previewEqState = null
                     requestApply()
                 }
         }
@@ -103,6 +105,12 @@ class AudioEffectsEngine @Inject constructor(
                     }
             }
         }
+    }
+
+    /** Live EQ preview during slider drag before DataStore persistence commits. */
+    fun setEqualizerPreview(enabled: Boolean, gainsDb: FloatArray) {
+        previewEqState = enabled to gainsDb.copyOf()
+        requestApply()
     }
 
     /** Follows ExoPlayer whenever Android creates or replaces its audio session. */
@@ -203,23 +211,30 @@ class AudioEffectsEngine @Inject constructor(
             preampDb = loudnessPreampDb,
             limiterEngaged = false,
         )
-        val userEqEnabled = equalizerSettings.enabled
+        val preview = previewEqState
+        val userEqEnabled = preview?.first ?: equalizerSettings.enabled
         val loudnessActive = loudnessMode != LoudnessMode.OFF && loudnessGainDb != 0f
         val needsTone = userEqEnabled || studioClarityEnabled || loudnessActive
         if (needsTone) {
-            applyToneEffect(buildCombinedCurve(userEqEnabled, loudnessActive, loudnessGainDb))
+            applyToneEffect(buildCombinedCurve(userEqEnabled, preview?.second, loudnessActive, loudnessGainDb))
         } else {
             releaseToneInternal()
         }
     }
 
-    private fun buildCombinedCurve(userEqEnabled: Boolean, loudnessActive: Boolean, loudnessGainDb: Float): FloatArray =
+    private fun buildCombinedCurve(
+        userEqEnabled: Boolean,
+        previewGains: FloatArray?,
+        loudnessActive: Boolean,
+        loudnessGainDb: Float,
+    ): FloatArray =
         FloatArray(EQ_BAND_FREQS_HZ.size) { index ->
             val studioGain = if (studioClarityEnabled) {
                 EqualizerPresets.STUDIO_MASTER.gainsDb.getOrElse(index) { 0f }.takeIf { it.isFinite() } ?: 0f
             } else 0f
             val userGain = if (userEqEnabled) {
-                equalizerSettings.gainsDb.getOrElse(index) { 0f }.takeIf { it.isFinite() } ?: 0f
+                val raw = previewGains?.getOrElse(index) { 0f } ?: equalizerSettings.gainsDb.getOrElse(index) { 0f }
+                raw.takeIf { it.isFinite() } ?: 0f
             } else 0f
             val combined = studioGain + userGain
             val base = if (combined.isFinite()) combined.coerceIn(-EQ_MAX_GAIN_DB, EQ_MAX_GAIN_DB) else 0f

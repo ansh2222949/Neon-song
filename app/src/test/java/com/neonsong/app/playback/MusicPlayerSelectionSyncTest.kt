@@ -77,6 +77,8 @@ class MusicPlayerSelectionSyncTest {
             nativeAutoMixEngine = dagger.Lazy { mockk(relaxed = true) },
             autoDJController = dagger.Lazy { mockk(relaxed = true) },
             autoEqController = mockk(relaxed = true),
+            networkMonitor = mockk(relaxed = true),
+            loudnessPrefs = mockk(relaxed = true),
         )
     }
 

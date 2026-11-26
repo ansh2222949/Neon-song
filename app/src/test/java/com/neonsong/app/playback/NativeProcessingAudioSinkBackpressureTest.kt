@@ -11,6 +11,7 @@ import com.google.common.truth.Truth.assertThat
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.mockk.clearMocks
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -407,5 +408,36 @@ class NativeProcessingAudioSinkBackpressureTest {
         every { enhancedDelegate.isEnded() } returns true
         sink.playToEndOfStream()
         assertThat(sink.isEnded()).isTrue()
+    }
+
+    @Test
+    fun flush_promotedStandbySink_doesNotResetNativeAutoMixEngine() {
+        sink.configure(testStereoFormat, 0, null)
+        // Simulate Deck B being promoted to active Deck A after crossfade finishes.
+        sink.setAutoMixActive(true)
+        clearMocks(autoMixEngine, answers = false, recordedCalls = true)
+
+        sink.flush()
+
+        verify(exactly = 0) { autoMixEngine.reset() }
+    }
+
+    @Test
+    fun configure_losslessHiResRate_configuresNativeAutoMixEngineSampleRate() {
+        every { autoMixEngine.state } returns AutoMixState.IDLE
+        every { processor.outputSampleRateFor(96000) } returns 96000
+        every { processor.configure(any()) } returns AudioProcessor.AudioFormat(96000, 2, C.ENCODING_PCM_FLOAT)
+
+        val hiResFormat = Format.Builder()
+            .setSampleMimeType(MimeTypes.AUDIO_RAW)
+            .setPcmEncoding(C.ENCODING_PCM_FLOAT)
+            .setSampleRate(96000)
+            .setChannelCount(2)
+            .build()
+
+        sink.setAutoMixActive(true)
+        sink.configure(hiResFormat, 0, null)
+
+        verify { autoMixEngine.configure(96000) }
     }
 }

@@ -170,6 +170,8 @@ class MusicPlayer @Inject constructor(
     private val autoDJController: dagger.Lazy<com.neonsong.app.playback.autodj.AutoDJController>,
     /** AutoEQ: started with the player so the saved correction is published before playback. */
     private val autoEqController: com.neonsong.app.data.autoeq.AutoEqController,
+    private val networkMonitor: com.neonsong.app.data.network.NetworkMonitor,
+    private val loudnessPrefs: LoudnessPrefs,
 ) {
     private val appContext = context.applicationContext
     /**
@@ -501,8 +503,15 @@ class MusicPlayer @Inject constructor(
         }
         override fun triggerAutoTransition(overlapMs: Long) {
             onMain {
+                val effectiveBitPerfect = bitPerfectEnabled && !isSpatialAudioCodec(_state.value.audioCodec)
                 val standby = currentStandby()
                 val nextIndex = player.nextMediaItemIndex
+                if (effectiveBitPerfect) {
+                    if (nextIndex != C.INDEX_UNSET && nextIndex in 0 until player.mediaItemCount) {
+                        resolveAndPlayQueueItem(nextIndex)
+                    }
+                    return@onMain
+                }
                 val expectedMediaId = nextIndex.takeIf { it in 0 until player.mediaItemCount }
                     ?.let { player.getMediaItemAt(it).mediaId }
                 val standbyMatchesNext = standby != null && crossfadeStandbyArmed &&
@@ -1370,12 +1379,12 @@ class MusicPlayer @Inject constructor(
                     sink.setAutoMixActive(handleAudioFocus)
                     playerSinks += sink
                     sink.onConfiguredFormat = { rateHz, _, _ ->
-                        // The crossfade standby arms early and configures its
-                        // sink while the OUTGOING track is still the live one.
-                        // Only the active player may publish sample rate and
-                        // re-settle bit-perfect/system volume, otherwise the
-                        // next track's rate lands on the current track's pill.
-                        if (handleAudioFocus && (activePlayer == null || (playerDelegate.isInitialized() && activePlayer === playerDelegate.value))) {
+                        // Only the currently active player may publish sample rate and
+                        // re-settle bit-perfect/system volume, otherwise the standby deck's
+                        // pre-buffered next track would overwrite the playing track's pill.
+                        val isActiveSink = activePlayer == null ||
+                            autoMixSinksByPlayer[activePlayer]?.contains(sink) == true
+                        if (isActiveSink) {
                             onDecodedPcmFormatConfigured(rateHz)
                         }
                     }
@@ -2844,6 +2853,11 @@ class MusicPlayer @Inject constructor(
         standbyIndex = C.INDEX_UNSET
         player.volume = 1f
         setAutoMixRoles(player, null)
+        // Re-lock DAC routing & sample rate to the newly promoted active track cleanly.
+        val promotedRateHz = autoMixSinksByPlayer[player]
+            ?.firstNotNullOfOrNull { it.currentMixOutputSampleRateHz() }
+            ?: currentSourceRateHz()
+        applyDacRoutingFor(promotedRateHz)
     }
 
     /**
@@ -2873,8 +2887,13 @@ class MusicPlayer @Inject constructor(
             engine.setSpatialImmersionEnabled(false)
             engine.systemFlattened = true
         }
-        val effects = AudioEffectsEngine(equalizerPreferences, settingsPreferences, applicationScope)
+        val effects = AudioEffectsEngine(equalizerPreferences, settingsPreferences, applicationScope, loudnessPrefs)
+        effects.setBitPerfectActive(bitPerfectEnabled && !isSpatialAudioCodec(_state.value.audioCodec))
+        effects.setUsbExclusiveActive(usbExclusiveSinkActive)
         effects.setSystemEffectsActive(systemEffectsEffective)
+        if (bitPerfectEnabled && !isSpatialAudioCodec(_state.value.audioCodec)) {
+            engine.setBitPerfect(true)
+        }
         secondaryNativeEngine = engine
         secondaryEffects = effects
         createPlayer({ engine }, effects, false).also { secondaryPlayer = it }
@@ -2892,6 +2911,17 @@ class MusicPlayer @Inject constructor(
     @MainThread
     private fun armCrossfadeStandby(nextIndex: Int, nextItem: MediaItem) {
         val standby = standbyOrCreate()
+        // Lock standby Deck B's output sample rate to Deck A's current output rate when mixing
+        // (essential when e.g. Deck A is 96kHz Hi-Res FLAC and Deck B is 44.1kHz Lossless or Opus).
+        val activeMixRateHz = autoMixSinksByPlayer[player]
+            ?.firstNotNullOfOrNull { it.currentMixOutputSampleRateHz() }
+            ?: currentSourceRateHz()
+            ?: 48_000
+        autoMixSinksByPlayer[standby]?.forEach { sink ->
+            sink.setAutoMixEnabled(automixEnabled)
+            sink.setAutoMixActive(false)
+            sink.setOutputSampleRateOverride(activeMixRateHz)
+        }
         standbyQueue = (0 until player.mediaItemCount).map(player::getMediaItemAt)
         standbyIndex = nextIndex
         standby.volume = 0f
@@ -2931,6 +2961,11 @@ class MusicPlayer @Inject constructor(
                     standby.currentMediaItem?.mediaId == nextMediaId &&
                     standby.playbackState == Player.STATE_READY
                 if (standby != null && standbyReadyForNext) {
+                    val effectiveBitPerfect = bitPerfectEnabled && !isSpatialAudioCodec(_state.value.audioCodec)
+                    if (effectiveBitPerfect) {
+                        resolveAndPlayQueueItem(nextIndex)
+                        return@withContext
+                    }
                     if (automixEnabled || autoDJController.get().isEnabled) {
                         runCatching { nativeAutoMixEngine.get().triggerFadeDurationMs(overlapMs) }
                     }
@@ -2965,7 +3000,8 @@ class MusicPlayer @Inject constructor(
     @MainThread
     private fun updateCrossfade(positionMs: Long): Boolean {
         val isAutoDJ = runCatching { autoDJController.get().isEnabled }.getOrDefault(false)
-        if ((!crossfadeEnabled && !automixEnabled && !isAutoDJ) || bitPerfectEnabled) return false
+        val effectiveBitPerfect = bitPerfectEnabled && !isSpatialAudioCodec(_state.value.audioCodec)
+        if ((!crossfadeEnabled && !automixEnabled && !isAutoDJ) || effectiveBitPerfect) return false
         outgoingPlayer?.let { outgoing ->
             if (!player.isPlaying) {
                 autoMixLastTickMs = 0L
@@ -2974,21 +3010,31 @@ class MusicPlayer @Inject constructor(
             val nowMs = SystemClock.elapsedRealtime()
             val incomingPos = runCatching { player.currentPosition.coerceAtLeast(0L) }.getOrDefault(0L)
             val isEngineFading = automixEnabled || isAutoDJ
-            val progress = if (isEngineFading) {
+            val wallProgress = if (isEngineFading) {
                 if (autoMixLastTickMs > 0L) {
                     autoMixElapsedMs += (nowMs - autoMixLastTickMs).coerceIn(0L, 500L)
                 }
                 autoMixLastTickMs = nowMs
-                (autoMixElapsedMs.toFloat() / overlapDurationMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
+                (autoMixElapsedMs.toFloat() / overlapDurationMs.coerceAtLeast(1L)).coerceIn(0f, 1.5f)
             } else {
                 (incomingPos.toFloat() / overlapDurationMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
             }
-            if (progress >= 1f || outgoing.playbackState == Player.STATE_ENDED || outgoing.playerError != null) {
+            val autoMixEngineInstance = nativeAutoMixEngine.get()
+            val isNativeSinkBlending = automixEnabled && autoMixEngineInstance.isAvailable
+            val nativeEngineState = if (isNativeSinkBlending) autoMixEngineInstance.state else AutoMixState.IDLE
+            val nativeComplete = isNativeSinkBlending && (
+                nativeEngineState == AutoMixState.POST_RESTORE ||
+                    autoMixEngineInstance.transitionProgress >= 0.999f
+                )
+            val isBlendComplete = if (isNativeSinkBlending) {
+                nativeComplete || wallProgress >= 1.25f || outgoing.playbackState == Player.STATE_ENDED || outgoing.playerError != null
+            } else {
+                wallProgress >= 1f || outgoing.playbackState == Player.STATE_ENDED || outgoing.playerError != null
+            }
+            if (isBlendComplete) {
                 cancelCrossfade()
             } else {
-                val isNativeSinkBlending = automixEnabled && nativeAutoMixEngine.get().isAvailable &&
-                    nativeAutoMixEngine.get().state != AutoMixState.IDLE
-
+                val progress = wallProgress.coerceIn(0f, 1f)
                 if (isNativeSinkBlending) {
                     // The outgoing native sink owns the audible blend in C++.
                     player.volume = 0f
@@ -3199,10 +3245,10 @@ class MusicPlayer @Inject constructor(
         outgoing.removeMediaItems(outgoing.currentMediaItemIndex + 1, outgoing.mediaItemCount)
         outgoingPlayer = outgoing
         activePlayer = standby
-        val isNativeSinkBlending = automixEnabled && nativeAutoMixEngine.get().isAvailable &&
-            nativeAutoMixEngine.get().state != AutoMixState.IDLE
+        val isNativeSinkBlending = automixEnabled && nativeAutoMixEngine.get().isAvailable
         if (isNativeSinkBlending) {
-            // Keep the outgoing deck as the native audible master.
+            // Keep the outgoing deck as the native audible master even if pendingFadeDurationMs_
+            // hasn't been picked up by the next process() block yet.
             setAutoMixRoles(outgoing, standby)
         }
         standby.addListener(listener)
@@ -3762,14 +3808,58 @@ class MusicPlayer @Inject constructor(
         )
     }
 
+    private fun allNativeEngines(): List<NativeAudioEngine> = listOfNotNull(
+        runCatching { nativeAudioEngine.get() }.getOrNull(),
+        secondaryNativeEngine,
+    )
+
+    private fun allEffectsEngines(): List<AudioEffectsEngine> = listOfNotNull(
+        audioEffectsEngine,
+        secondaryEffects,
+    )
+
+    /** Unified DSP sync: pushes live 16-band EQ preview across primary & standby engines and AudioFX. */
+    fun syncEqualizerPreview(enabled: Boolean, gainsDb: FloatArray) {
+        allNativeEngines().forEach { engine ->
+            runCatching { engine.setEqualizer(enabled, gainsDb) }
+        }
+        allEffectsEngines().forEach { effects ->
+            runCatching { effects.setEqualizerPreview(enabled, gainsDb) }
+        }
+    }
+
+    /** Unified DSP sync: applies Studio Master Clarity across primary & standby engines immediately. */
+    fun syncStudioMasterClarity(enabled: Boolean) {
+        allNativeEngines().forEach { engine ->
+            runCatching { engine.setStudioMasterClarity(enabled) }
+        }
+    }
+
+    /** Unified DSP sync: applies Clarity output preset across primary & standby engines immediately. */
+    fun syncClarityPreset(preset: ClarityPreset) {
+        allNativeEngines().forEach { engine ->
+            runCatching { engine.setClarityPreset(preset) }
+        }
+    }
+
+    /** Unified DSP sync: applies Clarity spatial bypass across primary & standby engines immediately. */
+    fun syncClarityAtmosBypass(enabled: Boolean) {
+        allNativeEngines().forEach { engine ->
+            runCatching { engine.setClarityAtmosBypass(enabled) }
+        }
+    }
+
+    /** Unified DSP sync: updates Bit-Perfect mode across primary & standby engines and AudioFX immediately. */
+    fun syncBitPerfectMode(enabled: Boolean) {
+        bitPerfectEnabled = enabled
+        updateBitPerfectState()
+    }
+
     fun setSpatialImmersionEnabled(enabled: Boolean) {
         applicationScope.launch {
             settingsPreferences.setSpatialImmersionEnabled(enabled)
             cachedMiscSettings = cachedMiscSettings.copy(spatialImmersionEnabled = enabled)
-            listOfNotNull(
-                runCatching { nativeAudioEngine.get() }.getOrNull(),
-                secondaryNativeEngine,
-            ).forEach { engine -> runCatching { engine.setSpatialImmersionEnabled(enabled) } }
+            allNativeEngines().forEach { engine -> runCatching { engine.setSpatialImmersionEnabled(enabled) } }
             updateSignalPath()
         }
     }
@@ -3778,10 +3868,7 @@ class MusicPlayer @Inject constructor(
         applicationScope.launch {
             settingsPreferences.setSpatialImmersionPreset(preset)
             cachedMiscSettings = cachedMiscSettings.copy(spatialImmersionPreset = preset)
-            listOfNotNull(
-                runCatching { nativeAudioEngine.get() }.getOrNull(),
-                secondaryNativeEngine,
-            ).forEach { engine -> runCatching { engine.setSpatialImmersionStrength(preset.strength) } }
+            allNativeEngines().forEach { engine -> runCatching { engine.setSpatialImmersionStrength(preset.strength) } }
             updateSignalPath()
         }
     }
@@ -4857,8 +4944,9 @@ class MusicPlayer @Inject constructor(
         warmArtwork(nextTrack)
         preloadJob?.cancel()
         preloadJob = null
+        val activeQuality = activeStreamingQuality(cachedMiscSettings)
         val preferLossless = cachedMiscSettings.preferLosslessStreaming &&
-            cachedMiscSettings.losslessQuality != LosslessMusicApi.QUALITY_YOUTUBE
+            activeQuality != LosslessMusicApi.QUALITY_YOUTUBE
 
         preloadJob = applicationScope.launch(Dispatchers.IO) {
             // 1. Immediately prefetch fast YouTube stream so next track is ready with 0ms lag
@@ -6511,18 +6599,49 @@ class MusicPlayer @Inject constructor(
         )
     }
 
+    private fun activeStreamingQuality(misc: MiscSettings): Int {
+        val networkQuality = if (networkMonitor.isOnCellular()) {
+            misc.cellularStreamingQuality
+        } else {
+            misc.wifiStreamingQuality
+        }
+        if (!misc.preferLosslessStreaming) {
+            return when (networkQuality) {
+                LosslessMusicApi.QUALITY_DATA_SAVER,
+                LosslessMusicApi.QUALITY_YOUTUBE -> networkQuality
+                else -> LosslessMusicApi.QUALITY_MP3_320
+            }
+        }
+        return when {
+            misc.dolbyAtmosMode.equals("Off", ignoreCase = true) &&
+                networkQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS -> LosslessMusicApi.QUALITY_MAX_HI_RES
+            misc.dolbyAtmosMode.equals("Always On", ignoreCase = true) &&
+                networkQuality != LosslessMusicApi.QUALITY_YOUTUBE &&
+                networkQuality != LosslessMusicApi.QUALITY_DATA_SAVER -> LosslessMusicApi.QUALITY_DOLBY_ATMOS
+            else -> networkQuality
+        }
+    }
+
+    private fun shouldAllowSpatialStream(misc: MiscSettings): Boolean = when {
+        misc.dolbyAtmosMode.equals("Off", ignoreCase = true) -> false
+        misc.dolbyAtmosMode.equals("Always On", ignoreCase = true) -> true
+        else -> isSpatialAudioSupportedOnDevice()
+    }
+
     private suspend fun resolveLosslessTrackAudioStream(
         track: PlayableTrack,
         misc: MiscSettings,
         excludedLosslessUrls: Set<String> = emptySet(),
         expectedDurationSeconds: Int? = null,
     ): ResolvedStream? {
-        if (!misc.preferLosslessStreaming) return null
-        val atmosSupported = isSpatialAudioSupportedOnDevice()
-        val effectiveQuality = if (misc.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS && !atmosSupported) {
+        val requestedQuality = activeStreamingQuality(misc)
+        if (requestedQuality == LosslessMusicApi.QUALITY_YOUTUBE) return null
+        if (!misc.preferLosslessStreaming && requestedQuality == LosslessMusicApi.QUALITY_MP3_320) return null
+        val spatialAllowed = shouldAllowSpatialStream(misc)
+        val effectiveQuality = if (requestedQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS && !spatialAllowed) {
             LosslessMusicApi.QUALITY_MAX_HI_RES
         } else {
-            misc.losslessQuality
+            requestedQuality
         }
         val stream = losslessMusicApi.resolveStream(
             title = track.title,
@@ -6540,10 +6659,10 @@ class MusicPlayer @Inject constructor(
             LosslessMusicApi.isSpatialAudioCodec(mc ?: s.mimeType) || s.audioCodecOverride == "DOLBY ATMOS"
         }
         var chosenStream = stream
-        if (isSpatialStream(chosenStream) && !atmosSupported) {
+        if (isSpatialStream(chosenStream) && !spatialAllowed) {
             android.util.Log.w(
                 "MusicPlayer",
-                "[LOSSLESS] veto: spatial manifest for '${track.title}' on incapable device; requesting stereo tier",
+                "[LOSSLESS] veto: spatial manifest for '${track.title}' (mode=${misc.dolbyAtmosMode}); requesting stereo tier",
             )
             val stereoStream = losslessMusicApi.resolveStream(
                 title = track.title,
@@ -6563,8 +6682,9 @@ class MusicPlayer @Inject constructor(
      * the YouTube-only extraction fallback is considered. */
     private suspend fun resolvePreferredQueueStream(track: PlayableTrack): ResolvedStream? {
         val misc = cachedMiscSettings
+        val requestedQuality = activeStreamingQuality(misc)
         if (!misc.preferLosslessStreaming ||
-            misc.losslessQuality == LosslessMusicApi.QUALITY_YOUTUBE ||
+            requestedQuality == LosslessMusicApi.QUALITY_YOUTUBE ||
             losslessMusicApi.isCoolingDown
         ) return null
 
@@ -6756,10 +6876,14 @@ class MusicPlayer @Inject constructor(
     }
 
     private fun isWorthSwapping(current: ResolvedStream, candidate: ResolvedStream): Boolean {
-        // Dolby Atmos candidate beats a lossy stream, or upgrades stereo lossless when user specifically configured Dolby Atmos
+        val misc = cachedMiscSettings
+        val requestedQuality = activeStreamingQuality(misc)
+        val spatialAllowed = shouldAllowSpatialStream(misc)
+        // Dolby Atmos candidate beats a lossy stream, or upgrades stereo lossless when Atmos is active/configured
         if (candidate.audioCodec == "DOLBY ATMOS") {
+            if (!spatialAllowed) return false
             return current.audioCodec != "DOLBY ATMOS" &&
-                (!current.isLossless || cachedMiscSettings.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS)
+                (!current.isLossless || requestedQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS)
         }
         // Lossless candidate beats lossy stream
         if (candidate.isLossless && !current.isLossless) {
@@ -6818,16 +6942,17 @@ class MusicPlayer @Inject constructor(
             return
         }
         val misc = cachedMiscSettings
+        val requestedQuality = activeStreamingQuality(misc)
         val wantLossless = misc.preferLosslessStreaming &&
-            misc.losslessQuality != LosslessMusicApi.QUALITY_YOUTUBE
+            requestedQuality != LosslessMusicApi.QUALITY_YOUTUBE
         if (!wantLossless || losslessMusicApi.isCoolingDown) {
             android.util.Log.i(
                 "MusicPlayer",
-                "[STREAM UPGRADE] skipped '${track.title}' prefer=${misc.preferLosslessStreaming} quality=${misc.losslessQuality} cooling=${losslessMusicApi.isCoolingDown}",
+                "[STREAM UPGRADE] skipped '${track.title}' prefer=${misc.preferLosslessStreaming} quality=$requestedQuality cooling=${losslessMusicApi.isCoolingDown}",
             )
             return
         }
-        val wantsAtmos = misc.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS
+        val wantsAtmos = requestedQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS && shouldAllowSpatialStream(misc)
         if (currentStream.audioCodec == "DOLBY ATMOS") return
         if (currentStream.isLossless && !wantsAtmos) return
         if (isStreamSwapLocked()) {
@@ -6842,7 +6967,7 @@ class MusicPlayer @Inject constructor(
         activeUpgradeMediaId = expectedMediaId
         android.util.Log.i(
             "MusicPlayer",
-            "[STREAM UPGRADE] starting for '${track.title}' quality=${misc.losslessQuality}",
+            "[STREAM UPGRADE] starting for '${track.title}' quality=$requestedQuality atmosMode=${misc.dolbyAtmosMode}",
         )
         activeUpgradeJob = applicationScope.launch(Dispatchers.IO) {
             try {
@@ -6950,10 +7075,21 @@ class MusicPlayer @Inject constructor(
                     // still promotes off lossy instead of sticking on it.
                     android.util.Log.w("MusicPlayer", "[STREAM UPGRADE] Immersive audition failed for '${track.title}'; trying stereo fallback via hot-swap")
                     val stereoMisc = misc.copy(
-                        losslessQuality = if (misc.losslessQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS) {
+                        dolbyAtmosMode = "Off",
+                        losslessQuality = if (requestedQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS) {
                             LosslessMusicApi.QUALITY_MAX_HI_RES
                         } else {
-                            misc.losslessQuality
+                            requestedQuality
+                        },
+                        cellularStreamingQuality = if (misc.cellularStreamingQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS) {
+                            LosslessMusicApi.QUALITY_MAX_HI_RES
+                        } else {
+                            misc.cellularStreamingQuality
+                        },
+                        wifiStreamingQuality = if (misc.wifiStreamingQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS) {
+                            LosslessMusicApi.QUALITY_MAX_HI_RES
+                        } else {
+                            misc.wifiStreamingQuality
                         },
                     )
                     val stereoCandidate = runCatching {

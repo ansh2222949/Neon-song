@@ -198,6 +198,7 @@ class SyncedVideoViewModel @Inject constructor(
         artist: String,
         videoId: String?,
         targetDurationMs: Long? = null,
+        trackAlbum: String? = null,
         forceRefresh: Boolean = false,
     ) {
         val key = trackRequestKey(title, artist, videoId)
@@ -217,7 +218,7 @@ class SyncedVideoViewModel @Inject constructor(
 
         loadJob = viewModelScope.launch {
             _uiState.value = SyncedVideoUiState.Loading
-            val result = videoRepository.resolveVideo(title, artist, videoId, targetDurationMs)
+            val result = videoRepository.resolveVideo(title, artist, videoId, targetDurationMs, trackAlbum)
             if (!isActive || currentKey != key) return@launch
             result
                 .onSuccess { bundle ->
@@ -254,9 +255,9 @@ class SyncedVideoViewModel @Inject constructor(
         )
     }
 
-    fun retry(title: String, artist: String, videoId: String?, targetDurationMs: Long? = null) {
+    fun retry(title: String, artist: String, videoId: String?, targetDurationMs: Long? = null, trackAlbum: String? = null) {
         currentKey = null
-        loadVideo(title, artist, videoId, targetDurationMs, forceRefresh = true)
+        loadVideo(title, artist, videoId, targetDurationMs, trackAlbum, forceRefresh = true)
     }
 
     fun cancelPendingLoad() {

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.RoundedCorner
 import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material.icons.filled.SwitchAccount
 import androidx.compose.material.icons.filled.TextFields
@@ -441,6 +442,40 @@ object SettingsSearchIndex {
             )
             add(
                 SettingsEntry(
+                    id = "appearance.liquid_glass",
+                    title = "Liquid Glass",
+                    subtitle = "Translucent refraction and specular glass surfaces across the app",
+                    keywords = listOf(
+                        "liquid glass", "glass", "blur", "refraction", "frosted", "translucent",
+                        "ios glass", "material"
+                    ),
+                    icon = Icons.Filled.AutoAwesome,
+                    iconContainer = { MaterialTheme.colorScheme.primaryContainer },
+                    iconTint = { MaterialTheme.colorScheme.onPrimaryContainer },
+                    parentTab = SettingsTab.APPEARANCE,
+                    section = "Appearance",
+                    type = EntryType.TOGGLE,
+                )
+            )
+            add(
+                SettingsEntry(
+                    id = "appearance.corner_scale",
+                    title = "Corner Radius Scale",
+                    subtitle = "Adjust squircle and card corner roundness from 60% to 140%",
+                    keywords = listOf(
+                        "corner", "corner radius", "shape", "squircle", "roundness", "sharp",
+                        "pill", "radius scale"
+                    ),
+                    icon = Icons.Filled.RoundedCorner,
+                    iconContainer = { MaterialTheme.colorScheme.secondaryContainer },
+                    iconTint = { MaterialTheme.colorScheme.onSecondaryContainer },
+                    parentTab = SettingsTab.APPEARANCE,
+                    section = "Appearance",
+                    type = EntryType.SLIDER,
+                )
+            )
+            add(
+                SettingsEntry(
                     id = "appearance.dynamic_color",
                     title = "Dynamic Color (Material You)",
                     subtitle = "Match UI accent colors to wallpaper and system palette",
@@ -675,6 +710,23 @@ object SettingsSearchIndex {
                     iconTint = { MaterialTheme.colorScheme.onTertiaryContainer },
                     parentTab = SettingsTab.APPEARANCE,
                     section = "Canvas",
+                    type = EntryType.TOGGLE,
+                )
+            )
+            add(
+                SettingsEntry(
+                    id = "appearance.inline_player_lyrics",
+                    title = "Inline lyrics in player",
+                    subtitle = "Live synced lyric lines shown in bottom-left corner (Spotify style)",
+                    keywords = listOf(
+                        "inline lyrics", "player lyrics", "corner lyrics", "spotify lyrics",
+                        "live lyrics", "mini lyrics", "now playing lyrics"
+                    ),
+                    icon = Icons.Filled.Lyrics,
+                    iconContainer = { MaterialTheme.colorScheme.tertiaryContainer },
+                    iconTint = { MaterialTheme.colorScheme.onTertiaryContainer },
+                    parentTab = SettingsTab.APPEARANCE,
+                    section = "Experimental & Features",
                     type = EntryType.TOGGLE,
                 )
             )

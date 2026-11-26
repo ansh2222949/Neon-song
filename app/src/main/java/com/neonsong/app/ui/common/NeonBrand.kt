@@ -24,10 +24,30 @@ import com.neonsong.app.R
  */
 object NeonBrand {
     const val AppName = "Neon Song"
+    const val KEY_BERU_3D = "beru_3d"
+    const val KEY_MONOCHROME_GLASS = "monochrome_glass"
 
     @get:DrawableRes
     @setparam:DrawableRes
     var AppIconRes: Int by mutableIntStateOf(R.drawable.beru_icon_3d)
+
+    @DrawableRes
+    fun resForKey(key: String?): Int = when (key) {
+        KEY_MONOCHROME_GLASS -> R.drawable.ic_launcher_beru_foreground
+        else -> R.drawable.beru_icon_3d
+    }
+
+    fun keyForRes(@DrawableRes resId: Int): String = when (resId) {
+        R.drawable.ic_launcher_beru_foreground -> KEY_MONOCHROME_GLASS
+        else -> KEY_BERU_3D
+    }
+
+    fun applyKey(key: String?) {
+        val target = resForKey(key)
+        if (AppIconRes != target) {
+            AppIconRes = target
+        }
+    }
 
     @DrawableRes
     val LauncherIconRes: Int = R.drawable.ic_launcher_beru_foreground

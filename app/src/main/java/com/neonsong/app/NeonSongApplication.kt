@@ -33,6 +33,7 @@ class NeonSongApplication : Application(), ImageLoaderFactory {
     @Inject lateinit var trackDownloadManager: dagger.Lazy<com.neonsong.app.data.download.TrackDownloadManager>
     @Inject lateinit var discordPresenceManager: dagger.Lazy<com.neonsong.app.presence.DiscordPresenceManager>
     @Inject lateinit var appLocaleManager: dagger.Lazy<com.neonsong.app.util.AppLocaleManager>
+    @Inject lateinit var settingsPreferences: dagger.Lazy<com.neonsong.app.data.local.SettingsPreferences>
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(com.neonsong.app.util.AppLocaleManager.wrap(base))
@@ -44,6 +45,9 @@ class NeonSongApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         StartupTrail.mark("app.onCreate.start")
+        runCatching {
+            com.neonsong.app.ui.common.NeonBrand.applyKey(settingsPreferences.get().readAppIconKeySync())
+        }
         runCatching { appLocaleManager.get().start() }
         runCatching { com.neonsong.app.playback.PlaybackDiagnostics.install(this) }
         runCatching { com.neonsong.app.data.music.potoken.BotGuardTokenGenerator.initialize(this) }
@@ -52,6 +56,20 @@ class NeonSongApplication : Application(), ImageLoaderFactory {
         applicationScope.launch(Dispatchers.IO) {
             runCatching { streamExtractor.get().preWarm() }
             runCatching { innerTubeMusicApi.get().preWarmPlayback() }
+        }
+        applicationScope.launch(Dispatchers.IO) {
+            try {
+                settingsPreferences.get().settings
+                    .map { it.appIconKey }
+                    .distinctUntilChanged()
+                    .collect { iconKey ->
+                        com.neonsong.app.ui.common.NeonBrand.applyKey(iconKey)
+                    }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                com.neonsong.app.diagnostics.AppLog.e("NeonSongStartup", "Brand icon observer disabled", error)
+            }
         }
         applicationScope.launch(Dispatchers.IO) {
             delay(OPTIONAL_STARTUP_DELAY_MS)

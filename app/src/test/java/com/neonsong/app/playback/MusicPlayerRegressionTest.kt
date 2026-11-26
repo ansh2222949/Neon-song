@@ -6,6 +6,7 @@ import org.robolectric.RuntimeEnvironment
 import com.google.common.truth.Truth.assertThat
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -52,12 +53,16 @@ class MusicPlayerRegressionTest {
             audioEffectsEngine = mockk(relaxed = true),
             applicationScope = CoroutineScope(Dispatchers.Unconfined),
             downloadedTrackDao = dagger.Lazy { mockk(relaxed = true) },
-            usbDacMonitor = mockk(relaxed = true),
+            usbDacMonitor = mockk<UsbDacMonitor>(relaxed = true).apply {
+                every { state } returns kotlinx.coroutines.flow.MutableStateFlow(UsbDacMonitor.State())
+            },
             exclusiveUsbOutput = mockk(relaxed = true),
             songPlayStatsRepository = dagger.Lazy { mockk(relaxed = true) },
             nativeAutoMixEngine = dagger.Lazy { mockk(relaxed = true) },
             autoDJController = dagger.Lazy { mockk(relaxed = true) },
             autoEqController = mockk(relaxed = true),
+            networkMonitor = mockk(relaxed = true),
+            loudnessPrefs = mockk(relaxed = true),
         )
     }
 

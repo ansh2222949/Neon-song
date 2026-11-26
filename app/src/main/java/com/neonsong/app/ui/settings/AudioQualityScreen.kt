@@ -231,9 +231,13 @@ fun AppleAudioQualityScreen(
                     title = "Spatial Audio & Dolby Atmos",
                     subtitle = "Multidimensional soundstage with binaural rendering",
                 ) {
-                    val options = listOf("Automatic", "Always On", "Off")
+                    val options = listOf(
+                        "Automatic" to "Uses Dolby Atmos when spatial hardware is active",
+                        "Always On" to "Always requests Dolby Atmos when available",
+                        "Off" to "Standard stereo playback only",
+                    )
                     ExpressiveGroup(rowCount = options.size) { index, position ->
-                        val option = options[index]
+                        val (option, optionSubtitle) = options[index]
                         val isSelected = dolbyAtmosMode.equals(option, ignoreCase = true)
                         val shape = groupShape(position)
 
@@ -267,12 +271,19 @@ fun AppleAudioQualityScreen(
                                         size = 38.dp,
                                     )
                                     Spacer(Modifier.width(12.dp))
-                                    Text(
-                                        text = option,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = option,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                        )
+                                        Text(
+                                            text = optionSubtitle,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                 }
                                 if (isSelected) {
                                     Icon(
@@ -304,11 +315,35 @@ fun AppleAudioQualityScreen(
                     title = "Quality Profiles by Connection",
                     subtitle = "Configure independent bitrates for cellular, Wi-Fi, and offline downloads",
                 ) {
-                    val destinationsCount = if (preferLossless) 3 else 1
-                    ExpressiveGroup(rowCount = destinationsCount) { index, position ->
+                    val effectiveCellularId = if (preferLossless) {
+                        if (dolbyAtmosMode.equals("Off", ignoreCase = true) && cellularQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS) {
+                            LosslessMusicApi.QUALITY_MAX_HI_RES
+                        } else {
+                            cellularQuality
+                        }
+                    } else if (cellularQuality == LosslessMusicApi.QUALITY_DATA_SAVER) {
+                        LosslessMusicApi.QUALITY_DATA_SAVER
+                    } else {
+                        LosslessMusicApi.QUALITY_MP3_320
+                    }
+                    val effectiveWifiId = if (preferLossless) {
+                        if (dolbyAtmosMode.equals("Off", ignoreCase = true) && wifiQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS) {
+                            LosslessMusicApi.QUALITY_MAX_HI_RES
+                        } else {
+                            wifiQuality
+                        }
+                    } else {
+                        LosslessMusicApi.QUALITY_MP3_320
+                    }
+                    val effectiveDownloadId = if (dolbyAtmosMode.equals("Off", ignoreCase = true) && downloadQuality == LosslessMusicApi.QUALITY_DOLBY_ATMOS) {
+                        LosslessMusicApi.QUALITY_MAX_HI_RES
+                    } else {
+                        downloadQuality
+                    }
+                    ExpressiveGroup(rowCount = 3) { index, position ->
                         when (index) {
                             0 -> {
-                                val cellularTier = AppleAudioQualityTier.fromQualityId(cellularQuality)
+                                val cellularTier = AppleAudioQualityTier.fromQualityId(effectiveCellularId)
                                 LiquidQualityActionRow(
                                     title = "Cellular Streaming",
                                     subtitle = cellularTier.title,
@@ -318,7 +353,7 @@ fun AppleAudioQualityScreen(
                                 )
                             }
                             1 -> {
-                                val wifiTier = AppleAudioQualityTier.fromQualityId(wifiQuality)
+                                val wifiTier = AppleAudioQualityTier.fromQualityId(effectiveWifiId)
                                 LiquidQualityActionRow(
                                     title = "Wi-Fi Streaming",
                                     subtitle = wifiTier.title,
@@ -328,7 +363,7 @@ fun AppleAudioQualityScreen(
                                 )
                             }
                             else -> {
-                                val downloadTier = AppleAudioQualityTier.fromQualityId(downloadQuality)
+                                val downloadTier = AppleAudioQualityTier.fromQualityId(effectiveDownloadId)
                                 LiquidQualityActionRow(
                                     title = "Downloads & Offline",
                                     subtitle = downloadTier.title,
@@ -356,6 +391,7 @@ fun AppleAudioQualityPickerScreen(
     target: AudioQualityTarget,
     preferLossless: Boolean,
     selectedQualityId: Int,
+    dolbyAtmosMode: String = "Automatic",
     onSelectTier: (AppleAudioQualityTier) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -363,21 +399,30 @@ fun AppleAudioQualityPickerScreen(
     val haptic = LocalHapticFeedback.current
     var showAboutDialog by remember { mutableStateOf(false) }
     val primary = MaterialTheme.colorScheme.primary
-    val currentTier = AppleAudioQualityTier.fromQualityId(selectedQualityId)
+    val atmosDisabled = dolbyAtmosMode.equals("Off", ignoreCase = true)
+    val effectiveSelectedId = when {
+        target == AudioQualityTarget.DOWNLOADS -> if (atmosDisabled && selectedQualityId == LosslessMusicApi.QUALITY_DOLBY_ATMOS) LosslessMusicApi.QUALITY_MAX_HI_RES else selectedQualityId
+        !preferLossless && target == AudioQualityTarget.CELLULAR_STREAMING ->
+            if (selectedQualityId == LosslessMusicApi.QUALITY_DATA_SAVER) LosslessMusicApi.QUALITY_DATA_SAVER else LosslessMusicApi.QUALITY_MP3_320
+        !preferLossless && target == AudioQualityTarget.WIFI_STREAMING -> LosslessMusicApi.QUALITY_MP3_320
+        atmosDisabled && selectedQualityId == LosslessMusicApi.QUALITY_DOLBY_ATMOS -> LosslessMusicApi.QUALITY_MAX_HI_RES
+        else -> selectedQualityId
+    }
+    val currentTier = AppleAudioQualityTier.fromQualityId(effectiveSelectedId)
     val listState = rememberLazyListState()
 
-    // Determine available tiers based on target and lossless switch
-    val tiers = remember(target, preferLossless) {
+    // Determine available tiers based on target, lossless switch, and Dolby Atmos mode
+    val tiers = remember(target, preferLossless, atmosDisabled) {
         when (target) {
             AudioQualityTarget.CELLULAR_STREAMING -> {
                 if (preferLossless) {
-                    listOf(
-                        AppleAudioQualityTier.HIGH_EFFICIENCY,
-                        AppleAudioQualityTier.HIGH_QUALITY,
-                        AppleAudioQualityTier.LOSSLESS,
-                        AppleAudioQualityTier.HI_RES_LOSSLESS,
-                        AppleAudioQualityTier.DOLBY_ATMOS,
-                    )
+                    buildList {
+                        add(AppleAudioQualityTier.HIGH_EFFICIENCY)
+                        add(AppleAudioQualityTier.HIGH_QUALITY)
+                        add(AppleAudioQualityTier.LOSSLESS)
+                        add(AppleAudioQualityTier.HI_RES_LOSSLESS)
+                        if (!atmosDisabled) add(AppleAudioQualityTier.DOLBY_ATMOS)
+                    }
                 } else {
                     listOf(
                         AppleAudioQualityTier.HIGH_EFFICIENCY,
@@ -385,16 +430,24 @@ fun AppleAudioQualityPickerScreen(
                     )
                 }
             }
-            AudioQualityTarget.WIFI_STREAMING, AudioQualityTarget.DOWNLOADS -> {
+            AudioQualityTarget.WIFI_STREAMING -> {
                 if (preferLossless) {
-                    listOf(
-                        AppleAudioQualityTier.HIGH_QUALITY,
-                        AppleAudioQualityTier.LOSSLESS,
-                        AppleAudioQualityTier.HI_RES_LOSSLESS,
-                        AppleAudioQualityTier.DOLBY_ATMOS,
-                    )
+                    buildList {
+                        add(AppleAudioQualityTier.HIGH_QUALITY)
+                        add(AppleAudioQualityTier.LOSSLESS)
+                        add(AppleAudioQualityTier.HI_RES_LOSSLESS)
+                        if (!atmosDisabled) add(AppleAudioQualityTier.DOLBY_ATMOS)
+                    }
                 } else {
                     listOf(AppleAudioQualityTier.HIGH_QUALITY)
+                }
+            }
+            AudioQualityTarget.DOWNLOADS -> {
+                buildList {
+                    add(AppleAudioQualityTier.HIGH_QUALITY)
+                    add(AppleAudioQualityTier.LOSSLESS)
+                    add(AppleAudioQualityTier.HI_RES_LOSSLESS)
+                    if (!atmosDisabled) add(AppleAudioQualityTier.DOLBY_ATMOS)
                 }
             }
         }

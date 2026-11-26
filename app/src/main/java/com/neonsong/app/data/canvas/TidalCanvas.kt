@@ -9,6 +9,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.util.Locale
 
 /**
@@ -19,20 +20,25 @@ object TidalCanvas {
     private const val TAG = "TidalCanvas"
     private const val SEARCH = "https://api.tidal.com/v1/search"
     private const val EMBED_TOKEN = "vNVdglQOjFJJGG2U"
+    private const val AUTH_COOLDOWN_MS = 30L * 60 * 1000
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    @Volatile private var authBlockedUntilMs: Long = 0L
 
     private val countryCode: String by lazy {
         Locale.getDefault().country.takeIf { it.length == 2 }?.uppercase(Locale.ROOT) ?: "US"
     }
 
     fun search(client: OkHttpClient, title: String, artist: String, album: String?): CanvasArtwork? {
+        if (System.currentTimeMillis() < authBlockedUntilMs) return null
         val cleanTitle = title.cleanCanvasTitle()
         val cleanArtist = artist.cleanCanvasArtist()
         val primaryArtist = splitArtists(cleanArtist).firstOrNull().orEmpty().ifBlank { cleanArtist }
 
         // 1. Search with clean primary artist + clean title (avoids YouTube album metadata polluting Tidal search)
         queryTracks(client, "$primaryArtist $cleanTitle", cleanTitle, cleanArtist)?.let { return it }
+
+        if (System.currentTimeMillis() < authBlockedUntilMs) return null
 
         // 2. Fallback with album if provided and distinct
         if (!album.isNullOrBlank()) {
@@ -41,6 +47,29 @@ object TidalCanvas {
         }
 
         return null
+    }
+
+    private fun tidalGet(client: OkHttpClient, url: String): String? {
+        val now = System.currentTimeMillis()
+        if (now < authBlockedUntilMs) return null
+        val request = Request.Builder()
+            .url(url)
+            .header("X-Tidal-Token", EMBED_TOKEN)
+            .header("User-Agent", CANVAS_UA)
+            .build()
+        return runCatching {
+            client.newCall(request).execute().use { response ->
+                when {
+                    response.isSuccessful -> response.body?.string()
+                    response.code == 401 || response.code == 403 -> {
+                        authBlockedUntilMs = now + AUTH_COOLDOWN_MS
+                        Log.w(TAG, "Tidal search unauthorized (${response.code}); cooling down for 30m")
+                        null
+                    }
+                    else -> null
+                }
+            }
+        }.getOrNull()
     }
 
     private fun queryTracks(
@@ -57,7 +86,7 @@ object TidalCanvas {
             .build()
             .toString()
 
-        val body = canvasGet(client, url, mapOf("X-Tidal-Token" to EMBED_TOKEN, "User-Agent" to CANVAS_UA))
+        val body = tidalGet(client, url)
             ?: return null
         val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
 
@@ -101,7 +130,7 @@ object TidalCanvas {
             .build()
             .toString()
 
-        val body = canvasGet(client, url, mapOf("X-Tidal-Token" to EMBED_TOKEN, "User-Agent" to CANVAS_UA))
+        val body = tidalGet(client, url)
             ?: return null
         val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
         val items = root["albums"]?.jsonObject?.get("items")?.jsonArray ?: return null

@@ -142,36 +142,59 @@ class SearchRepository @Inject constructor(
         targetDurationMs: Long? = null,
     ): String? = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext null
-        val query = "$title $artist official video".trim()
-        val videos = com.neonsong.app.util.cancellableRunCatching {
-            innerTube.searchVideos(query, limit = 10)
+        val cleanedSearchTitle = title
+            .replace(Regex("\\((?i)(feat\\.?[^)]*|with[^)]*|official[^)]*|from\\s+[^)]*|remaster[^)]*)\\)"), " ")
+            .replace(Regex("\\[(?i)(feat\\.?[^\\]]*|with[^\\]]*|official[^\\]]*|from\\s+[^\\]]*|remaster[^\\]]*)]"), " ")
+            .replace(Regex("\\s*[|•—–]\\s*.*$"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .ifBlank { title.trim() }
+        val primarySearchArtist = artist.split(Regex("\\s*(?:,|&|\\bx\\b|(?i)\\bfeat\\.?\\b|(?i)\\bft\\.?\\b)\\s*"))
+            .firstOrNull()?.trim().orEmpty().ifBlank { artist.trim() }
+
+        val query = "$cleanedSearchTitle $primarySearchArtist official music video".trim()
+        val primaryVideos = com.neonsong.app.util.cancellableRunCatching {
+            innerTube.searchVideos(query, limit = 12)
         }.getOrDefault(emptyList())
+        val videos = if (primaryVideos.isEmpty()) {
+            com.neonsong.app.util.cancellableRunCatching {
+                innerTube.searchVideos("$cleanedSearchTitle $primarySearchArtist video", limit = 10)
+            }.getOrDefault(emptyList())
+        } else {
+            primaryVideos
+        }
         if (videos.isEmpty()) return@withContext null
 
         val targetSeconds = targetDurationMs?.let { it / 1000 }
 
         // Preserve Unicode letters/digits (Hindi, Japanese, Korean, accents) instead of stripping to a-z only
-        val cleanTitle = title.lowercase()
-            .replace(Regex("\\(feat\\..*?\\)|\\[feat\\..*?\\]|\\(with.*?\\)|\\[with.*?\\]|\\(official.*?\\)|\\[official.*?\\]"), "")
+        val cleanTitle = cleanedSearchTitle.lowercase()
             .replace(Regex("[^\\p{L}\\p{N}\\s]"), " ")
+            .replace(Regex("\\s+"), " ")
             .trim()
-        val titleTokens = cleanTitle.split(Regex("\\s+")).filter { it.length > 1 }
+        val fillerWords = setOf("the", "and", "with", "feat", "ft", "official", "music", "video", "song")
+        val titleTokens = cleanTitle.split(Regex("\\s+")).filter { (it.length > 1 || it.all(Char::isDigit)) && it !in fillerWords }
 
         val cleanArtist = artist.lowercase()
             .replace(Regex("\\(feat\\..*?\\)|\\[feat\\..*?\\]|\\(with.*?\\)|\\[with.*?\\]"), "")
             .replace(Regex("[^\\p{L}\\p{N}\\s]"), " ")
+            .replace(Regex("\\s+"), " ")
             .trim()
-        val artistTokens = cleanArtist.split(Regex("\\s+")).filter { it.length > 1 }
+        val artistTokens = cleanArtist.split(Regex("\\s+")).filter { it.length > 1 && it !in fillerWords }
 
-        // Bad words list: covers, reactions, tutorials, remakes, slowed, etc.
+        // Bad words list: covers, reactions, tutorials, remakes, slowed, etc. (unless requested by track title)
+        val rawLowerTitle = title.lowercase()
+        val conditionalVariantTags = listOf("remix", "live", "acoustic", "unplugged", "instrumental", "lofi", "lo-fi", "cover")
+            .filterNot { rawLowerTitle.contains(it) }
         val forbiddenTags = listOf(
-            "cover", "reaction", "karaoke", "parody", "tutorial", "instrumental",
+            "reaction", "karaoke", "parody", "tutorial", "lyrical",
             "slowed", "reverb", "sped up", "1 hour", "nightcore", "bass boosted",
             "tribute", "dance cover", "how to play", "guitar lesson", "piano tutorial",
             "lyrics", "lyric", "official audio", "audio only", "(audio)", "[audio]", "audio version",
             "visualizer", "art track", "full album", "static image", "still image", "cover art",
-            "wallpaper", "single image", "provided to youtube by", "poster"
-        )
+            "wallpaper", "single image", "provided to youtube by", "poster", "jukebox", "mashup",
+            "status", "shorts", "#shorts",
+        ) + conditionalVariantTags
 
         data class ScoredVideo(val videoId: String, val score: Int)
 

@@ -41,6 +41,10 @@ class ThemeProviderBridge @Inject constructor(
         themeRepository.setLiquidGlass(enabled)
     }
 
+    override suspend fun setCornerScale(scale: Float) {
+        themeRepository.setCornerScale(scale)
+    }
+
     override suspend fun setDynamicNowPlaying(enabled: Boolean) {
         themeRepository.setDynamicNowPlaying(enabled)
     }

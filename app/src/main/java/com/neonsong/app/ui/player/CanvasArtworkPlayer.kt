@@ -2,13 +2,15 @@ package com.neonsong.app.ui.player
 
 import android.graphics.Bitmap
 import android.graphics.Matrix
-import android.graphics.SurfaceTexture
 import android.util.Log
 import android.view.TextureView
 import android.view.ViewGroup
 import androidx.annotation.OptIn
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -21,11 +23,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
@@ -142,6 +141,8 @@ fun CanvasArtworkPlayer(
                 repeatMode = Player.REPEAT_MODE_ONE
                 trackSelectionParameters = trackSelectionParameters.buildUpon()
                     .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                    .setMaxVideoSize(1080, 1440)
+                    .setMaxVideoBitrate(6_500_000)
                     .build()
             }
     }
@@ -191,6 +192,11 @@ fun CanvasArtworkPlayer(
         }
     }
 
+    val foreground = rememberIsForeground()
+    val currentForeground by rememberUpdatedState(foreground)
+    val currentIsPlaying by rememberUpdatedState(isPlaying)
+    val currentPausedForTransition by rememberUpdatedState(pausedForTransition)
+
     LaunchedEffect(url) {
         rendered = false
         clipAspect = 1f
@@ -209,9 +215,10 @@ fun CanvasArtworkPlayer(
         }
         player.setMediaSource(mediaSource)
         player.prepare()
+        // Always re-apply playWhenReady on media source changes / fallback retries even if rendered stayed false
+        player.playWhenReady = currentForeground && currentIsPlaying
     }
 
-    val foreground = rememberIsForeground()
     LaunchedEffect(foreground, isPlaying, pausedForTransition, rendered) {
         // Allow ExoPlayer to decode the very first frame even during a sheet transition so the
         // canvas is immediately visible, then pause decoding while transitioning if needed.
@@ -260,81 +267,65 @@ fun CanvasArtworkPlayer(
         }
     }
 
-    AndroidView(
-        factory = { viewContext ->
-            TextureView(viewContext).apply {
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
-                isOpaque = false
-                player.setVideoTextureView(this)
-
-                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                    override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                        applyContentTransform(clipAspect, currentContentMode, currentAlignPortraitTop)
+    // Avoid wrapping TextureView inside CompositingStrategy.Offscreen + BlendMode.DstIn (can blank
+    // HWUI TextureView output on Android 14–17); render a non-destructive top gradient fade instead.
+    Box(
+        modifier = modifier.graphicsLayer {
+            this.alpha = (alphaState.value * currentPresentationAlpha()).coerceIn(0f, 1f)
+        },
+    ) {
+        AndroidView(
+            factory = { viewContext ->
+                TextureView(viewContext).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    isOpaque = false
+                    // Let ExoPlayer own surfaceTextureListener exclusively so surface callbacks and
+                    // frame buffer presentation never get wiped out on Android 14-17 HWUI.
+                    player.setVideoTextureView(this)
+                    addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+                        (v as? TextureView)?.applyContentTransform(
+                            clipAspect.takeIf { it > 0f } ?: 1f,
+                            currentContentMode,
+                            currentAlignPortraitTop,
+                        )
                     }
-
-                    override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-                        applyContentTransform(clipAspect, currentContentMode, currentAlignPortraitTop)
-                    }
-
-                    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                        rendered = false
-                        return true
-                    }
-
-                    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
-                        if (!rendered) {
-                            applyContentTransform(
-                                clipAspect.takeIf { it > 0f } ?: 1f,
-                                currentContentMode,
-                                currentAlignPortraitTop,
-                            )
-                            rendered = true
-                        }
-                    }
+                    textureView = this
                 }
-                textureView = this
-            }
-        },
-        update = { view ->
-            if (textureView !== view) {
-                textureView = view
-                player.setVideoTextureView(view)
-            }
-            view.applyContentTransform(clipAspect, contentMode, alignPortraitTop)
-        },
-        modifier = modifier
-            .graphicsLayer {
-                this.alpha = (alphaState.value * currentPresentationAlpha()).coerceIn(0f, 1f)
-            }
-            .bottomFadeMask(bottomFade, bottomFadeEndPx),
-    )
-}
-
-private fun Modifier.bottomFadeMask(
-    fraction: Float,
-    endPx: Float? = null,
-): Modifier = if (fraction <= 0.001f) this else this
-    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-    .drawWithCache {
-        val clampedFraction = fraction.coerceIn(0f, 1f)
-        val endY = endPx?.coerceIn(0f, size.height) ?: size.height
-        val startY = endY * (1f - clampedFraction)
-        val brush = Brush.verticalGradient(
-            0.00f to Color.Black,
-            0.45f to Color.Black.copy(alpha = 0.62f),
-            0.78f to Color.Black.copy(alpha = 0.16f),
-            1.00f to Color.Transparent,
-            startY = startY,
-            endY = endY,
+            },
+            update = { view ->
+                if (textureView !== view) {
+                    textureView = view
+                    player.setVideoTextureView(view)
+                }
+                if (view.width > 0 && view.height > 0) {
+                    view.applyContentTransform(clipAspect, contentMode, alignPortraitTop)
+                } else {
+                    view.post { view.applyContentTransform(clipAspect, contentMode, alignPortraitTop) }
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
         )
-        onDrawWithContent {
-            drawContent()
-            drawRect(brush = brush, blendMode = BlendMode.DstIn)
+        if (bottomFade > 0.001f) {
+            val fadeFraction = bottomFade.coerceIn(0.05f, 1f)
+            val startStop = (1f - fadeFraction).coerceIn(0f, 0.92f)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0.0f to Color.Transparent,
+                            startStop to Color.Transparent,
+                            ((startStop + 1f) * 0.5f) to Color.Black.copy(alpha = 0.42f),
+                            1.0f to Color.Black.copy(alpha = 0.86f),
+                        ),
+                    ),
+            )
         }
     }
+}
 
 private fun TextureView.captureAt(
     maxPx: Int,

@@ -57,8 +57,9 @@ class YtRemoteAddGuardTest {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val context = mockk<Context>()
         every { context.cacheDir } returns tmp.root
-        val auth = mockk<YtMusicAuthManager>()
+        val auth = mockk<YtMusicAuthManager>(relaxed = true)
         every { auth.connection } returns MutableStateFlow(YtConnection.DISCONNECTED)
+        coEvery { auth.awaitLoadedConnection() } returns YtConnection.DISCONNECTED
         val preferences = mockk<YtMusicPreferences>(relaxed = true)
         every { preferences.connection } returns flowOf(YtConnection.DISCONNECTED)
         innerTube = mockk()

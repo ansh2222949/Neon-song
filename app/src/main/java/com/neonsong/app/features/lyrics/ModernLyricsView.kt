@@ -6,6 +6,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -450,7 +451,7 @@ private fun ModernSyncedLyricsList(
                     if (abs(delta) > 4f) {
                         listState.animateScrollBy(
                             value = delta,
-                            animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+                            animationSpec = spring(dampingRatio = 0.90f, stiffness = 260f),
                         )
                     }
                 } else {
@@ -918,6 +919,7 @@ private fun SyncedLyricsProgressHost(
     modifier: Modifier = Modifier,
 ) {
     val offsetState by rememberUpdatedState(lyricsOffsetMs)
+    val speedState by rememberUpdatedState(state.speed.coerceIn(0.5f, 2f))
     val framePositionMs = remember { mutableLongStateOf(progressInitial.positionMs) }
     val hasAnySyllables = remember(lines) { lines.any { it.hasSyllables } }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -945,20 +947,17 @@ private fun SyncedLyricsProgressHost(
             while (true) {
                 withFrameNanos { now ->
                     val sample = latestSampleMs
+                    val spd = speedState.toDouble()
                     if (sample != lastSample || sampleFrameNanos < 0L) {
                         lastSample = sample
                         sampleFrameNanos = now
                     }
-                    val target = sample + ((now - sampleFrameNanos) / 1_000_000.0).coerceAtMost(250.0)
-                    val frameDt = if (lastFrameNanos < 0L) 0.0 else (now - lastFrameNanos) / 1_000_000.0
+                    val target = sample + (((now - sampleFrameNanos) / 1_000_000.0) * spd).coerceAtMost(240.0)
+                    val frameDt = if (lastFrameNanos < 0L) 0.0 else ((now - lastFrameNanos) / 1_000_000.0) * spd
                     lastFrameNanos = now
                     val predicted = display + frameDt
                     val err = target - predicted
-                    display = if (abs(err) > 300.0) {
-                        target
-                    } else {
-                        maxOf(display, predicted + err * 0.2)
-                    }
+                    display = if (abs(err) > 180.0) target else (predicted + err * 0.28)
                     framePositionMs.longValue = display.toLong()
                 }
             }

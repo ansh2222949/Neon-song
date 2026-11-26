@@ -28,9 +28,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neonsong.app.data.local.EQ_MAX_GAIN_DB
+import com.neonsong.app.ui.theme.LocalNeonCorners
 import com.neonsong.app.ui.theme.liquidGlassSurface
 
 fun eqBandCategory(hz: Int): String = when {
@@ -49,12 +51,14 @@ fun EqualizerCurveGraph(
     gains: FloatArray,
     enabled: Boolean,
     modifier: Modifier = Modifier,
+    graphHeight: Dp = 136.dp,
 ) {
     EqualizerCurveGraph(
         bandCount = gains.size,
         gainAt = { gains[it] },
         enabled = enabled,
         modifier = modifier,
+        graphHeight = graphHeight,
     )
 }
 
@@ -64,6 +68,7 @@ fun EqualizerCurveGraph(
     gainAt: (Int) -> Float,
     enabled: Boolean,
     modifier: Modifier = Modifier,
+    graphHeight: Dp = 136.dp,
 ) {
     val primary = MaterialTheme.colorScheme.primary
     val secondary = MaterialTheme.colorScheme.secondary
@@ -90,12 +95,13 @@ fun EqualizerCurveGraph(
         )
     }
 
+    val graphShape = LocalNeonCorners.current.squircle(22.dp)
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(136.dp)
+            .height(graphHeight)
             .liquidGlassSurface(
-                shape = EqGraphShape,
+                shape = graphShape,
                 borderWidth = 1.dp,
                 accentTint = if (enabled) primary else Color.Unspecified,
             )

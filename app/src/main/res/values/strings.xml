@@ -5,6 +5,12 @@
     <string name="widget_description">Artwork, track details and playback controls for every media app</string>
     <string name="widget_obsidian_name">Neon Song Obsidian Glass</string>
     <string name="widget_obsidian_description">Frosted obsidian glass player with translucent depth and crystal rim</string>
+    <string name="widget_aura_name">Neon Song Aura Glass</string>
+    <string name="widget_aura_description">Frosted One UI glass player with song-reactive tint and crisp squircle artwork</string>
+    <string name="widget_aura_idle">Tap to open Neon Song</string>
+    <string name="widget_previous">Previous track</string>
+    <string name="widget_play_pause">Play or pause</string>
+    <string name="widget_next">Next track</string>
 
     <!-- Bottom navigation -->
     <string name="nav_feed">Home</string>
@@ -86,10 +92,6 @@
     <string name="video_quality_auto_recommended">Auto (Recommended)</string>
     <string name="settings_liquid_glass">Liquid Glass</string>
     <string name="settings_liquid_glass_sub">iOS-style translucent materials across the app</string>
-    <string name="settings_md3_nav_bar">Material 3 Navigation Bar</string>
-    <string name="settings_md3_nav_bar_sub">Enable modern floating dock navigation instead of classic bottom tabs</string>
-    <string name="settings_hide_nav_tabs">Hide Navigation Tabs</string>
-    <string name="settings_hide_nav_tabs_sub">Completely hide navigation tabs and switch between screens using swipe gestures only</string>
     <string name="settings_lyrics_animation">Lyrics Animation</string>
     <string name="settings_lyrics_provider">Lyrics provider</string>
     <string name="settings_lyrics_provider_desc">Tried first for every song. If it returns nothing, the app automatically falls through to the other providers.</string>
@@ -104,8 +106,8 @@
     <string name="settings_studio_clarity">Studio Master Clarity</string>
     <string name="settings_studio_clarity_on">Crystal-clear open sound • airy detail • deep clean separation</string>
     <string name="settings_studio_clarity_off">Original unshaped output</string>
-    <string name="settings_canvas_enabled">Animated Album Canvas</string>
-    <string name="settings_canvas_enabled_sub">Stream motion artwork loops from Apple Music, Tidal and community</string>
+    <string name="settings_canvas_enabled">Motion Video Artwork</string>
+    <string name="settings_canvas_enabled_sub">Play live Apple Music &amp; community motion loops on cover art</string>
     <string name="settings_canvas_full_bleed">Full Screen Artwork</string>
     <string name="settings_canvas_full_bleed_sub">Full screen edge-to-edge artwork for static and animated tracks</string>
     <string name="settings_canvas_cellular">Canvas Over Cellular</string>

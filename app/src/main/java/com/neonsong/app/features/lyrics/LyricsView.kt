@@ -7,6 +7,7 @@ import com.neonsong.app.ui.player.WavySeekBar
 
 
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -223,9 +224,52 @@ fun LyricsPanel(
                                 onRetry = onRetry,
                             )
                         } else if (targetState.isSynced && targetState.lines.isNotEmpty()) {
+                            val classicFramePosMs = remember(targetState.lines) {
+                                mutableLongStateOf(effectiveProgressFlow.value.positionMs)
+                            }
+                            val classicSpeed by rememberUpdatedState(state.speed.coerceIn(0.5f, 2f))
+                            val classicOffset by rememberUpdatedState(lyricsOffsetMs)
+                            val classicHasSyllables = remember(targetState.lines) {
+                                targetState.lines.any { it.hasSyllables }
+                            }
+                            LaunchedEffect(effectiveProgressFlow, state.isPlaying, classicHasSyllables, targetState.lines) {
+                                if (!state.isPlaying || !classicHasSyllables) {
+                                    effectiveProgressFlow.collect { classicFramePosMs.longValue = it.positionMs }
+                                    return@LaunchedEffect
+                                }
+                                var latestSampleMs = effectiveProgressFlow.value.positionMs
+                                val collectorJob = launch {
+                                    effectiveProgressFlow.collect { latestSampleMs = it.positionMs }
+                                }
+                                try {
+                                    var lastSample = latestSampleMs
+                                    var sampleFrameNanos = -1L
+                                    var lastFrameNanos = -1L
+                                    var display = latestSampleMs.toDouble()
+                                    while (true) {
+                                        withFrameNanos { now ->
+                                            val sample = latestSampleMs
+                                            val spd = classicSpeed.toDouble()
+                                            if (sample != lastSample || sampleFrameNanos < 0L) {
+                                                lastSample = sample
+                                                sampleFrameNanos = now
+                                            }
+                                            val target = sample + (((now - sampleFrameNanos) / 1_000_000.0) * spd).coerceAtMost(240.0)
+                                            val frameDt = if (lastFrameNanos < 0L) 0.0 else ((now - lastFrameNanos) / 1_000_000.0) * spd
+                                            lastFrameNanos = now
+                                            val predicted = display + frameDt
+                                            val err = target - predicted
+                                            display = if (kotlin.math.abs(err) > 180.0) target else (predicted + err * 0.28)
+                                            classicFramePosMs.longValue = display.toLong()
+                                        }
+                                    }
+                                } finally {
+                                    collectorJob.cancel()
+                                }
+                            }
                             SyncedLyricsList(
                                 lines = targetState.lines,
-                                currentPositionMs = { effectiveProgressFlow.value.positionMs + lyricsOffsetMs },
+                                currentPositionMs = { classicFramePosMs.longValue + classicOffset },
                                 lyricsOffsetMs = lyricsOffsetMs,
                                 lyricsFontScale = lyricsFontScale,
                                 isPlaying = state.isPlaying,
