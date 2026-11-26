@@ -1,5 +1,6 @@
 package com.neonsong.app.widget
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -11,8 +12,10 @@ import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.palette.graphics.Palette
+import com.neonsong.app.ui.common.NeonBrand
 import java.io.File
 
 data class WidgetBakedAssets(
@@ -25,6 +28,91 @@ data class WidgetBakedAssets(
 object WidgetGlassRenderer {
 
     private const val TARGET_ART_PX = 256
+
+    private data class BrandCacheKey(
+        val resId: Int,
+        val isObsidian: Boolean,
+        val fallbackPrimary: Int,
+    )
+
+    private val brandCacheLock = Any()
+
+    @Volatile
+    private var cachedBrandKey: BrandCacheKey? = null
+
+    @Volatile
+    private var cachedBrandAssets: WidgetBakedAssets? = null
+
+    /**
+     * Returns cached 256px superellipse-framed app emblem art ([NeonBrand.AppIconRes])
+     * with Fresnel glass rim for widget empty/loading states and notification fallbacks.
+     */
+    fun brandArtwork(
+        context: Context,
+        isObsidian: Boolean,
+        fallbackPrimary: Int,
+    ): WidgetBakedAssets {
+        val resId = NeonBrand.AppIconRes
+        val key = BrandCacheKey(resId, isObsidian, fallbackPrimary)
+        val existing = cachedBrandAssets
+        if (key == cachedBrandKey && existing != null && existing.artSquircle?.isRecycled != true) {
+            return existing
+        }
+        return synchronized(brandCacheLock) {
+            val recheck = cachedBrandAssets
+            if (key == cachedBrandKey && recheck != null && recheck.artSquircle?.isRecycled != true) {
+                return@synchronized recheck
+            }
+            val source = decodeBrandBitmap(context, resId)
+            val baked = bake(
+                sourceArt = source,
+                isObsidian = isObsidian,
+                fallbackPrimary = fallbackPrimary,
+            )
+            cachedBrandKey = key
+            cachedBrandAssets = baked
+            baked
+        }
+    }
+
+    private fun decodeBrandBitmap(context: Context, resId: Int): Bitmap? = runCatching {
+        val res = context.resources ?: return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeResource(res, resId, bounds)
+        if (bounds.outWidth > 0 && bounds.outHeight > 0) {
+            val largest = maxOf(bounds.outWidth, bounds.outHeight)
+            var sample = 1
+            while (largest / (sample * 2) >= TARGET_ART_PX) {
+                sample *= 2
+            }
+            val opts = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            val decoded = BitmapFactory.decodeResource(res, resId, opts)
+            if (decoded != null) {
+                return@runCatching if (decoded.width <= TARGET_ART_PX && decoded.height <= TARGET_ART_PX) {
+                    decoded
+                } else {
+                    val scale = TARGET_ART_PX.toFloat() / maxOf(decoded.width, decoded.height)
+                    val scaled = Bitmap.createScaledBitmap(
+                        decoded,
+                        (decoded.width * scale).toInt().coerceAtLeast(1),
+                        (decoded.height * scale).toInt().coerceAtLeast(1),
+                        true,
+                    )
+                    if (scaled !== decoded) decoded.recycle()
+                    scaled
+                }
+            }
+        }
+        val drawable = ContextCompat.getDrawable(context, resId) ?: return null
+        val out = Bitmap.createBitmap(TARGET_ART_PX, TARGET_ART_PX, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        drawable.setBounds(0, 0, TARGET_ART_PX, TARGET_ART_PX)
+        drawable.draw(canvas)
+        out
+    }.getOrNull()
 
     fun decodeScaledArt(path: String?): Bitmap? = runCatching {
         if (path.isNullOrBlank()) return null

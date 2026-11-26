@@ -1152,7 +1152,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 .setContentText(state.current?.artist ?: "Music player")
                 .setSubText(state.current?.album)
                 .setContentIntent(openAppPendingIntent())
-                .setLargeIcon(scaledBitmap(art, 384))
+                .setLargeIcon(scaledBitmap(art, 384) ?: brandFallbackLargeIcon())
                 .setOnlyAlertOnce(true)
                 .setOngoing(state.isPlaying)
                 .setShowWhen(false)
@@ -1216,7 +1216,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             .setContentText(state.current?.artist ?: "Music player")
             .setSubText(state.current?.album)
             .setContentIntent(openAppPendingIntent())
-            .setLargeIcon(scaledBitmap(art, 384))
+            .setLargeIcon(scaledBitmap(art, 384) ?: brandFallbackLargeIcon())
             .setOnlyAlertOnce(true)
             .setOngoing(state.isPlaying)
             .setShowWhen(false)
@@ -1267,8 +1267,9 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         setImageViewBitmap(R.id.notification_background, glassBackground(widthDp, heightDp, palette))
         // Expanded art is shown at 96dp (288px @3x); compact at 54dp where
         // 192px is already sharp. Two sizes keep the Binder parcel small.
-        if (art != null) setImageViewBitmap(R.id.notification_artwork, scaledBitmap(art, if (expanded) 288 else 192))
-        else setImageViewResource(R.id.notification_artwork, R.mipmap.ic_launcher)
+        val notificationArt = scaledBitmap(art ?: brandFallbackLargeIcon(), if (expanded) 288 else 192)
+        if (notificationArt != null) setImageViewBitmap(R.id.notification_artwork, notificationArt)
+        else setImageViewResource(R.id.notification_artwork, R.drawable.widget_art_placeholder)
         setTextViewText(R.id.notification_title, state.current?.title ?: "Neon Song")
         setTextViewText(R.id.notification_artist, state.current?.artist ?: "Music player")
         setTextColor(R.id.notification_title, palette.onSurface)
@@ -1382,6 +1383,13 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         if (isExpanded) cachedExpandedGlass = bitmap else cachedCompactGlass = bitmap
         return bitmap
     }
+
+    private fun brandFallbackLargeIcon(): Bitmap? =
+        com.neonsong.app.widget.WidgetGlassRenderer.brandArtwork(
+            context = this,
+            isObsidian = true,
+            fallbackPrimary = notificationPalette.primary,
+        ).artSquircle?.takeUnless { it.isRecycled }
 
     private fun scaledBitmap(source: Bitmap?, maxEdge: Int): Bitmap? {
         source ?: return null

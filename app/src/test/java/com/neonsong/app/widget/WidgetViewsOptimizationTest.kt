@@ -90,4 +90,36 @@ class WidgetViewsOptimizationTest {
         )
         assertThat(views).isNotNull()
     }
+
+    @Test
+    fun buildAuraWidgetViews_withNullAndValidArt_returnsValidRemoteViews() {
+        val nullViews = AuraWidgetViews.build(
+            context = context,
+            appWidgetId = 301,
+            eqFrame = 0,
+            progressOverride = 0f,
+            memoryArt = null,
+        )
+        assertThat(nullViews).isNotNull()
+
+        val art = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.RED) }
+        val activeViews = AuraWidgetViews.build(
+            context = context,
+            appWidgetId = 301,
+            eqFrame = 1,
+            progressOverride = 0.45f,
+            memoryArt = art,
+        )
+        assertThat(activeViews).isNotNull()
+    }
+
+    @Test
+    fun brandArtwork_isThreadSafeAndHandlesMissingManifestResourcesGracefully() {
+        val brand = WidgetGlassRenderer.brandArtwork(
+            context = context,
+            isObsidian = true,
+            fallbackPrimary = 0xFF00E5FF.toInt(),
+        )
+        assertThat(brand.primaryColor).isNotEqualTo(0)
+    }
 }

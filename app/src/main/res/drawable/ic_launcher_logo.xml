@@ -1,26 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <!-- Same source geometry as ic_launcher_foreground.xml, scaled to the
-         true logo proportions (bars nearly touching the circle edge)
-         instead of the adaptive-icon safe zone. For in-app use only —
-         anywhere the OS itself renders the launcher icon (home screen,
-         app switcher, settings' app info page) already uses
-         ic_launcher_foreground via the adaptive-icon XMLs; this drawable
-         is for contexts like the About card where we're drawing the mark
-         ourselves and want it pixel-accurate to the source artwork. -->
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Monochrome Neon Song status-bar / media-popup icon:
+         sculpted beamed music note + signature 4-point sparkle -->
     <path
-        android:fillColor="#012226"
-        android:pathData="M12.92,36.47 A5.99,5.99 0 0 1 24.89,36.47 L24.89,78.39 A5.99,5.99 0 0 1 12.92,78.39 Z" />
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M14.7,4.2 L8.3,5.85 C7.45,6.06 6.85,6.82 6.85,7.7 L6.85,14.95 C6.25,14.55 5.5,14.38 4.7,14.52 C3.02,14.82 1.92,16.4 2.26,18.02 C2.6,19.65 4.2,20.72 5.88,20.4 C7.58,20.08 8.75,18.62 8.75,16.88 L8.75,9.32 L14.25,7.9 L14.25,13.4 C13.65,13.0 12.9,12.83 12.1,12.97 C10.42,13.27 9.32,14.85 9.66,16.47 C10.0,18.1 11.6,19.17 13.28,18.85 C14.98,18.53 16.15,17.07 16.15,15.33 L16.15,5.55 C16.15,4.55 15.52,4.0 14.7,4.2 Z" />
     <path
-        android:fillColor="#012226"
-        android:pathData="M36.86,16.58 A6.14,6.14 0 0 1 49.15,16.58 L49.15,92.58 A6.14,6.14 0 0 1 36.86,92.58 Z" />
-    <path
-        android:fillColor="#012226"
-        android:pathData="M60.54,23.12 A6.25,6.25 0 0 1 73.04,23.12 L73.04,84.82 A6.25,6.25 0 0 1 60.54,84.82 Z" />
-    <path
-        android:fillColor="#012226"
-        android:pathData="M80.74,33.72 A6.72,6.72 0 0 1 94.18,33.72 L94.18,74.17 A6.72,6.72 0 0 1 80.74,74.17 Z" />
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M19.55,2.4 Q19.9,4.85 22.35,5.2 Q19.9,5.55 19.55,8.0 Q19.2,5.55 16.75,5.2 Q19.2,4.85 19.55,2.4 Z" />
 </vector>

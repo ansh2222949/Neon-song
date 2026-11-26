@@ -74,19 +74,20 @@ internal object ObsidianWidgetViews {
     ): RemoteViews {
         val resolved = WidgetViews.resolve(context)
         val assets = resolveAssets(memoryArt, resolved.snapshot.artPath)
+        val brand = WidgetGlassRenderer.brandArtwork(context, isObsidian = true, fallbackPrimary = 0xFF7C4DFF.toInt())
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             // Samsung One UI responsive breakpoints (2x1, 3x1/4x1/5x1, 2x2, 4x2/4x3+)
             val sizeMap = mapOf(
-                SizeF(110f, 48f) to buildLayout(context, R.layout.widget_obsidian_compact, resolved, eqFrame, progressOverride, assets),
-                SizeF(215f, 48f) to buildLayout(context, R.layout.widget_obsidian_horizontal, resolved, eqFrame, progressOverride, assets),
-                SizeF(115f, 115f) to buildLayout(context, R.layout.widget_obsidian_square, resolved, eqFrame, progressOverride, assets),
-                SizeF(240f, 115f) to buildLayout(context, R.layout.widget_obsidian_expanded, resolved, eqFrame, progressOverride, assets),
+                SizeF(110f, 48f) to buildLayout(context, R.layout.widget_obsidian_compact, resolved, eqFrame, progressOverride, assets, brand),
+                SizeF(215f, 48f) to buildLayout(context, R.layout.widget_obsidian_horizontal, resolved, eqFrame, progressOverride, assets, brand),
+                SizeF(115f, 115f) to buildLayout(context, R.layout.widget_obsidian_square, resolved, eqFrame, progressOverride, assets, brand),
+                SizeF(240f, 115f) to buildLayout(context, R.layout.widget_obsidian_expanded, resolved, eqFrame, progressOverride, assets, brand),
             )
             return RemoteViews(sizeMap)
         }
 
-        return buildLayout(context, resolveLayoutId(context, appWidgetId), resolved, eqFrame, progressOverride, assets)
+        return buildLayout(context, resolveLayoutId(context, appWidgetId), resolved, eqFrame, progressOverride, assets, brand)
     }
 
     private const val OBSIDIAN_BASE_SURFACE = 0xEB101218.toInt()
@@ -131,6 +132,7 @@ internal object ObsidianWidgetViews {
         eqFrame: Int?,
         progressOverride: Float?,
         assets: WidgetBakedAssets,
+        brand: WidgetBakedAssets,
     ): RemoteViews {
         val views = RemoteViews(context.packageName, layoutId)
         bind(
@@ -140,6 +142,7 @@ internal object ObsidianWidgetViews {
             eqFrame = eqFrame,
             progressOverride = progressOverride,
             assets = assets,
+            brand = brand,
             isCompact = (layoutId == R.layout.widget_obsidian_compact),
         )
         return views
@@ -152,25 +155,32 @@ internal object ObsidianWidgetViews {
         eqFrame: Int?,
         progressOverride: Float?,
         assets: WidgetBakedAssets,
+        brand: WidgetBakedAssets,
         isCompact: Boolean,
     ) {
         val snapshot = resolved.snapshot
         if (!resolved.usableSession) {
             views.setViewVisibility(R.id.widget_empty_group, View.VISIBLE)
             views.setViewVisibility(R.id.widget_content_group, View.GONE)
-            views.setImageViewResource(R.id.widget_empty_icon, R.drawable.widget_art_placeholder)
+            val brandSquircle = brand.artSquircle
+            if (brandSquircle != null && !brandSquircle.isRecycled) {
+                views.setImageViewBitmap(R.id.widget_empty_icon, brandSquircle)
+            } else {
+                views.setImageViewResource(R.id.widget_empty_icon, R.drawable.widget_art_placeholder)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 runCatching {
+                    val idleSurface = ColorUtils.blendARGB(OBSIDIAN_BASE_SURFACE, brand.primaryColor, 0.14f)
                     views.setColorStateList(
                         R.id.widget_root,
                         "setBackgroundTintList",
-                        ColorStateList.valueOf(OBSIDIAN_BASE_SURFACE),
+                        ColorStateList.valueOf(idleSurface),
                     )
                 }
             }
             if (resolved.hasAccess) {
-                views.setTextViewText(R.id.widget_empty_title, context.getString(R.string.widget_obsidian_name))
-                views.setTextViewText(R.id.widget_empty_sub, "Start a song in any media app")
+                views.setTextViewText(R.id.widget_empty_title, context.getString(R.string.app_name))
+                views.setTextViewText(R.id.widget_empty_sub, context.getString(R.string.widget_aura_idle))
                 views.setOnClickPendingIntent(R.id.widget_root, WidgetActions.openAppPending(context))
             } else {
                 views.setTextViewText(R.id.widget_empty_title, "Allow music access")
@@ -237,8 +247,8 @@ internal object ObsidianWidgetViews {
         }
 
         // Cached 256px superellipse squircle artwork with specular Fresnel rim
-        val art = assets.artSquircle
-        if (art != null && !art.isRecycled) {
+        val art = assets.artSquircle?.takeUnless { it.isRecycled } ?: brand.artSquircle?.takeUnless { it.isRecycled }
+        if (art != null) {
             views.setImageViewBitmap(R.id.widget_art, art)
         } else {
             views.setImageViewResource(R.id.widget_art, R.drawable.widget_art_placeholder)

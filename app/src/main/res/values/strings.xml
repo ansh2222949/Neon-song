@@ -7,7 +7,7 @@
     <string name="widget_obsidian_description">Frosted obsidian glass player with translucent depth and crystal rim</string>
     <string name="widget_aura_name">Neon Song Aura Glass</string>
     <string name="widget_aura_description">Frosted One UI glass player with song-reactive tint and crisp squircle artwork</string>
-    <string name="widget_aura_idle">Tap to open Neon Song</string>
+    <string name="widget_aura_idle">Tap to play • Ready for Hi-Res audio</string>
     <string name="widget_previous">Previous track</string>
     <string name="widget_play_pause">Play or pause</string>
     <string name="widget_next">Next track</string>

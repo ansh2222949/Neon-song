@@ -70,13 +70,14 @@ internal object AuraWidgetViews {
     ): RemoteViews {
         val resolved = WidgetViews.resolve(context)
         val assets = resolveAssets(memoryArt, resolved.snapshot.artPath)
+        val brand = WidgetGlassRenderer.brandArtwork(context, isObsidian = true, fallbackPrimary = FALLBACK_PRIMARY)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val sizeMap = mapOf(
-                SizeF(110f, 48f) to buildLayout(context, R.layout.widget_aura_compact, resolved, eqFrame, progressOverride, assets),
-                SizeF(200f, 48f) to buildLayout(context, R.layout.widget_aura_horizontal, resolved, eqFrame, progressOverride, assets),
-                SizeF(115f, 105f) to buildLayout(context, R.layout.widget_aura_square, resolved, eqFrame, progressOverride, assets),
-                SizeF(230f, 105f) to buildLayout(context, R.layout.widget_aura_expanded, resolved, eqFrame, progressOverride, assets),
+                SizeF(110f, 48f) to buildLayout(context, R.layout.widget_aura_compact, resolved, eqFrame, progressOverride, assets, brand),
+                SizeF(200f, 48f) to buildLayout(context, R.layout.widget_aura_horizontal, resolved, eqFrame, progressOverride, assets, brand),
+                SizeF(115f, 105f) to buildLayout(context, R.layout.widget_aura_square, resolved, eqFrame, progressOverride, assets, brand),
+                SizeF(230f, 105f) to buildLayout(context, R.layout.widget_aura_expanded, resolved, eqFrame, progressOverride, assets, brand),
             )
             return RemoteViews(sizeMap)
         }
@@ -90,7 +91,7 @@ internal object AuraWidgetViews {
             minW < 210 -> R.layout.widget_aura_square
             else -> R.layout.widget_aura_expanded
         }
-        return buildLayout(context, layoutId, resolved, eqFrame, progressOverride, assets)
+        return buildLayout(context, layoutId, resolved, eqFrame, progressOverride, assets, brand)
     }
 
     fun buildProgressOnly(
@@ -133,12 +134,15 @@ internal object AuraWidgetViews {
         eqFrame: Int?,
         progressOverride: Float?,
         assets: WidgetBakedAssets,
+        brand: WidgetBakedAssets,
     ): RemoteViews {
         val views = RemoteViews(context.packageName, layoutId)
         val snap = resolved.snapshot
-        val accentTint = ColorUtils.blendARGB(assets.primaryColor, 0xFFFFFFFF.toInt(), 0.22f)
-        val playContentColor = assets.onPrimaryColor
-        val surfaceTint = ColorUtils.blendARGB(BASE_SMOKED_SURFACE, assets.primaryColor, 0.22f)
+        val hasTrackArt = assets.artSquircle != null && !assets.artSquircle.isRecycled
+        val activePalette = if (hasTrackArt) assets else brand
+        val accentTint = ColorUtils.blendARGB(activePalette.primaryColor, 0xFFFFFFFF.toInt(), 0.22f)
+        val playContentColor = activePalette.onPrimaryColor
+        val surfaceTint = ColorUtils.blendARGB(BASE_SMOKED_SURFACE, activePalette.primaryColor, 0.22f)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             views.setColorStateList(R.id.widget_root, "setBackgroundTintList", ColorStateList.valueOf(surfaceTint))
@@ -147,9 +151,14 @@ internal object AuraWidgetViews {
         if (!resolved.usableSession) {
             views.setViewVisibility(R.id.widget_empty_group, View.VISIBLE)
             views.setViewVisibility(R.id.widget_content_group, View.GONE)
-            views.setImageViewResource(R.id.widget_empty_icon, R.drawable.widget_art_placeholder)
+            val brandSquircle = brand.artSquircle
+            if (brandSquircle != null && !brandSquircle.isRecycled) {
+                views.setImageViewBitmap(R.id.widget_empty_icon, brandSquircle)
+            } else {
+                views.setImageViewResource(R.id.widget_empty_icon, R.drawable.widget_art_placeholder)
+            }
             if (resolved.hasAccess) {
-                views.setTextViewText(R.id.widget_empty_title, context.getString(R.string.widget_aura_name))
+                views.setTextViewText(R.id.widget_empty_title, context.getString(R.string.app_name))
                 views.setTextViewText(R.id.widget_empty_sub, context.getString(R.string.widget_aura_idle))
                 views.setOnClickPendingIntent(R.id.widget_root, WidgetActions.openAppPending(context))
             } else {
@@ -164,8 +173,8 @@ internal object AuraWidgetViews {
         views.setViewVisibility(R.id.widget_empty_group, View.GONE)
         views.setViewVisibility(R.id.widget_content_group, View.VISIBLE)
 
-        val squircle = assets.artSquircle
-        if (squircle != null && !squircle.isRecycled) {
+        val squircle = assets.artSquircle?.takeUnless { it.isRecycled } ?: brand.artSquircle?.takeUnless { it.isRecycled }
+        if (squircle != null) {
             views.setImageViewBitmap(R.id.widget_art, squircle)
         } else {
             views.setImageViewResource(R.id.widget_art, R.drawable.widget_art_placeholder)
@@ -178,7 +187,7 @@ internal object AuraWidgetViews {
         views.setImageViewResource(R.id.widget_btn_play_pause, playIcon)
         views.setInt(R.id.widget_btn_play_pause, "setColorFilter", playContentColor)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            views.setColorStateList(R.id.widget_play_pause_container, "setBackgroundTintList", ColorStateList.valueOf(assets.primaryColor))
+            views.setColorStateList(R.id.widget_play_pause_container, "setBackgroundTintList", ColorStateList.valueOf(activePalette.primaryColor))
         }
         val togglePi = WidgetActions.togglePending(context, AuraWidgetReceiver::class.java)
         views.setOnClickPendingIntent(R.id.widget_play_pause_container, togglePi)

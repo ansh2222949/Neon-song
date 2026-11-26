@@ -19,9 +19,10 @@
 
         <ImageView
             android:id="@+id/widget_empty_icon"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="54dp"
+            android:layout_height="54dp"
             android:contentDescription="@null"
+            android:scaleType="centerCrop"
             android:src="@drawable/widget_art_placeholder" />
 
         <TextView
@@ -145,11 +146,12 @@
                 android:id="@+id/widget_progress"
                 style="?android:attr/progressBarStyleHorizontal"
                 android:layout_width="match_parent"
-                android:layout_height="3dp"
+                android:layout_height="3.5dp"
                 android:layout_marginTop="5dp"
                 android:max="1000"
                 android:progress="0"
                 android:progressBackgroundTint="#2EFFFFFF"
+                android:progressDrawable="@drawable/widget_progress_bar"
                 android:progressTint="#FF00E5FF" />
         </LinearLayout>
 

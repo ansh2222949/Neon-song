@@ -91,19 +91,20 @@ internal object WidgetViews {
     ): RemoteViews {
         val resolved = resolve(context)
         val assets = resolveAssets(context, memoryArt, resolved.snapshot.artPath)
+        val brand = WidgetGlassRenderer.brandArtwork(context, isObsidian = false, fallbackPrimary = 0xFF00E5FF.toInt())
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             // Samsung One UI responsive breakpoints (2x1, 3x1/4x1/5x1, 2x2, 4x2/4x3+)
             val sizeMap = mapOf(
-                SizeF(110f, 48f) to buildLayout(context, R.layout.widget_now_playing_compact, resolved, eqFrame, progressOverride, assets),
-                SizeF(215f, 48f) to buildLayout(context, R.layout.widget_now_playing, resolved, eqFrame, progressOverride, assets),
-                SizeF(115f, 115f) to buildLayout(context, R.layout.widget_now_playing_square, resolved, eqFrame, progressOverride, assets),
-                SizeF(240f, 115f) to buildLayout(context, R.layout.widget_now_playing_expanded, resolved, eqFrame, progressOverride, assets),
+                SizeF(110f, 48f) to buildLayout(context, R.layout.widget_now_playing_compact, resolved, eqFrame, progressOverride, assets, brand),
+                SizeF(215f, 48f) to buildLayout(context, R.layout.widget_now_playing, resolved, eqFrame, progressOverride, assets, brand),
+                SizeF(115f, 115f) to buildLayout(context, R.layout.widget_now_playing_square, resolved, eqFrame, progressOverride, assets, brand),
+                SizeF(240f, 115f) to buildLayout(context, R.layout.widget_now_playing_expanded, resolved, eqFrame, progressOverride, assets, brand),
             )
             return RemoteViews(sizeMap)
         }
 
-        return buildLayout(context, resolveLayoutId(context, appWidgetId), resolved, eqFrame, progressOverride, assets)
+        return buildLayout(context, resolveLayoutId(context, appWidgetId), resolved, eqFrame, progressOverride, assets, brand)
     }
 
     private fun resolveLayoutId(context: Context, appWidgetId: Int): Int {
@@ -146,6 +147,7 @@ internal object WidgetViews {
         eqFrame: Int?,
         progressOverride: Float?,
         assets: WidgetBakedAssets,
+        brand: WidgetBakedAssets,
     ): RemoteViews {
         val views = RemoteViews(context.packageName, layoutId)
         bind(
@@ -155,6 +157,7 @@ internal object WidgetViews {
             eqFrame = eqFrame,
             progressOverride = progressOverride,
             assets = assets,
+            brand = brand,
             isCompact = (layoutId == R.layout.widget_now_playing_compact),
         )
         return views
@@ -167,16 +170,26 @@ internal object WidgetViews {
         eqFrame: Int?,
         progressOverride: Float?,
         assets: WidgetBakedAssets,
+        brand: WidgetBakedAssets,
         isCompact: Boolean,
     ) {
         val snapshot = resolved.snapshot
         if (!resolved.usableSession) {
             views.setViewVisibility(R.id.widget_empty_group, View.VISIBLE)
             views.setViewVisibility(R.id.widget_content_group, View.GONE)
-            views.setImageViewResource(R.id.widget_empty_icon, R.drawable.widget_art_placeholder)
+            val brandSquircle = brand.artSquircle
+            if (brandSquircle != null && !brandSquircle.isRecycled) {
+                views.setImageViewBitmap(R.id.widget_empty_icon, brandSquircle)
+            } else {
+                views.setImageViewResource(R.id.widget_empty_icon, R.drawable.widget_art_placeholder)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 runCatching {
-                    val neutralSurface = ContextCompat.getColor(context, R.color.widget_surface)
+                    val neutralSurface = ColorUtils.blendARGB(
+                        ContextCompat.getColor(context, R.color.widget_surface),
+                        brand.primaryColor,
+                        0.08f,
+                    )
                     views.setColorStateList(
                         R.id.widget_root,
                         "setBackgroundTintList",
@@ -185,8 +198,8 @@ internal object WidgetViews {
                 }
             }
             if (resolved.hasAccess) {
-                views.setTextViewText(R.id.widget_empty_title, context.getString(R.string.widget_name))
-                views.setTextViewText(R.id.widget_empty_sub, "Start a song in any media app")
+                views.setTextViewText(R.id.widget_empty_title, context.getString(R.string.app_name))
+                views.setTextViewText(R.id.widget_empty_sub, context.getString(R.string.widget_aura_idle))
                 views.setOnClickPendingIntent(R.id.widget_root, WidgetActions.openAppPending(context))
             } else {
                 views.setTextViewText(R.id.widget_empty_title, "Allow music access")
@@ -256,8 +269,8 @@ internal object WidgetViews {
         }
 
         // Cached 256px superellipse squircle artwork with specular Fresnel rim
-        val art = assets.artSquircle
-        if (art != null && !art.isRecycled) {
+        val art = assets.artSquircle?.takeUnless { it.isRecycled } ?: brand.artSquircle?.takeUnless { it.isRecycled }
+        if (art != null) {
             views.setImageViewBitmap(R.id.widget_art, art)
         } else {
             views.setImageViewResource(R.id.widget_art, R.drawable.widget_art_placeholder)

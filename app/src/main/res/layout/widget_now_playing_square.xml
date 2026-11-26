@@ -23,9 +23,10 @@
 
         <ImageView
             android:id="@+id/widget_empty_icon"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
+            android:layout_width="58dp"
+            android:layout_height="58dp"
             android:contentDescription="@null"
+            android:scaleType="centerCrop"
             android:src="@drawable/widget_art_placeholder" />
 
         <TextView
@@ -150,6 +151,7 @@
                 android:max="1000"
                 android:progress="0"
                 android:progressBackgroundTint="@color/widget_track"
+                android:progressDrawable="@drawable/widget_progress_bar"
                 android:progressTint="@color/widget_primary" />
         </LinearLayout>
 

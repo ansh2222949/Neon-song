@@ -63,7 +63,11 @@ class NeonSongApplication : Application(), ImageLoaderFactory {
                     .map { it.appIconKey }
                     .distinctUntilChanged()
                     .collect { iconKey ->
+                        val previousIcon = com.neonsong.app.ui.common.NeonBrand.AppIconRes
                         com.neonsong.app.ui.common.NeonBrand.applyKey(iconKey)
+                        if (com.neonsong.app.ui.common.NeonBrand.AppIconRes != previousIcon) {
+                            com.neonsong.app.widget.WidgetUpdater.refreshTheme(this@NeonSongApplication)
+                        }
                     }
             } catch (cancellation: CancellationException) {
                 throw cancellation
