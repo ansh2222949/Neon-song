@@ -107,7 +107,8 @@
     <string name="settings_studio_clarity_on">Crystal-clear open sound • airy detail • deep clean separation</string>
     <string name="settings_studio_clarity_off">Original unshaped output</string>
     <string name="settings_canvas_enabled">Motion Video Artwork</string>
-    <string name="settings_canvas_enabled_sub">Play live Apple Music &amp; community motion loops on cover art</string>
+    <string name="settings_canvas_enabled_sub">Play live Spotify Canvas &amp; Apple Music motion loops</string>
+    <string name="settings_canvas_style">Canvas Video Style</string>
     <string name="settings_canvas_full_bleed">Full Screen Artwork</string>
     <string name="settings_canvas_full_bleed_sub">Full screen edge-to-edge artwork for static and animated tracks</string>
     <string name="settings_canvas_cellular">Canvas Over Cellular</string>

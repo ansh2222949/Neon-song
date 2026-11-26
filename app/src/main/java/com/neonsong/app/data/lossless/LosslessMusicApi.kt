@@ -8,6 +8,7 @@ import com.neonsong.app.data.addon.AddonTrack
 import com.neonsong.app.data.addon.AddonStream
 import com.neonsong.app.data.local.SettingsPreferences
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -21,6 +22,7 @@ import org.json.JSONObject
 import java.net.URLEncoder
 import java.text.Normalizer
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -391,6 +393,13 @@ class LosslessMusicApi @Inject constructor(
             "cover", "demo", "reprise", "remake", "rework", "extended", "edit",
             "sped", "slowed", "reverb", "nightcore", "lofi", "orchestral", "symphonic",
             "part", "pt", "chapter", "atmos", "dolby", "spatial",
+            "piano", "ver", "version", "tv", "anime", "game", "size", "short",
+            "guitar", "violin", "cello", "flute", "sax", "saxophone", "orchestra", "strings",
+            "orgel", "musicbox", "lullaby", "chiptune", "8bit", "parody", "meme",
+            "offvocal", "inst", "arrangement", "arrange", "first", "take", "firsttake",
+            "english", "japanese", "korean", "chinese", "spanish", "hindi", "tamil", "telugu",
+            "french", "german", "italian", "russian", "slow", "fast", "mix", "dub",
+            "chopped", "screwed",
         )
 
         private val NEUTRAL_SEGMENTS = setOf(
@@ -434,8 +443,8 @@ class LosslessMusicApi @Inject constructor(
         private val ARTIST_SEPARATORS =
             Regex("""\s*(?:[,&/;·|]|\band\b|\bx\b|\bvs\.?\b|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bwith\b)\s*""", RegexOption.IGNORE_CASE)
 
-        private val DIACRITICS = Regex("\\p{M}+")
-        private val NON_ALPHANUMERIC = Regex("[^a-z0-9]+")
+        private val DIACRITICS = Regex("[\\u0300-\\u036F]+")
+        private val NON_ALPHANUMERIC = Regex("[^\\p{L}\\p{N}\\p{M}]+")
         private val MULTI_SPACE = Regex("\\s+")
 
         private val BRACKET_SEGMENT_REGEX = Regex("""[(\[]([^()\[\]]*)[)\]]""")
@@ -446,14 +455,18 @@ class LosslessMusicApi @Inject constructor(
         private val INITIALS_DOT_REGEX = Regex("""\b([a-z])\s*\.\s*(?=[a-z]\b)""")
         private val INITIALS_SPACE_REGEX = Regex("""\b([a-z])\s+(?=[a-z]\b)""")
         private val CREDIT_HYPHEN_SPLIT_REGEX = Regex("""\s+-\s+""")
-        fun normalizeText(raw: String): String = Normalizer.normalize(raw, Normalizer.Form.NFD)
-            .replace(DIACRITICS, "")
+        fun normalizeText(raw: String): String = Normalizer.normalize(
+            Normalizer.normalize(raw, Normalizer.Form.NFD)
+                .replace(DIACRITICS, ""),
+            Normalizer.Form.NFC,
+        )
             .lowercase(Locale.ROOT)
             .replace("$", "s")
             .replace(NON_ALPHANUMERIC, " ")
             .replace(MULTI_SPACE, " ")
             .trim()
         private val TOPIC_CHANNEL_SUFFIX = Regex("""(?i)\s*[-–—]\s*topic\s*$|\s+topic\s*$""")
+        private val CJK_BRACKET_TAG = Regex("""【[^】]*】""")
         private val PIPE_NOISE = Regex("""\s*\|.*$""")
         private val SOUNDTRACK_SUFFIX = Regex(
             """(?i)\s*[\[(]\s*(?:from\s+(?:the\s+)?(?:original\s+)?(?:motion\s+picture|movie|film|soundtrack)|soundtrack|ost)\s*(?:["“][^"”\r\n]+["”]|[^\])]+)?\s*[\])]\s*$|\s*[-–—|]\s*(?:from\s+(?:the\s+)?(?:original\s+)?(?:motion\s+picture|movie|film|soundtrack)|soundtrack|ost)\s*.*$""",
@@ -492,7 +505,9 @@ class LosslessMusicApi @Inject constructor(
         fun parseTitle(raw: String, artist: String = "", album: String? = null): TitleParts {
             val versions = sortedSetOf<String>()
             val context = mutableSetOf<String>()
-            var text = raw.lowercase(Locale.ROOT)
+            var text = raw
+                .replace(CJK_BRACKET_TAG, " ")
+                .lowercase(Locale.ROOT)
                 .replace("&", " and ")
                 .replace("$", "s")
 
@@ -618,25 +633,509 @@ class LosslessMusicApi @Inject constructor(
         private val PERFORMING_ROLE_WORDS = setOf(
             "mainartist", "featuredartist", "performer", "vocal", "vocals", "vocalist", "singer",
         )
+        private val UNREQUESTED_ARTIST_PROJECT_TOKENS = setOf(
+            "first", "take", "cover", "tribute", "karaoke", "piano", "lullaby",
+            "orchestra", "orchestral", "strings", "musicbox", "8bit", "chiptune", "kidz",
+        )
+        private val GENERIC_ALBUM_WORDS = setOf(
+            "the", "best", "single", "album", "vol", "volume", "deluxe", "edition",
+            "hits", "music", "song", "songs", "live", "one", "zero", "part",
+            "remaster", "remastered", "expanded", "complete", "collection", "greatest",
+            "track", "tracks", "original", "version", "ep", "lp", "ost", "soundtrack",
+        )
         private val IDENTITY_VARIANT_PATTERNS = listOf(
             "live" to Regex("\\blive\\b"),
             "acoustic" to Regex("\\bacoustic\\b"),
-            "karaoke" to Regex("\\bkaraoke\\b"),
-            "instrumental" to Regex("\\binstrumental\\b"),
+            "karaoke" to Regex("\\bkaraoke\\b|カラオケ"),
+            "instrumental" to Regex("\\binstrumental\\b|\\boff\\s*vocal\\b|\\binst\\b|オフボーカル"),
             "tribute" to Regex("\\btribute\\b"),
-            "cover" to Regex("\\bcover\\b"),
+            "cover" to Regex("\\bcover\\b|歌ってみた|弾いてみた"),
             "remix" to Regex("\\bremix(?:ed)?\\b"),
             "mashup" to Regex("""\bmash[ -]?up\b|\b[a-z0-9]+\s+x\s+[a-z0-9]+\b"""),
             "demo" to Regex("\\bdemo\\b"),
             "slowed" to Regex("\\bslowed\\b"),
             "reverb" to Regex("\\breverb\\b"),
-            "sped-up" to Regex("\\bsped up\\b"),
+            "sped-up" to Regex("\\bsped up\\b|\\bspeed up\\b"),
             "nightcore" to Regex("\\bnightcore\\b"),
             "radio-edit" to Regex("\\bradio edit\\b"),
             "extended" to Regex("\\bextended(?: version| mix)?\\b"),
+            "first-take" to Regex("""\bfirst\s+take\b"""),
+            "piano-ver" to Regex("""\bpiano\s*(?:ver(?:sion)?|cover|solo|arrange(?:ment)?)\b|ピアノ"""),
+            "orchestral" to Regex("""\borchestr(?:a|al)\b|\bsymphonic\b"""),
+            "8bit" to Regex("""\b8[\s-]?bit\b|\bchiptune\b|\bmusic\s*box\b|\borgel\b|\blullaby\b"""),
+            "parody" to Regex("""\bparody\b"""),
             "atmos" to Regex("\\bdolby\\b|\\batmos\\b|\\bspatial\\b|360\\s*reality|sony\\s*360"),
         )
+
+        private fun hasNonAsciiLetter(value: String): Boolean = value.any { ch ->
+            ch.code >= 128 && Character.isLetter(ch)
+        }
+
+        /**
+         * YouTube Music formats bilingual titles as "Native - Romanized" (e.g. "うっせぇわ - Usseewa").
+         * Extracts both independent forms when one half is non-Latin and the other is Latin.
+         */
+        internal fun extractBilingualTitles(
+            rawTitle: String,
+            artist: String = "",
+            album: String? = null,
+        ): List<String> {
+            val cleaned = cleanForSearch(rawTitle)
+            val parts = cleaned.split(Regex("""\s+[-–—/]\s+""")).map { it.trim() }.filter { it.isNotBlank() }
+            if (parts.size != 2) return emptyList()
+            val (left, right) = parts
+            if (isArtistOrAlbumName(left, artist, album) || isArtistOrAlbumName(right, artist, album) ||
+                isSegmentMetadata(left) || isSegmentMetadata(right)
+            ) {
+                return emptyList()
+            }
+            val leftNonAscii = hasNonAsciiLetter(left)
+            val rightNonAscii = hasNonAsciiLetter(right)
+            return if (leftNonAscii != rightNonAscii) listOf(left, right) else emptyList()
+        }
+
+        internal fun verifiedMatchScoreForTesting(
+            candidateTitle: String,
+            candidateArtist: String,
+            candidateAlbum: String = "",
+            candidateDurationSec: Int = 0,
+            targetTitle: String,
+            targetArtist: String,
+            expectedDurationSeconds: Int? = null,
+            expectedAlbum: String? = null,
+        ): Int? = verifiedMatchScore(
+            item = TidalCandidateItem(
+                id = 1L,
+                title = candidateTitle,
+                duration = candidateDurationSec,
+                performerName = candidateArtist,
+                albumArtistName = candidateArtist,
+                albumTitle = candidateAlbum,
+                performers = candidateArtist,
+            ),
+            title = targetTitle,
+            artist = targetArtist,
+            expectedDurationSeconds = expectedDurationSeconds,
+            expectedAlbum = expectedAlbum,
+        )
+
+        private fun verifiedMatchScore(
+            item: TidalCandidateItem,
+            title: String,
+            artist: String,
+            expectedDurationSeconds: Int?,
+            expectedAlbum: String?,
+        ): Int? {
+            val matchArtist = cleanForSearch(artist).ifBlank { artist }
+            val bilingualCandidates = extractBilingualTitles(title, matchArtist, expectedAlbum)
+            val wantedVariants = (listOf(title) + bilingualCandidates)
+                .distinct()
+                .map { parseTitle(it, matchArtist, expectedAlbum) }
+                .filter { it.core.isNotBlank() && it.core.any(Char::isLetterOrDigit) }
+            val wanted = wantedVariants.firstOrNull() ?: return null
+            val got = parseTitle(item.title, item.performerName, item.albumTitle)
+            if (got.core.isBlank() || !got.core.any(Char::isLetterOrDigit)) return null
+
+            // 1. Version agreement: asking for original must never land on remix, live, acoustic, karaoke, piano ver, etc.
+            if (wantedVariants.none { it.versions == got.versions }) {
+                Log.d(TAG, "reject candidate id=${item.id}: version mismatch wanted=${wanted.versions} got=${got.versions} for '$title'")
+                return null
+            }
+
+            // Severe mismatches (karaoke, instrumental, tribute, cover, first take, piano solo, 8-bit, etc.)
+            val targetVariants = identityVariants(title, matchArtist)
+            val candidateVariants = identityVariants(item.title, item.performerName)
+            val strictBlockTags = setOf(
+                "instrumental", "karaoke", "tribute", "cover",
+                "first-take", "piano-ver", "orchestral", "8bit", "parody",
+            )
+            val severeMismatch = strictBlockTags.any { tag ->
+                !targetVariants.contains(tag) && candidateVariants.contains(tag)
+            }
+            if (severeMismatch) {
+                Log.d(TAG, "reject candidate id=${item.id}: severe variant mismatch target=$targetVariants candidate=$candidateVariants for '$title'")
+                return null
+            }
+
+            // Reject cover/tribute/first-take style project credits unless the caller explicitly asked for them
+            val targetArtistNorm = normalizeText(matchArtist).split(' ').toSet()
+            val targetTitleNorm = normalizeText(title).split(' ').toSet()
+            val candidateArtistWords = normalizeText("${item.performerName} ${item.albumArtistName}").split(' ').filter { it.isNotEmpty() }.toSet()
+            val hasUnrequestedProjectTag = candidateArtistWords.any { token ->
+                token in UNREQUESTED_ARTIST_PROJECT_TOKENS &&
+                    token !in targetArtistNorm &&
+                    token !in targetTitleNorm
+            }
+            if (hasUnrequestedProjectTag) {
+                Log.d(TAG, "reject candidate id=${item.id}: unrequested artist project credit '${item.performerName}' for '$title'")
+                return null
+            }
+
+            // 2. Title core matching across wanted + any valid bilingual form ("うっせぇわ" / "Usseewa")
+            var bestIsExact = false
+            var bestIsNorm = false
+            var bestIsPhonetic = false
+            var bestIsFuzzy = false
+            var bestCoreDistance = Int.MAX_VALUE
+            for (w in wantedVariants) {
+                val isExact = w.core == got.core
+                val isNorm = w.core.replace(" ", "") == got.core.replace(" ", "")
+                val bothAscii = w.core.all { it.code < 128 } && got.core.all { it.code < 128 }
+                val isPhonetic = bothAscii && foldTransliteration(w.core) == foldTransliteration(got.core)
+                val dist = levenshtein(w.core, got.core)
+                val minLen = minOf(w.core.length, got.core.length)
+                // Only allow tiny typo fuzzy match on longer Latin titles (never on CJK or 7-char words like "calling"/"falling")
+                val isFuzzy = bothAscii && minLen >= 10 && dist <= (if (minLen >= 16) 2 else 1)
+                if (isExact || isNorm || isPhonetic || isFuzzy) {
+                    bestIsExact = bestIsExact || isExact
+                    bestIsNorm = bestIsNorm || isNorm
+                    bestIsPhonetic = bestIsPhonetic || isPhonetic
+                    bestIsFuzzy = bestIsFuzzy || isFuzzy
+                    if (dist < bestCoreDistance) bestCoreDistance = dist
+                }
+            }
+            if (!bestIsExact && !bestIsNorm && !bestIsPhonetic && !bestIsFuzzy) return null
+
+            val isExactCore = bestIsExact
+            val isNormalizedCore = bestIsNorm
+            val isPhoneticCore = bestIsPhonetic
+            val coreDistance = if (bestCoreDistance == Int.MAX_VALUE) 0 else bestCoreDistance
+
+            // 3. Artist verification & exact-master duration tie-break
+            val hasArtistMatch = isVerifiedArtistMatch(
+                targetArtist = matchArtist,
+                performer = item.performerName,
+                albumArtist = item.albumArtistName,
+                performersText = item.performers,
+            )
+
+            val durationDifference = if (expectedDurationSeconds != null && expectedDurationSeconds > 0 && item.duration > 0) {
+                kotlin.math.abs(item.duration - expectedDurationSeconds)
+            } else null
+
+            val isLabel = isRecordLabel(matchArtist)
+            val hasAlbumCtx = hasAlbumOrContextOverlap(wanted, got, expectedAlbum, item.albumTitle)
+
+            // When credits disagree (e.g. composer vs singer in regional music, or channel name like T-Series/Sony Music India):
+            // Allow ONLY IF exact title master matches duration to within <= 2 seconds AND (it is a label OR strong album match)!
+            val creditDisagreeOverride = !hasArtistMatch && (isExactCore || isNormalizedCore || isPhoneticCore) &&
+                (isLabel || hasAlbumCtx) &&
+                durationDifference != null && durationDifference <= 2
+
+            if (!hasArtistMatch && !creditDisagreeOverride) {
+                Log.d(TAG, "reject candidate id=${item.id}: artist mismatch target='$matchArtist' performer='${item.performerName}' for '$title'")
+                return null
+            }
+
+            // Bug #2: same title + same artist in another language (Telugu vs Hindi vs Tamil)
+            val expectedLanguages = extractLanguages("$title ${expectedAlbum.orEmpty()}")
+            val candidateLanguages = extractLanguages("${item.title} ${item.albumTitle}")
+            if (expectedLanguages.isNotEmpty() && candidateLanguages.isNotEmpty() &&
+                expectedLanguages.intersect(candidateLanguages).isEmpty()
+            ) {
+                Log.d(TAG, "reject candidate id=${item.id} title='${item.title}' album='${item.albumTitle}': language mismatch expected=$expectedLanguages candidate=$candidateLanguages for '$title'")
+                return null
+            }
+
+            // 4. Duration ceiling
+            val maxDurationDifference = when {
+                hasArtistMatch && isExactCore -> 45
+                hasArtistMatch -> 35
+                else -> 2 // Credit disagree override strictly capped at 2 seconds
+            }
+            if (durationDifference != null && durationDifference > maxDurationDifference) {
+                Log.d(TAG, "reject candidate id=${item.id}: duration ${item.duration}s vs expected ${expectedDurationSeconds}s (Δ${durationDifference}s > ${maxDurationDifference}s) for '$title'")
+                return null
+            }
+
+            // 5. Scoring
+            var score = 1_000 - coreDistance * 30
+            if (isExactCore) score += 400
+            else if (isNormalizedCore) score += 300
+            else if (isPhoneticCore) score += 200
+
+            if (hasArtistMatch) {
+                score += 300
+            } else {
+                // Master tie-break penalty so any credited candidate beats it
+                score -= 300
+            }
+
+            // Context alignment (shared movie/album/soundtrack name in brackets or packaging)
+            if (wanted.context.isNotEmpty() && got.context.isNotEmpty() && wanted.context.any { it in got.context }) {
+                score += 200
+            }
+
+            expectedAlbum?.takeIf(String::isNotBlank)?.let { album ->
+                val normExpected = normalizeTitle(album, "")
+                val normCandidate = normalizeTitle(item.albumTitle, "")
+                if (normExpected.isNotBlank() && normCandidate.isNotBlank()) {
+                    when {
+                        normExpected == normCandidate -> score += 500
+                        normCandidate.contains(normExpected) || normExpected.contains(normCandidate) -> score += 300
+                        else -> {
+                            val expTokens = normExpected.split(' ').filter { it.length > 1 }.toSet()
+                            val candTokens = normCandidate.split(' ').filter { it.length > 1 }.toSet()
+                            val expNumbers = NUMBER_TOKEN_REGEX.findAll(normExpected).map { it.value }.toSet()
+                            val candNumbers = NUMBER_TOKEN_REGEX.findAll(normCandidate).map { it.value }.toSet()
+                            val numbersClash = expNumbers.isNotEmpty() && candNumbers.isNotEmpty() && expNumbers != candNumbers
+                            val overlap = expTokens.intersect(candTokens).size
+                            if (!numbersClash && expTokens.isNotEmpty() && overlap >= minOf(2, expTokens.size) && overlap * 2 >= expTokens.size) {
+                                score += 150
+                            } else {
+                                score -= 100
+                                Log.d(TAG, "album mismatch penalty id=${item.id}: expected='$album' candidate='${item.albumTitle}' for '$title'")
+                            }
+                        }
+                    }
+                }
+            }
+            durationDifference?.let { score += (maxDurationDifference - it) * 5 }
+            return score
+        }
+
+        private fun extractLanguages(raw: String): Set<String> {
+            if (raw.isBlank()) return emptySet()
+            return normalizeText(raw).split(' ').toSet().intersect(LANGUAGE_TOKENS)
+        }
+
+        private fun hasAlbumOrContextOverlap(
+            wanted: TitleParts,
+            got: TitleParts,
+            expectedAlbum: String?,
+            candidateAlbum: String?,
+        ): Boolean {
+            if (wanted.context.isNotEmpty() && got.context.isNotEmpty() && wanted.context.any { it in got.context }) {
+                return true
+            }
+            if (wanted.context.isNotEmpty() && !candidateAlbum.isNullOrBlank()) {
+                val normCand = normalizeText(candidateAlbum).split(' ').filter { it.length > 2 }.toSet()
+                if (wanted.context.any { it in normCand }) return true
+            }
+            if (got.context.isNotEmpty() && !expectedAlbum.isNullOrBlank()) {
+                val normExp = normalizeText(expectedAlbum).split(' ').filter { it.length > 2 }.toSet()
+                if (got.context.any { it in normExp }) return true
+            }
+            if (!expectedAlbum.isNullOrBlank() && !candidateAlbum.isNullOrBlank()) {
+                val normExp = normalizeText(expectedAlbum)
+                val normCand = normalizeText(candidateAlbum)
+                if (normExp.isNotBlank() && normCand.isNotBlank()) {
+                    if (normExp == normCand || normExp.contains(normCand) || normCand.contains(normExp)) {
+                        if (normExp !in GENERIC_ALBUM_WORDS && normCand !in GENERIC_ALBUM_WORDS) return true
+                    }
+                    val expTokens = normExp.split(' ').filter { it.length > 2 && it !in GENERIC_ALBUM_WORDS }.toSet()
+                    val candTokens = normCand.split(' ').filter { it.length > 2 && it !in GENERIC_ALBUM_WORDS }.toSet()
+                    if (expTokens.size >= 2 && candTokens.size >= 2 && expTokens.intersect(candTokens).size >= 2) return true
+                }
+            }
+            return false
+        }
+
+        /**
+         * When multiple language releases exist and the request specifies an
+         * expected language, filter candidates to match that language.
+         * Never drops all candidates to empty.
+         */
+        private fun gateAmbiguousLanguage(
+            verified: List<TidalCandidateItem>,
+            title: String,
+            expectedAlbum: String?,
+        ): List<TidalCandidateItem> {
+            if (verified.size < 2) return verified
+            val expectedLanguages = extractLanguages("$title ${expectedAlbum.orEmpty()}")
+            if (expectedLanguages.isNotEmpty()) {
+                val matching = verified.filter {
+                    val candidateLangs = extractLanguages("${it.title} ${it.albumTitle}")
+                    candidateLangs.isEmpty() || candidateLangs.intersect(expectedLanguages).isNotEmpty()
+                }
+                if (matching.isNotEmpty()) return matching
+            }
+            return verified
+        }
+
+        private fun cleanForSearch(raw: String): String {
+            return raw
+                .replace(TOPIC_CHANNEL_SUFFIX, "")
+                .replace(CJK_BRACKET_TAG, " ")
+                .replace(PIPE_NOISE, "")
+                .replace(SOUNDTRACK_SUFFIX, "")
+                .replace(FEATURING_CLAUSE, " ")
+                .replace(ATMOS_VERSION_MARKER, " ")
+                .replace(BRACKETED_DISPLAY_NOISE, " ")
+                .replace(TRAILING_DISPLAY_NOISE, " ")
+                .replace(MULTI_SPACE, " ")
+                .trim()
+        }
+
+        private fun normalizeTitle(raw: String, artist: String): String {
+            var cleaned = cleanForSearch(raw)
+            if (artist.isNotBlank()) {
+                val cleanArt = cleanForSearch(artist).ifBlank { artist }
+                cleaned = cleaned.replaceFirst(
+                    Regex("""^\s*${Regex.escape(cleanArt)}\s*[-–—:]\s*""", RegexOption.IGNORE_CASE),
+                    "",
+                )
+                cleaned = cleaned.replace(
+                    Regex("""(?i)\s*[-–—:]\s*${Regex.escape(cleanArt)}\s*$"""),
+                    "",
+                )
+            }
+            return normalizeText(cleaned)
+        }
+
+        private fun levenshtein(a: String, b: String): Int {
+            if (a == b) return 0
+            if (a.isEmpty()) return b.length
+            if (b.isEmpty()) return a.length
+            var previous = IntArray(b.length + 1) { it }
+            var current = IntArray(b.length + 1)
+            for (i in 1..a.length) {
+                current[0] = i
+                for (j in 1..b.length) {
+                    current[j] = minOf(
+                        previous[j] + 1,
+                        current[j - 1] + 1,
+                        previous[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1,
+                    )
+                }
+                val swap = previous
+                previous = current
+                current = swap
+            }
+            return previous[b.length]
+        }
+
+        private fun identityVariants(raw: String, artist: String): Set<String> {
+            val withoutArtistPrefix = if (artist.isBlank()) raw else raw.replaceFirst(
+                Regex("""^\s*${Regex.escape(artist)}\s*[-–—:]\s*""", RegexOption.IGNORE_CASE),
+                "",
+            )
+            val normalized = normalizeText(withoutArtistPrefix)
+            return IDENTITY_VARIANT_PATTERNS.mapNotNullTo(linkedSetOf()) { (name, pattern) ->
+                name.takeIf { pattern.containsMatchIn(normalized) }
+            }
+        }
+
+        /** True for an Atmos/Spatial mix by backend flag OR by title label ("(Dolby Atmos)"
+         *  version suffix). Labels matter because some catalogue items omit audioModes; the
+         *  "atmos" identity-variant tag keeps such items de-preferenced (never vetoed) for
+         *  stereo tiers while the Atmos boost/ordering prefers them when 28 is selected. */
+        private fun isAtmosCandidate(item: TidalCandidateItem): Boolean =
+            item.isAtmos || item.isSpatial ||
+                identityVariants(item.title, item.performerName).contains("atmos")
+
+        private fun foldTransliteration(str: String): String {
+            return str
+                .replace("aa", "a")
+                .replace("ee", "i")
+                .replace("oo", "u")
+                .replace("th", "t")
+                .replace("dh", "d")
+                .replace("bh", "b")
+                .replace("kh", "k")
+                .replace("gh", "g")
+                .replace("sh", "s")
+                .replace("zh", "z")
+                .replace("ph", "f")
+                .replace("v", "w")
+                .replace("ll", "l")
+                .replace("tt", "t")
+                .replace("dd", "d")
+                .replace("pp", "p")
+                .replace("mm", "m")
+                .replace("nn", "n")
+                .replace("ss", "s")
+                .replace("rr", "r")
+                .replace("cc", "c")
+                .replace("yy", "y")
+        }
+
+        private fun cleanArtistIdentity(raw: String): String {
+            val normalized = normalizeText(raw)
+            // Collapse single-letter initials: "a r rahman" -> "ar rahman", "a p dhillon" -> "ap dhillon"
+            val collapsed = normalized.replace(INITIALS_SPACE_REGEX, "$1")
+            return collapsed
+                .split(' ')
+                .filter { it !in ARTIST_NOISE_WORDS }
+                .joinToString(" ")
+                .trim()
+        }
+
+        internal fun artistNames(value: String): Set<List<String>> {
+            val lowered = value.lowercase(Locale.ROOT).replace("$", "s")
+            return lowered
+                .replace(INITIALS_DOT_REGEX, "$1")
+                .replace(INITIALS_SPACE_REGEX, "$1")
+                .split(ARTIST_SEPARATORS)
+                .map { name ->
+                    name.split(WORD_SPLIT_REGEX)
+                        .map { it.replace(NON_ALPHANUMERIC, "") }
+                        .filter { it.length > 1 && it !in ARTIST_NOISE_WORDS }
+                }
+                .filter { it.isNotEmpty() }
+                .toSet()
+        }
+
+        private fun runOfWords(outer: List<String>, inner: List<String>): Boolean {
+            if (inner.isEmpty() || inner.size > outer.size) return false
+            if (inner.size == 1 && outer.size > 1) {
+                return false
+            }
+            return (0..outer.size - inner.size).any { at ->
+                outer.subList(at, at + inner.size) == inner
+            }
+        }
+
+        private fun isVerifiedArtistMatch(
+            targetArtist: String,
+            performer: String,
+            albumArtist: String,
+            performersText: String?,
+        ): Boolean {
+            val target = cleanArtistIdentity(targetArtist)
+            if (target.isBlank()) return false
+            val primaryIdentities = listOf(performer, albumArtist)
+                .map(::cleanArtistIdentity)
+                .filter(String::isNotBlank)
+            if (primaryIdentities.any { it == target }) return true
+
+            val targetArtists = artistNames(targetArtist)
+            val candidateArtists = (listOf(performer, albumArtist) + listOfNotNull(performersText))
+                .filter(String::isNotBlank)
+                .flatMap { artistNames(it) }
+                .toSet()
+
+            if (targetArtists.isEmpty() || candidateArtists.isEmpty()) return false
+
+            for (ta in targetArtists) {
+                for (ca in candidateArtists) {
+                    if (ta == ca) return true
+                    if (runOfWords(ta, ca) || runOfWords(ca, ta)) return true
+                }
+            }
+
+            // Only match explicit performing-role credit lines here — never flatten raw artist
+            // tokens from primaryIdentities, which caused "Ado" to false-match "Clavick & Ado THE FIRST TAKE".
+            val performingCredits = performersText?.let { raw ->
+                normalizeText(raw)
+                    .split(CREDIT_HYPHEN_SPLIT_REGEX)
+                    .filter { credit -> PERFORMING_ROLE_WORDS.any { role -> role in credit.split(' ') } }
+            }.orEmpty()
+            val performingTokens = performingCredits
+                .flatMap { it.split(' ') }
+                .toSet()
+            val targetTokens = target.split(' ').filter { it.length > 1 }.toSet()
+            return performingTokens.isNotEmpty() && targetTokens.isNotEmpty() && targetTokens.all(performingTokens::contains)
+        }
     }
+
+    private data class CachedAddonLookup(
+        val stream: LosslessAudioStream?,
+        val expiresAtMs: Long,
+    )
+
+    private val inFlightAddonLookups = ConcurrentHashMap<String, CompletableDeferred<LosslessAudioStream?>>()
+    private val recentAddonLookups = ConcurrentHashMap<String, CachedAddonLookup>()
 
     fun invalidateCredentialsCache() {
         cachedCredentials = null
@@ -700,6 +1199,53 @@ class LosslessMusicApi @Inject constructor(
             Log.i(TAG, "resolveStream skipped: creds=$creds")
             return@withContext null
         }
+
+        // Deduplicate concurrent identical lookups (player upgrade + queue preloader)
+        if (excludedUrls.isEmpty() && !isDownload) {
+            val lookupKey = "${cleanForSearch(title).lowercase(Locale.ROOT)}|${cleanForSearch(artist).lowercase(Locale.ROOT)}|$preferredQuality|${expectedDurationSeconds ?: -1}|${creds.baseUrl}"
+            val now = System.currentTimeMillis()
+            recentAddonLookups[lookupKey]?.let { cached ->
+                if (cached.expiresAtMs > now) return@withContext cached.stream
+                recentAddonLookups.remove(lookupKey, cached)
+            }
+            val newDeferred = CompletableDeferred<LosslessAudioStream?>()
+            val existing = inFlightAddonLookups.putIfAbsent(lookupKey, newDeferred)
+            if (existing != null) {
+                return@withContext existing.await()
+            }
+            try {
+                Log.i(TAG, "resolveStream starting for '$title' by '$artist' via addon (preferredQuality=$preferredQuality, isDownload=false, baseUrl='${creds.baseUrl}', isCustomKey=${creds.apiKey != "addon"})")
+                val resolved = resolveFromAddon(
+                    title = title,
+                    artist = artist,
+                    expectedDurationSeconds = expectedDurationSeconds,
+                    expectedAlbum = expectedAlbum,
+                    preferredQuality = preferredQuality,
+                    addonBaseUrl = creds.baseUrl,
+                    clientSecret = creds.apiKey.takeIf { it != "addon" },
+                    excludedUrls = excludedUrls,
+                    isDownload = false,
+                )
+                val ttlMs = if (resolved != null) 45_000L else 20_000L
+                if (recentAddonLookups.size > 48) {
+                    val t = System.currentTimeMillis()
+                    recentAddonLookups.entries.removeIf { it.value.expiresAtMs <= t }
+                    if (recentAddonLookups.size > 48) recentAddonLookups.clear()
+                }
+                recentAddonLookups[lookupKey] = CachedAddonLookup(resolved, System.currentTimeMillis() + ttlMs)
+                newDeferred.complete(resolved)
+                return@withContext resolved
+            } catch (cancelled: CancellationException) {
+                newDeferred.cancel(cancelled)
+                throw cancelled
+            } catch (error: Throwable) {
+                newDeferred.completeExceptionally(error)
+                throw error
+            } finally {
+                inFlightAddonLookups.remove(lookupKey, newDeferred)
+            }
+        }
+
         Log.i(TAG, "resolveStream starting for '$title' by '$artist' via addon (preferredQuality=$preferredQuality, isDownload=$isDownload, baseUrl='${creds.baseUrl}', isCustomKey=${creds.apiKey != "addon"})")
 
         return@withContext resolveFromAddon(
@@ -746,6 +1292,7 @@ class LosslessMusicApi @Inject constructor(
         var sawAnyResponse = false
         val cleanTitle = cleanForSearch(title).ifBlank { title }
         val cleanArtist = cleanForSearch(artist).ifBlank { artist }
+        val bilingualTitles = extractBilingualTitles(title, cleanArtist, expectedAlbum)
         val parsedTarget = parseTitle(title, cleanArtist, expectedAlbum)
         val searchableTitle = (parsedTarget.words + parsedTarget.versions).joinToString(" ").ifBlank { cleanTitle }
 
@@ -755,13 +1302,21 @@ class LosslessMusicApi @Inject constructor(
         val primaryArtist = artistList.firstOrNull().orEmpty()
         val secondaryArtist = artistList.getOrNull(1).orEmpty()
 
-        val queries = listOfNotNull(
-            if (primaryArtist.isNotBlank()) "$searchableTitle $primaryArtist".trim() else null,
-            if (secondaryArtist.isNotBlank()) "$searchableTitle $secondaryArtist".trim() else null,
-            searchableTitle.trim(),
-            if (cleanArtist.isNotBlank() && cleanArtist != primaryArtist) "$searchableTitle $cleanArtist".trim() else null,
-            if (parsedTarget.core.length >= 4) foldTransliteration(searchableTitle).trim() else null,
-        ).filter { it.isNotBlank() }.distinct()
+        val titleQueries = (listOf(searchableTitle) + bilingualTitles)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        val queries = buildList {
+            for (tq in titleQueries) {
+                if (primaryArtist.isNotBlank()) add("$tq $primaryArtist".trim())
+            }
+            if (secondaryArtist.isNotBlank()) add("$searchableTitle $secondaryArtist".trim())
+            titleQueries.forEach { add(it) }
+            if (cleanArtist.isNotBlank() && cleanArtist != primaryArtist) add("$searchableTitle $cleanArtist".trim())
+            if (parsedTarget.core.length >= 4 && parsedTarget.core.all { it.code < 128 }) {
+                add(foldTransliteration(searchableTitle).trim())
+            }
+        }.filter { it.isNotBlank() }.distinct()
 
         val isAtmosPreferred = preferredQuality == QUALITY_DOLBY_ATMOS
         val qualityParam = when (preferredQuality) {
@@ -1082,373 +1637,5 @@ class LosslessMusicApi @Inject constructor(
             return rawUrl.startsWith("http://") || rawUrl.startsWith("https://")
         }
         return true
-    }
-
-
-
-
-
-
-    private fun verifiedMatchScore(
-        item: TidalCandidateItem,
-        title: String,
-        artist: String,
-        expectedDurationSeconds: Int?,
-        expectedAlbum: String?,
-    ): Int? {
-        val matchArtist = cleanForSearch(artist).ifBlank { artist }
-        val wanted = parseTitle(title, matchArtist, expectedAlbum)
-        val got = parseTitle(item.title, item.performerName, item.albumTitle)
-        if (wanted.core.isBlank() || got.core.isBlank()) return null
-
-        // 1. Version agreement: asking for original must never land on remix, live, acoustic, karaoke, etc.
-        // And asking for remix must never land on original cut.
-        if (wanted.versions != got.versions) {
-            Log.d(TAG, "reject candidate id=${item.id}: version mismatch wanted=${wanted.versions} got=${got.versions} for '$title'")
-            return null
-        }
-
-        // Severe mismatches (karaoke, instrumental, tribute, cover)
-        val targetVariants = identityVariants(title, matchArtist)
-        val candidateVariants = identityVariants(item.title, matchArtist)
-        val severeMismatch = (!targetVariants.contains("instrumental") && candidateVariants.contains("instrumental")) ||
-            (!targetVariants.contains("karaoke") && candidateVariants.contains("karaoke")) ||
-            (!targetVariants.contains("tribute") && candidateVariants.contains("tribute")) ||
-            (!targetVariants.contains("cover") && candidateVariants.contains("cover"))
-        if (severeMismatch) {
-            Log.d(TAG, "reject candidate id=${item.id}: severe variant mismatch target=$targetVariants candidate=$candidateVariants for '$title'")
-            return null
-        }
-
-        // 2. Title core matching
-        val isExactCore = wanted.core == got.core
-        val isNormalizedCore = wanted.core.replace(" ", "") == got.core.replace(" ", "")
-        val isPhoneticCore = foldTransliteration(wanted.core) == foldTransliteration(got.core)
-        val coreDistance = levenshtein(wanted.core, got.core)
-        val minLen = minOf(wanted.core.length, got.core.length)
-        val isFuzzyCore = minLen >= 7 && coreDistance <= (if (minLen >= 14) 2 else 1)
-
-        if (!isExactCore && !isNormalizedCore && !isPhoneticCore && !isFuzzyCore) return null
-
-        // 3. Artist verification & exact-master duration tie-break
-        val hasArtistMatch = isVerifiedArtistMatch(
-            targetArtist = matchArtist,
-            performer = item.performerName,
-            albumArtist = item.albumArtistName,
-            performersText = item.performers,
-        )
-
-        val durationDifference = if (expectedDurationSeconds != null && expectedDurationSeconds > 0 && item.duration > 0) {
-            kotlin.math.abs(item.duration - expectedDurationSeconds)
-        } else null
-
-        val isLabel = isRecordLabel(matchArtist)
-        val hasAlbumCtx = hasAlbumOrContextOverlap(wanted, got, expectedAlbum, item.albumTitle)
-
-        // When credits disagree (e.g. composer vs singer in regional music, or channel name like T-Series/Sony Music India):
-        // Allow ONLY IF exact title master matches duration to within <= 2 seconds AND (it is a label OR album/context matches)!
-        val creditDisagreeOverride = !hasArtistMatch && (isExactCore || isNormalizedCore || isPhoneticCore) &&
-            (isLabel || hasAlbumCtx) &&
-            durationDifference != null && durationDifference <= 2
-
-        if (!hasArtistMatch && !creditDisagreeOverride) {
-            Log.d(TAG, "reject candidate id=${item.id}: artist mismatch target='$matchArtist' performer='${item.performerName}' for '$title'")
-            return null
-        }
-
-        // Bug #2: same title + same artist in another language (Telugu vs Hindi vs Tamil)
-        val expectedLanguages = extractLanguages("$title ${expectedAlbum.orEmpty()}")
-        val candidateLanguages = extractLanguages("${item.title} ${item.albumTitle}")
-        if (expectedLanguages.isNotEmpty() && candidateLanguages.isNotEmpty() &&
-            expectedLanguages.intersect(candidateLanguages).isEmpty()
-        ) {
-            Log.d(TAG, "reject candidate id=${item.id} title='${item.title}' album='${item.albumTitle}': language mismatch expected=$expectedLanguages candidate=$candidateLanguages for '$title'")
-            return null
-        }
-
-        // 4. Duration ceiling
-        val maxDurationDifference = when {
-            hasArtistMatch && isExactCore -> 45
-            hasArtistMatch -> 35
-            else -> 2 // Credit disagree override strictly capped at 2 seconds
-        }
-        if (durationDifference != null && durationDifference > maxDurationDifference) {
-            Log.d(TAG, "reject candidate id=${item.id}: duration ${item.duration}s vs expected ${expectedDurationSeconds}s (Δ${durationDifference}s > ${maxDurationDifference}s) for '$title'")
-            return null
-        }
-
-        // 5. Scoring
-        var score = 1_000 - coreDistance * 30
-        if (isExactCore) score += 400
-        else if (isNormalizedCore) score += 300
-        else if (isPhoneticCore) score += 200
-
-        if (hasArtistMatch) {
-            score += 300
-        } else {
-            // Master tie-break penalty so any credited candidate beats it
-            score -= 300
-        }
-
-        // Context alignment (shared movie/album/soundtrack name in brackets or packaging)
-        if (wanted.context.isNotEmpty() && got.context.isNotEmpty() && wanted.context.any { it in got.context }) {
-            score += 200
-        }
-
-        expectedAlbum?.takeIf(String::isNotBlank)?.let { album ->
-            val normExpected = normalizeTitle(album, "")
-            val normCandidate = normalizeTitle(item.albumTitle, "")
-            if (normExpected.isNotBlank() && normCandidate.isNotBlank()) {
-                when {
-                    normExpected == normCandidate -> score += 500
-                    normCandidate.contains(normExpected) || normExpected.contains(normCandidate) -> score += 300
-                    else -> {
-                        val expTokens = normExpected.split(' ').filter { it.length > 1 }.toSet()
-                        val candTokens = normCandidate.split(' ').filter { it.length > 1 }.toSet()
-                        val expNumbers = NUMBER_TOKEN_REGEX.findAll(normExpected).map { it.value }.toSet()
-                        val candNumbers = NUMBER_TOKEN_REGEX.findAll(normCandidate).map { it.value }.toSet()
-                        val numbersClash = expNumbers.isNotEmpty() && candNumbers.isNotEmpty() && expNumbers != candNumbers
-                        val overlap = expTokens.intersect(candTokens).size
-                        if (!numbersClash && expTokens.isNotEmpty() && overlap >= minOf(2, expTokens.size) && overlap * 2 >= expTokens.size) {
-                            score += 150
-                        } else {
-                            score -= 100
-                            Log.d(TAG, "album mismatch penalty id=${item.id}: expected='$album' candidate='${item.albumTitle}' for '$title'")
-                        }
-                    }
-                }
-            }
-        }
-        durationDifference?.let { score += (maxDurationDifference - it) * 5 }
-        return score
-    }
-
-    private fun extractLanguages(raw: String): Set<String> {
-        if (raw.isBlank()) return emptySet()
-        return normalizeText(raw).split(' ').toSet().intersect(LANGUAGE_TOKENS)
-    }
-
-    private fun hasAlbumOrContextOverlap(
-        wanted: TitleParts,
-        got: TitleParts,
-        expectedAlbum: String?,
-        candidateAlbum: String?,
-    ): Boolean {
-        if (wanted.context.isNotEmpty() && got.context.isNotEmpty() && wanted.context.any { it in got.context }) {
-            return true
-        }
-        if (wanted.context.isNotEmpty() && !candidateAlbum.isNullOrBlank()) {
-            val normCand = normalizeText(candidateAlbum).split(' ').filter { it.length > 2 }.toSet()
-            if (wanted.context.any { it in normCand }) return true
-        }
-        if (got.context.isNotEmpty() && !expectedAlbum.isNullOrBlank()) {
-            val normExp = normalizeText(expectedAlbum).split(' ').filter { it.length > 2 }.toSet()
-            if (got.context.any { it in normExp }) return true
-        }
-        if (!expectedAlbum.isNullOrBlank() && !candidateAlbum.isNullOrBlank()) {
-            val normExp = normalizeText(expectedAlbum)
-            val normCand = normalizeText(candidateAlbum)
-            if (normExp.isNotBlank() && normCand.isNotBlank()) {
-                if (normExp == normCand || normExp.contains(normCand) || normCand.contains(normExp)) return true
-                val expTokens = normExp.split(' ').filter { it.length > 2 }.toSet()
-                val candTokens = normCand.split(' ').filter { it.length > 2 }.toSet()
-                if (expTokens.isNotEmpty() && candTokens.isNotEmpty() && expTokens.any { it in candTokens }) return true
-            }
-        }
-        return false
-    }
-
-    /**
-     * When multiple language releases exist and the request specifies an
-     * expected language, filter candidates to match that language.
-     * Never drops all candidates to empty.
-     */
-    private fun gateAmbiguousLanguage(
-        verified: List<TidalCandidateItem>,
-        title: String,
-        expectedAlbum: String?,
-    ): List<TidalCandidateItem> {
-        if (verified.size < 2) return verified
-        val expectedLanguages = extractLanguages("$title ${expectedAlbum.orEmpty()}")
-        if (expectedLanguages.isNotEmpty()) {
-            val matching = verified.filter {
-                val candidateLangs = extractLanguages("${it.title} ${it.albumTitle}")
-                candidateLangs.isEmpty() || candidateLangs.intersect(expectedLanguages).isNotEmpty()
-            }
-            if (matching.isNotEmpty()) return matching
-        }
-        return verified
-    }
-
-    private fun cleanForSearch(raw: String): String {
-        return raw
-            .replace(TOPIC_CHANNEL_SUFFIX, "")
-            .replace(PIPE_NOISE, "")
-            .replace(SOUNDTRACK_SUFFIX, "")
-            .replace(FEATURING_CLAUSE, " ")
-            .replace(ATMOS_VERSION_MARKER, " ")
-            .replace(BRACKETED_DISPLAY_NOISE, " ")
-            .replace(TRAILING_DISPLAY_NOISE, " ")
-            .replace(MULTI_SPACE, " ")
-            .trim()
-    }
-
-    private fun normalizeTitle(raw: String, artist: String): String {
-        var cleaned = cleanForSearch(raw)
-        if (artist.isNotBlank()) {
-            val cleanArt = cleanForSearch(artist).ifBlank { artist }
-            cleaned = cleaned.replaceFirst(
-                Regex("""^\s*${Regex.escape(cleanArt)}\s*[-–—:]\s*""", RegexOption.IGNORE_CASE),
-                "",
-            )
-            cleaned = cleaned.replace(
-                Regex("""(?i)\s*[-–—:]\s*${Regex.escape(cleanArt)}\s*$"""),
-                "",
-            )
-        }
-        return normalizeText(cleaned)
-    }
-
-    private fun levenshtein(a: String, b: String): Int {
-        if (a == b) return 0
-        if (a.isEmpty()) return b.length
-        if (b.isEmpty()) return a.length
-        var previous = IntArray(b.length + 1) { it }
-        var current = IntArray(b.length + 1)
-        for (i in 1..a.length) {
-            current[0] = i
-            for (j in 1..b.length) {
-                current[j] = minOf(
-                    previous[j] + 1,
-                    current[j - 1] + 1,
-                    previous[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1,
-                )
-            }
-            val swap = previous
-            previous = current
-            current = swap
-        }
-        return previous[b.length]
-    }
-
-    private fun identityVariants(raw: String, artist: String): Set<String> {
-        val withoutArtistPrefix = if (artist.isBlank()) raw else raw.replaceFirst(
-            Regex("""^\s*${Regex.escape(artist)}\s*[-–—:]\s*""", RegexOption.IGNORE_CASE),
-            "",
-        )
-        val normalized = normalizeText(withoutArtistPrefix)
-        return IDENTITY_VARIANT_PATTERNS.mapNotNullTo(linkedSetOf()) { (name, pattern) ->
-            name.takeIf { pattern.containsMatchIn(normalized) }
-        }
-    }
-
-    /** True for an Atmos/Spatial mix by backend flag OR by title label ("(Dolby Atmos)"
-     *  version suffix). Labels matter because some catalogue items omit audioModes; the
-     *  "atmos" identity-variant tag keeps such items de-preferenced (never vetoed) for
-     *  stereo tiers while the Atmos boost/ordering prefers them when 28 is selected. */
-    private fun isAtmosCandidate(item: TidalCandidateItem): Boolean =
-        item.isAtmos || item.isSpatial ||
-            identityVariants(item.title, item.performerName).contains("atmos")
-
-    private fun foldTransliteration(str: String): String {
-        return str
-            .replace("aa", "a")
-            .replace("ee", "i")
-            .replace("oo", "u")
-            .replace("th", "t")
-            .replace("dh", "d")
-            .replace("bh", "b")
-            .replace("kh", "k")
-            .replace("gh", "g")
-            .replace("sh", "s")
-            .replace("zh", "z")
-            .replace("ph", "f")
-            .replace("v", "w")
-            .replace("ll", "l")
-            .replace("tt", "t")
-            .replace("dd", "d")
-            .replace("pp", "p")
-            .replace("mm", "m")
-            .replace("nn", "n")
-            .replace("ss", "s")
-            .replace("rr", "r")
-            .replace("cc", "c")
-            .replace("yy", "y")
-    }
-
-    private fun cleanArtistIdentity(raw: String): String {
-        val normalized = normalizeText(raw)
-        // Collapse single-letter initials: "a r rahman" -> "ar rahman", "a p dhillon" -> "ap dhillon"
-        val collapsed = normalized.replace(INITIALS_SPACE_REGEX, "$1")
-        return collapsed
-            .split(' ')
-            .filter { it !in ARTIST_NOISE_WORDS }
-            .joinToString(" ")
-            .trim()
-    }
-
-    internal fun artistNames(value: String): Set<List<String>> {
-        val lowered = value.lowercase(Locale.ROOT).replace("$", "s")
-        return lowered
-            .replace(INITIALS_DOT_REGEX, "$1")
-            .replace(INITIALS_SPACE_REGEX, "$1")
-            .split(ARTIST_SEPARATORS)
-            .map { name ->
-                name.split(WORD_SPLIT_REGEX)
-                    .map { it.replace(NON_ALPHANUMERIC, "") }
-                    .filter { it.length > 1 && it !in ARTIST_NOISE_WORDS }
-            }
-            .filter { it.isNotEmpty() }
-            .toSet()
-    }
-
-    private fun runOfWords(outer: List<String>, inner: List<String>): Boolean {
-        if (inner.isEmpty() || inner.size > outer.size) return false
-        if (inner.size == 1 && outer.size > 1) {
-            return false
-        }
-        return (0..outer.size - inner.size).any { at ->
-            outer.subList(at, at + inner.size) == inner
-        }
-    }
-
-    private fun isVerifiedArtistMatch(
-        targetArtist: String,
-        performer: String,
-        albumArtist: String,
-        performersText: String?,
-    ): Boolean {
-        val target = cleanArtistIdentity(targetArtist)
-        if (target.isBlank()) return false
-        val primaryIdentities = listOf(performer, albumArtist)
-            .map(::cleanArtistIdentity)
-            .filter(String::isNotBlank)
-        if (primaryIdentities.any { it == target }) return true
-
-        val targetArtists = artistNames(targetArtist)
-        val candidateArtists = (listOf(performer, albumArtist) + listOfNotNull(performersText))
-            .filter(String::isNotBlank)
-            .flatMap { artistNames(it) }
-            .toSet()
-
-        if (targetArtists.isEmpty() || candidateArtists.isEmpty()) return false
-
-        for (ta in targetArtists) {
-            for (ca in candidateArtists) {
-                if (ta == ca) return true
-                if (runOfWords(ta, ca) || runOfWords(ca, ta)) return true
-            }
-        }
-
-        val performingCredits = performersText?.let { raw ->
-            normalizeText(raw)
-                .split(CREDIT_HYPHEN_SPLIT_REGEX)
-                .filter { credit -> PERFORMING_ROLE_WORDS.any { role -> role in credit.split(' ') } }
-        }.orEmpty()
-        val performingTokens = (primaryIdentities + performingCredits)
-            .flatMap { it.split(' ') }
-            .toSet()
-        val targetTokens = target.split(' ').filter { it.length > 1 }.toSet()
-        return targetTokens.isNotEmpty() && targetTokens.all(performingTokens::contains)
     }
 }

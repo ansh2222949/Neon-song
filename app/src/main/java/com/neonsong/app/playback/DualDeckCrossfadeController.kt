@@ -348,6 +348,7 @@ class DualDeckCrossfadeController(
         val standbyPlayerState = standbyPlayer.playbackState
 
         val isBufferStarved = standbyBuffered < safeHeadroom || standbyPlayerState == Player.STATE_BUFFERING
+        var recoveredFromStarvation = false
         if (isBufferStarved) {
             if (!isStarved) {
                 isStarved = true
@@ -368,6 +369,7 @@ class DualDeckCrossfadeController(
         } else if (isStarved) {
             val starvedDuration = maxOf(0L, nowMs - starvationStartTimeMs)
             isStarved = false
+            recoveredFromStarvation = true
             starvationStartTimeMs = 0L
             Log.i(
                 TAG,
@@ -375,7 +377,7 @@ class DualDeckCrossfadeController(
             )
         }
 
-        if (!isStarved) {
+        if (!isStarved && !recoveredFromStarvation) {
             activeElapsedMs += deltaMs
         }
 

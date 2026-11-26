@@ -53,7 +53,7 @@ object DiscordPresence {
      */
     const val APPLICATION_ID = "1552563991426105414"
 
-    const val PROJECT_URL = "https://github.com/Clash-Projects/Neon Song-Native"
+    const val PROJECT_URL = "https://github.com/ansh2222949/Neon-song"
     const val RELEASES_URL = "$PROJECT_URL/releases"
     const val DEFAULT_BUTTON_1 = "Listen On Neon Song"
     const val DEFAULT_BUTTON_2 = "Get Neon Song"

@@ -1,7 +1,7 @@
 {
-  "version": "4.2.5",
-  "versionCode": 25,
-  "changelog": "• Initial release of Neon Song\n• Pure Liquid Glass UI and song-reactive fluid artwork backgrounds\n• High-fidelity native audio engine, bit-perfect playback and AutoDJ",
+  "version": "5.0.0",
+  "versionCode": 26,
+  "changelog": "• Added Spotify-style (9:16 Full-Bleed) & Apple Music Animated Canvas switcher with motion toggle\n• Hardened Lossless/Atmos matching for bilingual CJK/Latin tracks, strict artist/version validation & request deduplication\n• Fixed fullscreen Canvas track-skip freezes, cleared stale lyrics immediately on skip, and upgraded MV Canvas to 720p–1080p HW-decoded streams\n• Reduced thermal/GPU load by pausing obscured ambient shaders/waves and improved AutoMix/AutoDJ & reactive settings reliability",
   "downloadUrl": "https://github.com/ansh2222949/Neon-song/releases/latest/download/NeonSong.apk",
   "releaseUrl": "https://github.com/ansh2222949/Neon-song/releases/latest",
   "isMandatory": false

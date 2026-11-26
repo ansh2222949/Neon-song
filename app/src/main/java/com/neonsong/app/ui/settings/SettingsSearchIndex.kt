@@ -681,6 +681,23 @@ object SettingsSearchIndex {
             )
             add(
                 SettingsEntry(
+                    id = "appearance.canvas_style",
+                    title = "Canvas Video Style",
+                    subtitle = "Switch between Spotify Canvas and Apple Music motion artwork",
+                    keywords = listOf(
+                        "canvas style", "spotify canvas", "apple music motion", "apple", "spotify",
+                        "fullscreen video loop", "motion style"
+                    ),
+                    icon = Icons.Filled.AutoAwesome,
+                    iconContainer = { MaterialTheme.colorScheme.secondaryContainer },
+                    iconTint = { MaterialTheme.colorScheme.onSecondaryContainer },
+                    parentTab = SettingsTab.APPEARANCE,
+                    section = "Canvas",
+                    type = EntryType.ACTION,
+                )
+            )
+            add(
+                SettingsEntry(
                     id = "appearance.canvas_full_bleed",
                     title = "Canvas Full Bleed",
                     subtitle = "Expand canvas video to fill entire screen behind controls",

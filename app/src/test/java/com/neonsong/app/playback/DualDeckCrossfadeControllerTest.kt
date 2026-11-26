@@ -36,7 +36,11 @@ class DualDeckCrossfadeControllerTest {
     fun setUp() {
         nativeEngine = mockk(relaxed = true)
         every { nativeEngine.isAvailable } returns true
+        every { nativeEngine.isRunning } returns true
+        every { nativeEngine.start(any()) } returns true
         every { nativeEngine.getCrossfade() } returns 0.0f
+        every { nativeEngine.getDeckSpeed(any()) } returns 1.0f
+        every { nativeEngine.getDeckPitch(any()) } returns 1.0f
         every { nativeEngine.getDeckTimeRatio(any()) } returns 1.0f
         every { nativeEngine.underrunCount } returns 0L
 

@@ -35,25 +35,29 @@ object CommunityCanvas {
     fun search(client: OkHttpClient, title: String, artist: String, album: String?): CanvasArtwork? {
         val index = manifest(client).ifEmpty { return null }
 
-        val wantTitle = title.normalizeForMatch()
-        val wantArtist = artist.normalizeForMatch()
-        val wantAlbum = album?.normalizeForMatch()
+        val wantTitle = title.cleanCanvasTitle().normalizeForMatch()
+        val wantArtists = splitArtists(artist.cleanCanvasArtist())
+        val wantAlbum = album?.cleanCanvasTitle()?.normalizeForMatch()
 
         val hit = index.firstOrNull { entry ->
-            val song = entry.song.normalizeForMatch()
-            val credited = entry.artist.normalizeForMatch()
-            val listed = entry.album.normalizeForMatch()
-            val titleOk = song.isNotBlank() &&
-                (wantTitle.contains(song) || song.contains(wantTitle))
-            val artistOk = credited.isNotBlank() &&
-                (wantArtist.contains(credited) || credited.contains(wantArtist))
-            val albumOk = listed.isBlank() || wantAlbum.isNullOrBlank() || listed == wantAlbum
+            val song = entry.song.cleanCanvasTitle().normalizeForMatch()
+            val creditedArtists = splitArtists(entry.artist.cleanCanvasArtist())
+            val listed = entry.album.cleanCanvasTitle().normalizeForMatch()
+            val titleOk = song.isNotBlank() && wantTitle.isNotBlank() &&
+                (wantTitle == song || wantTitle.contains(song) || song.contains(wantTitle))
+            val artistOk = creditedArtists.isNotEmpty() && wantArtists.isNotEmpty() &&
+                wantArtists.any { want ->
+                    creditedArtists.any { got -> got == want || got.contains(want) || want.contains(got) }
+                }
+            val albumOk = listed.isBlank() || wantAlbum.isNullOrBlank() ||
+                listed == wantAlbum || listed.contains(wantAlbum) || wantAlbum.contains(listed)
             titleOk && artistOk && albumOk
         } ?: return null
 
         Log.d(TAG, "manifest hit for '${hit.song}' by '${hit.artist}'")
         return CanvasArtwork(
             url = hit.url,
+            tallUrl = hit.url,
             title = hit.song,
             artist = hit.artist,
             album = hit.album.takeIf { it.isNotBlank() },

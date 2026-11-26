@@ -63,8 +63,8 @@ android {
         applicationId = "com.neonsong.app"
         minSdk = (project.findProperty("minSdk") as? String)?.toIntOrNull() ?: 29
         targetSdk = 35
-        versionCode = 25
-        versionName = "4.2.5"
+        versionCode = 26
+        versionName = "5.0.0"
 
         val neonSongLyricsToken = resolveSecret("NEONSONG_LYRICS_TOKEN")
         val neonSongLyricsUrl = resolveSecret("NEONSONG_LYRICS_URL")

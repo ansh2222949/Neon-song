@@ -34,6 +34,7 @@ data class SearchResultItem(
     val subtitle: String? = null,
     val videoId: String? = null,
     val entityId: String? = null,
+    val durationSeconds: Int? = null,
 )
 
 /**
@@ -92,6 +93,7 @@ class SearchRepository @Inject constructor(
                     subtitle = track.album,
                     videoId = track.videoId,
                     entityId = track.videoId,
+                    durationSeconds = track.durationSeconds,
                 )
             }
             SearchTab.ARTISTS -> innerTube.searchArtists(query, throwOnError = true).map { artist ->
@@ -143,6 +145,7 @@ class SearchRepository @Inject constructor(
     ): String? = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext null
         val cleanedSearchTitle = title
+            .replace(Regex("【[^】]*】"), " ")
             .replace(Regex("\\((?i)(feat\\.?[^)]*|with[^)]*|official[^)]*|from\\s+[^)]*|remaster[^)]*)\\)"), " ")
             .replace(Regex("\\[(?i)(feat\\.?[^\\]]*|with[^\\]]*|official[^\\]]*|from\\s+[^\\]]*|remaster[^\\]]*)]"), " ")
             .replace(Regex("\\s*[|•—–]\\s*.*$"), " ")
@@ -194,6 +197,7 @@ class SearchRepository @Inject constructor(
             "visualizer", "art track", "full album", "static image", "still image", "cover art",
             "wallpaper", "single image", "provided to youtube by", "poster", "jukebox", "mashup",
             "status", "shorts", "#shorts",
+            "生歌", "歌ってみた", "弾いてみた", "カラオケ", "ニコカラ", "utattemita",
         ) + conditionalVariantTags
 
         data class ScoredVideo(val videoId: String, val score: Int)

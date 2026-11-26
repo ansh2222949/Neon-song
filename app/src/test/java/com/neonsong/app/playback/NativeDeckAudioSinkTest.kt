@@ -51,6 +51,8 @@ class NativeDeckAudioSinkTest {
     fun setUp() {
         nativeEngine = mockk(relaxed = true)
         every { nativeEngine.isAvailable } returns true
+        every { nativeEngine.isRunning } returns true
+        every { nativeEngine.start(any()) } returns true
         every { nativeEngine.isDeckResamplerDrained(any()) } returns true
         every { nativeEngine.isDeckWsolaDrained(any()) } returns true
         every { nativeEngine.getPresentationLatencyUs() } returns 0L
@@ -340,6 +342,7 @@ class NativeDeckAudioSinkTest {
     fun getCurrentPositionUs_withResamplingAndWsola_calculatesCorrectMediaTime() {
         // Source is 44.1 kHz, output is 48 kHz, Deck B WSOLA is 1.25x speed
         deckBSink.configure(testStereoPcm16Format, 0, null) // 44100 Hz
+        deckBSink.setPlaybackParameters(androidx.media3.common.PlaybackParameters(1.25f))
 
         every { nativeEngine.outputSampleRate } returns 48000
         every { nativeEngine.getDeckTimeRatio(1) } returns 1.25f
@@ -379,12 +382,13 @@ class NativeDeckAudioSinkTest {
         deckASink.flush()
 
         verify(exactly = 1) { nativeEngine.flushDeck(0) }
-        assertThat(deckASink.getCurrentPositionUs(false)).isEqualTo(0L)
+        assertThat(deckASink.getCurrentPositionUs(false)).isEqualTo(AudioSink.CURRENT_POSITION_NOT_SET)
     }
 
     @Test
     fun endOfStream_lifecycleStates_behaveCorrectly() {
         deckASink.configure(testStereoFloatFormat, 0, null)
+        deckASink.play()
 
         every { nativeEngine.getDeckBufferedFrames(0) } returns 1024L
         assertThat(deckASink.isEnded()).isFalse()
@@ -407,6 +411,7 @@ class NativeDeckAudioSinkTest {
     @Test
     fun endOfStream_gatesOnResamplerAndWsolaDrain() {
         deckBSink.configure(testStereoFloatFormat, 0, null)
+        deckBSink.play()
         deckBSink.playToEndOfStream()
 
         every { nativeEngine.getDeckBufferedFrames(1) } returns 0L

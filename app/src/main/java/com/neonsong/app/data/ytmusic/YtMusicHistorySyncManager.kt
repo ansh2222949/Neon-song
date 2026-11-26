@@ -356,7 +356,7 @@ class YtMusicHistorySyncManager @Inject constructor(
 
         const val CPN_LENGTH = 16
         const val CPN_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
-        val VERSION_SPLIT = Regex("[^a-z0-9]+")
+        val VERSION_SPLIT = Regex("[^\\p{L}\\p{N}\\p{M}]+")
         val VERSION_MARKERS = setOf(
             "live", "remix", "karaoke", "cover", "instrumental", "slowed",
             "acoustic", "demo", "edit", "remaster", "remastered", "mono",

@@ -60,6 +60,11 @@ class NativeProcessingAudioSinkBackpressureTest {
             AudioProcessor.AudioFormat(48000, arg.channelCount, C.ENCODING_PCM_FLOAT)
         }
         every { enhancedDelegate.getFormatSupport(any()) } returns AudioSink.SINK_FORMAT_SUPPORTED_DIRECTLY
+        every { enhancedDelegate.handleBuffer(any(), any(), any()) } answers {
+            val buf = firstArg<ByteBuffer>()
+            buf.position(buf.limit())
+            true
+        }
 
         sink = NativeProcessingAudioSink(
             enhancedDelegate = enhancedDelegate,

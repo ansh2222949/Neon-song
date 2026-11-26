@@ -1612,7 +1612,7 @@ class InnerTubeMusicApi @Inject constructor(
     ): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
         val config = getWebConfig()
-        suspend fun runSearch(params: String?): List<YouTubeMusicTrack> {
+        suspend fun runYtmSearch(params: String?): List<YouTubeMusicTrack> {
             val body = buildJsonObject {
                 put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
                 put("query", query.trim())
@@ -1628,13 +1628,44 @@ class InnerTubeMusicApi @Inject constructor(
             )
             return parseSongRenderers(root)
         }
-        val filtered = cancellableRunCatching { runSearch("EgWKAQIQAWoKEAkQBRAKEAMQBA==") }.getOrDefault(emptyList())
-        val results = if (filtered.isEmpty()) {
-            cancellableRunCatching { runSearch(null) }.getOrDefault(emptyList())
-        } else {
-            filtered
+        suspend fun runWebVideoSearch(): List<YouTubeMusicTrack> {
+            val body = buildJsonObject {
+                put("context", context("WEB", YOUTUBE_WEB_VERSION, config.visitorData))
+                put("query", query.trim())
+            }
+            val root = post(
+                url = "$YOUTUBE_API/search?key=${config.apiKey}&prettyPrint=false",
+                body = body,
+                clientName = "WEB",
+                clientVersion = YOUTUBE_WEB_VERSION,
+                userAgent = WEB_USER_AGENT,
+                origin = YOUTUBE_ORIGIN,
+                referer = "$YOUTUBE_ORIGIN/",
+                callTimeoutMs = SEARCH_REQUEST_TIMEOUT_MS,
+            )
+            val renderers = mutableListOf<JsonObject>()
+            collectObjects(root, "videoRenderer", renderers)
+            return renderers.mapNotNull(::parseVideoRenderer)
         }
-        results
+        val (webResults, ytmResults) = kotlinx.coroutines.coroutineScope {
+            val webDeferred = async {
+                cancellableRunCatching { runWebVideoSearch() }.getOrDefault(emptyList())
+            }
+            val ytmDeferred = async {
+                val filtered = cancellableRunCatching {
+                    runYtmSearch("EgWKAQIQAWoKEAkQBRAKEAMQBA==")
+                }.getOrDefault(emptyList())
+                if (filtered.isEmpty()) {
+                    cancellableRunCatching { runYtmSearch(null) }.getOrDefault(emptyList())
+                } else {
+                    filtered
+                }
+            }
+            webDeferred.await() to ytmDeferred.await()
+        }
+        // Prefer regular YouTube WEB results first: YTM WEB_REMIX sometimes re-titles
+        // official MVs with a "Live At ..." album subtitle that triggers live rejection.
+        (webResults + ytmResults)
             .distinctBy { it.videoId }
             .filter { it.videoId.isNotBlank() }
             .take(limit)
@@ -4094,6 +4125,7 @@ class InnerTubeMusicApi @Inject constructor(
         val ENGLISH_COUNTRIES = setOf("US", "GB", "CA", "AU", "NZ", "IE", "ZA")
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         val CLIENT_IDS = mapOf(
+            "WEB" to "1",
             "WEB_REMIX" to "67",
             "IOS" to "5",
             "IOS_MUSIC" to "26",
@@ -4187,6 +4219,7 @@ class InnerTubeMusicApi @Inject constructor(
         const val WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
         const val FALLBACK_WEB_KEY = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
         const val FALLBACK_WEB_VERSION = "1.20260707.12.00"
+        const val YOUTUBE_WEB_VERSION = "2.20260707.01.00"
         const val ARTIST_SEARCH_FILTER = "EgWKAQIgAWoKEAkQBRAKEAMQBA=="
         const val ALBUM_SEARCH_FILTER = "EgWKAQIYAWoKEAkQBRAKEAMQBA=="
         val CODEC_PATTERN = Regex("""codecs?=[\"']([^\"']+)[\"']""", RegexOption.IGNORE_CASE)

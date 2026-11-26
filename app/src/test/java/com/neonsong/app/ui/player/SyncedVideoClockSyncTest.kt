@@ -48,10 +48,10 @@ class SyncedVideoClockSyncTest {
     @Test
     fun excessiveDriftTriggersHardSeekToAudioPosition() {
         // Video is 800ms behind audio (e.g. user seek or buffer underrun)
-        // Includes 85ms keyframe decode lead compensation when playing
+        // Includes 65ms keyframe decode lead compensation when playing
         val decisionPlaying = SyncedVideoClockSync.evaluateSync(videoPosMs = 10_000L, audioPosMs = 10_800L, baseSpeed = 1.0f, isPlaying = true)
         assertThat(decisionPlaying.action).isEqualTo(SyncAction.HARD_SEEK)
-        assertThat(decisionPlaying.seekTargetMs).isEqualTo(10_885L)
+        assertThat(decisionPlaying.seekTargetMs).isEqualTo(10_865L)
         assertThat(decisionPlaying.targetSpeed).isEqualTo(1.0f)
 
         SyncedVideoClockSync.reset()
@@ -70,7 +70,7 @@ class SyncedVideoClockSyncTest {
         )
         assertThat(decision.action).isEqualTo(SyncAction.MICRO_ACCELERATE)
         assertThat(decision.seekTargetMs).isNull()
-        assertThat(decision.targetSpeed).isEqualTo(1.12f)
+        assertThat(decision.targetSpeed).isEqualTo(1.14f)
     }
 
     @Test

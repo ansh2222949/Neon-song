@@ -89,6 +89,7 @@ fun SyncedVideoSurface(
     modifier: Modifier = Modifier,
     videoId: String? = track.videoId,
     videoScalingMode: VideoScalingMode = VideoScalingMode.FIT,
+    manualSyncOffsetMs: Long = 0L,
     viewModel: SyncedVideoViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -249,6 +250,33 @@ fun SyncedVideoSurface(
     val activeStream = matchingReady?.activeStream
     val activeStreamUrl = activeStream?.url?.takeIf { it.isNotBlank() } ?: sniffedFallbackUrl?.takeIf { it.isNotBlank() }
     val activeMimeType = activeStream?.mimeType?.substringBefore(';')?.trim()
+    var observedAudioDurMs by remember(surfaceInstanceKey) {
+        mutableLongStateOf(musicPlayer.progressState.value.durationMs.takeIf { it > 0L } ?: (track.durationMs ?: 0L))
+    }
+    var observedVideoDurMs by remember(surfaceInstanceKey, activeStream?.durationMs) {
+        mutableLongStateOf(activeStream?.durationMs?.takeIf { it > 0L } ?: 0L)
+    }
+    val estimatedIntroOffsetMs = remember(
+        observedAudioDurMs,
+        observedVideoDurMs,
+        activeStream?.durationMs,
+        track.durationMs,
+        manualSyncOffsetMs,
+    ) {
+        val streamDur = observedVideoDurMs.takeIf { it > 0L } ?: (activeStream?.durationMs?.takeIf { it > 0L } ?: 0L)
+        val audioDur = observedAudioDurMs.takeIf { it > 0L } ?: (track.durationMs ?: 0L)
+        SyncedVideoClockSync.estimateIntroOffsetMs(audioDur, streamDur, manualOffsetMs = manualSyncOffsetMs)
+    }
+
+    LaunchedEffect(surfaceInstanceKey, manualSyncOffsetMs) {
+        if (videoPlayer.playbackState == Player.STATE_READY) {
+            clockController.reset()
+            val vDur = videoPlayer.duration
+            val rawTarget = musicPlayer.currentPositionMs().coerceAtLeast(0L) + estimatedIntroOffsetMs
+            val target = if (vDur > 500L) rawTarget.coerceIn(0L, vDur - 250L) else rawTarget.coerceAtLeast(0L)
+            videoPlayer.seekTo(target)
+        }
+    }
 
     LaunchedEffect(surfaceInstanceKey, activeStreamUrl) {
         val url = activeStreamUrl?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
@@ -266,7 +294,9 @@ fun SyncedVideoSurface(
         activeStream?.requestHeaders?.let { activeRequestHeaders.putAll(it) }
 
         val startupLead = if (shouldPlayVideo) (180L * audioSpeed).toLong() else 0L
-        val startPosMs = (musicPlayer.currentPositionMs().coerceAtLeast(0L) + startupLead)
+        val rawStartMs = (musicPlayer.currentPositionMs().coerceAtLeast(0L) + startupLead + estimatedIntroOffsetMs)
+        val streamDurMs = activeStream?.durationMs?.takeIf { it > 1_000L }
+        val startPosMs = if (streamDurMs != null) rawStartMs.coerceAtMost(streamDurMs - 250L).coerceAtLeast(0L) else rawStartMs
         val itemBuilder = MediaItem.Builder().setUri(url)
         if (!activeMimeType.isNullOrBlank()) {
             itemBuilder.setMimeType(activeMimeType)
@@ -277,12 +307,22 @@ fun SyncedVideoSurface(
     }
 
     // Zero-recomposition discontinuous seek detector (collects progressState inside LaunchedEffect)
-    LaunchedEffect(surfaceInstanceKey, videoPlayer, activeStreamUrl) {
+    LaunchedEffect(surfaceInstanceKey, videoPlayer, activeStreamUrl, estimatedIntroOffsetMs) {
         if (activeStreamUrl.isNullOrBlank()) return@LaunchedEffect
+        var isFirstSample = true
         var lastObservedAudioPosMs = musicPlayer.progressState.value.positionMs
         var lastObservedWallMs = SystemClock.elapsedRealtime()
         musicPlayer.progressState.collect { prog ->
+            if (prog.durationMs > 0L && abs(prog.durationMs - observedAudioDurMs) > 250L) {
+                observedAudioDurMs = prog.durationMs
+            }
             val now = SystemClock.elapsedRealtime()
+            if (isFirstSample) {
+                isFirstSample = false
+                lastObservedAudioPosMs = prog.positionMs
+                lastObservedWallMs = now
+                return@collect
+            }
             val liveState = musicPlayer.state.value
             val expectedDelta = if (liveState.isPlaying && !liveState.isBuffering) {
                 ((now - lastObservedWallMs) * liveState.speed).toLong()
@@ -294,22 +334,25 @@ fun SyncedVideoSurface(
             if (isFirstFrameRendered && abs(actualDelta - expectedDelta) > 350L && videoPlayer.playbackState == Player.STATE_READY) {
                 clockController.reset()
                 val vDur = videoPlayer.duration
-                val target = prog.positionMs.coerceAtLeast(0L).let {
+                val target = (prog.positionMs.coerceAtLeast(0L) + estimatedIntroOffsetMs).let {
                     if (vDur > 500L) it.coerceAtMost(vDur - 250L) else it
                 }
-                videoPlayer.seekTo(target)
+                videoPlayer.seekTo(target.coerceAtLeast(0L))
             }
         }
     }
 
     // 30Hz Audio-Master PLL Loop (pauses cleanly while audio buffers & clamps to video end)
-    LaunchedEffect(surfaceInstanceKey, videoPlayer, shouldPlayVideo, audioSpeed, activeStreamUrl) {
+    LaunchedEffect(surfaceInstanceKey, videoPlayer, shouldPlayVideo, audioSpeed, activeStreamUrl, estimatedIntroOffsetMs) {
         if (activeStreamUrl.isNullOrBlank()) return@LaunchedEffect
         var lastHardSeekAtMs = Long.MIN_VALUE
         while (isActive) {
             val vDur = videoPlayer.duration
+            if (vDur > 1_000L && abs(vDur - observedVideoDurMs) > 250L) {
+                observedVideoDurMs = vDur
+            }
             val rawAudioPos = musicPlayer.currentPositionMs().coerceAtLeast(0L)
-            val pastVideoEnd = vDur > 5_000L && rawAudioPos >= vDur - 250L
+            val pastVideoEnd = vDur > 5_000L && (rawAudioPos + estimatedIntroOffsetMs) >= vDur - 250L
             val effectivePlay = shouldPlayVideo && !pastVideoEnd
 
             if (videoPlayer.playWhenReady != effectivePlay) {
@@ -340,6 +383,7 @@ fun SyncedVideoSurface(
                     baseSpeed = audioSpeed,
                     allowHardSeek = allowHardSeek,
                     isPlaying = effectivePlay,
+                    videoOffsetMs = estimatedIntroOffsetMs,
                     videoDurationMs = vDur.takeIf { it > 0L } ?: 0L,
                 )
                 if (decision.action == SyncAction.HARD_SEEK && decision.seekTargetMs != null) {

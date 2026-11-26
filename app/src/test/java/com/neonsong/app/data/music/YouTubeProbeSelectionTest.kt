@@ -19,7 +19,7 @@ class YouTubeProbeSelectionTest {
             ),
         )
         assertNull(request.header("Range"))
-        assertEquals("audio/*,*/*;q=0.8", request.header("Accept"))
+        assertEquals("*/*", request.header("Accept"))
         assertEquals("identity", request.header("Accept-Encoding"))
         assertEquals("Neon Song", request.header("User-Agent"))
     }

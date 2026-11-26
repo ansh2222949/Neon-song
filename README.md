@@ -150,10 +150,11 @@ Neon Song is engineered on **Clean Architecture** with strict **Unidirectional D
 * **Native Rust Shared Library (`security/neonsong-vault` / `libneonsong_vault.so`):** Cross-compiled for `arm64-v8a`, `armeabi-v7a`, and `x86_64`. Provides hardware Keystore-bound chunk decryption, APK signature verification, runtime integrity checks, and automatic RAM scrubbing via `zeroize`.
 
 ### 🌐 5. Media Resolution, Sync & Offline Library
-* **Synchronized Music Video & Animated Album Canvas (`CanvasArtworkPlayer.kt`):** One-tap switch between album sleeve and synced HD music video without interrupting the master audio clock, plus looping vertical Animated Album Canvas motion artwork.
+* **Dual-Style Animated Canvas (`CanvasArtworkPlayer.kt`, `CanvasRepository.kt`):** Switch between **Spotify Style** (full-bleed 9:16 Canvas with `AppleMusicCanvas`, `CommunityCanvas`, and hardware-decoded `480p–1080p` `YOUTUBE_MV` fallback) and **Apple Music Style** motion artwork, with instant motion toggle, background/cellular guards, per-track `TextureView` lifecycle resets, and automatic ambient shader pausing to minimize thermal/GPU load.
+* **Strict Bilingual Lossless & Atmos Verification (`LosslessMusicApi.kt`):** Resolves FLAC/Atmos streams with strict artist/version filtering, bilingual CJK/Latin title matching (e.g., `"うっせぇわ - Usseewa"`), duration alignment, and in-flight request deduplication.
 * **24/7 YouTube Music & Last.fm Sync:** Two-way library & playlist mirroring, multi-channel account switching, real-time Last.fm scrobbling, and "Now Playing" love sync.
 * **5-Way Playlist Import:** Import playlists via connected account, live search, public playlist URLs, external links, or `.csv` / `.m3u` files.
-* **Synced Word-by-Word Karaoke Lyrics (`ModernLyricsView.kt`):** Multi-provider syllable and line-synced lyrics with 8 animation styles, live font scaling (`70%–150%`), and `±10,000 ms` sync offset control.
+* **Synced Word-by-Word Karaoke Lyrics (`ModernLyricsView.kt`):** Multi-provider syllable and line-synced lyrics with 8 animation styles, instant track-change state reset (`0ms` stale lyrics clearance), live font scaling (`70%–150%`), and `±10,000 ms` sync offset control.
 * **Offline Downloads & fMP4 Index Healing (`TrackDownloadManager.kt`):** Downloads with embedded cover art, `.lrc` companion files, custom `Artist/Album/` folder structures, and automatic `sidx`/`mfra` seek-index building for fragmented MP4 streams.
 
 ### 🖥️ 6. System & Desktop Integrations
@@ -194,14 +195,20 @@ Neon Song includes a modular streaming resolver engine with first-class support 
 
 ## 📥 Download & Installation
 
-### Latest Official Release (`v4.2.5`)
+### Latest Official Release (`v5.0.0`)
+
+* **What's New in v5.0.0:**
+  * **Dual-Style Animated Canvas & HD MV Fallback:** Switch between **Spotify Style** (9:16 full-bleed with hardware-decoded `480p–1080p` MV fallback) and **Apple Music Style** motion artwork (`editorialVideo` + bilingual CJK/Romanized search), per-track `TextureView` surface resets on skips, and motion toggle.
+  * **Hardened Lossless/Atmos Verification:** Strict artist/version verification, bilingual `"Native - Romanized"` matching, CJK bracket normalization, and concurrent request deduplication.
+  * **Zero-Lag Lyrics & Thermal Efficiency:** Instant lyrics state clearing (`0ms` stale lyrics removal) on track changes, obscured background shader pausing, visibility-gated wavy seekbar, and reduced decode buffers.
+  * **Reactive Settings Studio & AutoMix/AutoDJ Reliability:** Live settings preview studio, Aura home screen widget, C++ AutoMix/AutoDJ beatmatching fixes, and `562` verified JVM unit tests.
 
 | Package Variant | Target OS | Supported Architectures | Size | Direct Download |
 | :--- | :--- | :--- | :--- | :--- |
 | **Universal Release APK** *(Recommended)* | Android 10+ (API 29–35) | `arm64-v8a`, `armeabi-v7a`, `x86_64` | **36.3 MB** | [**⚡ Download NeonSong.apk**](https://github.com/ansh2222949/Neon-song/releases/latest/download/NeonSong.apk) |
-| **Optimized Release APK** | Android 10+ (API 29–35) | `arm64-v8a`, `armeabi-v7a` | **36.3 MB** | [**📦 Download Release APK**](https://github.com/ansh2222949/Neon-song/releases/download/v4.2.5/Neon.Song-v4.2.5-release.apk) |
-| **Legacy Android 7 APK** | Android 7.0 – 9.0 (API 24–28) | Multi-arch | **30.0 MB** | [**📱 Download Legacy APK**](https://github.com/ansh2222949/Neon-song/releases/download/v4.2.5/Neon.Song-v4.2.5-android7.apk) |
-| **SHA-256 Checksums** | All Builds | Verification Text | < 1 KB | [**🔒 View SHA256SUMS.txt**](https://github.com/ansh2222949/Neon-song/releases/download/v4.2.5/SHA256SUMS.txt) |
+| **Optimized Release APK** | Android 10+ (API 29–35) | `arm64-v8a`, `armeabi-v7a` | **36.3 MB** | [**📦 Download Release APK**](https://github.com/ansh2222949/Neon-song/releases/download/v5.0.0/Neon.Song-v5.0.0-release.apk) |
+| **Legacy Android 7 APK** | Android 7.0 – 9.0 (API 24–28) | Multi-arch | **30.0 MB** | [**📱 Download Legacy APK**](https://github.com/ansh2222949/Neon-song/releases/download/v5.0.0/Neon.Song-v5.0.0-android7.apk) |
+| **SHA-256 Checksums** | All Builds | Verification Text | < 1 KB | [**🔒 View SHA256SUMS.txt**](https://github.com/ansh2222949/Neon-song/releases/download/v5.0.0/SHA256SUMS.txt) |
 
 > 💡 **Installation Note:** When prompted on Android, enable *"Install unknown apps"* for your browser or file manager, then tap **Install**. All APKs are built reproducibly via GitHub Actions.
 

@@ -301,8 +301,8 @@ private const val TEXTURE_PX = 256
 private const val TEXTURE_CACHE = 6
 private const val CROSSFADE_MS = 720
 private const val APPEAR_MS = 340
-private const val PLAYER_FPS = 30f
-private const val AMBIENT_FPS = 20f
+private const val PLAYER_FPS = 24f
+private const val AMBIENT_FPS = 12f
 private const val RAD_TO_DEG = 57.29578f
 
 private class BlurEffectCache(private val maxEntries: Int = 16) {
@@ -851,7 +851,7 @@ fun FluidArtworkBackground(
 
                         if (agslRenderer != null) {
                             drawIntoCanvas { canvas ->
-                                val scale = 0.22f
+                                val scale = 0.18f
                                 val invScale = 1f / scale
                                 val scaledWidth = size.width * scale
                                 val scaledHeight = size.height * scale

@@ -81,6 +81,7 @@ class SyncedVideoRepository @Inject constructor(
      */
     private fun cleanTrackTitle(title: String): String {
         var cleaned = title
+            .replace(Regex("【[^】]*】"), " ")
             .replace(Regex("\\((?i)(official|audio|lyric|lyrics|video|hd|4k|hq|full\\s*song|from\\s+[^)]+|feat\\.?[^)]+|ft\\.?[^)]+|featuring[^)]+|remastered[^)]*|single\\s*version|album\\s*version|radio\\s*edit)\\)"), " ")
             .replace(Regex("\\[(?i)(official|audio|lyric|lyrics|video|hd|4k|hq|full\\s*song|from\\s+[^\\]]+|feat\\.?[^\\]]+|ft\\.?[^\\]]+|remastered[^\\]]*|single\\s*version|album\\s*version)]"), " ")
             .replace(Regex("(?i)\\b(feat\\.?|ft\\.?|featuring)\\b.*$"), " ")
@@ -699,6 +700,7 @@ class SyncedVideoRepository @Inject constructor(
             "static image", "still image", "poster", "teaser", "trailer", "promo",
             "behind the scenes", "making of", "interview", "dance cover", "choreography",
             "tutorial", "guitar lesson", "piano tutorial", "shorts", "#shorts",
+            "生歌", "歌ってみた", "弾いてみた", "カラオケ", "ニコカラ", "utattemita",
         )
         // Direct-played track ke liye sirf static audio/cover uploads skip karo; real Fan MVs allow raho
         val DIRECT_AUDIO_ONLY_MARKERS = listOf(

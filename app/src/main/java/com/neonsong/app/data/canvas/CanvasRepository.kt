@@ -1,7 +1,9 @@
 package com.neonsong.app.data.canvas
 
 import android.util.Log
+import com.neonsong.app.data.music.YOUTUBE_WEB_USER_AGENT
 import com.neonsong.app.data.network.NetworkMonitor
+import com.neonsong.app.data.video.SyncedVideoRepository
 import com.neonsong.app.playback.PlayableTrack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -16,12 +18,14 @@ import javax.inject.Singleton
 
 /**
  * Finds the looping video that belongs behind a track's or a release's cover
- * art (Apple motion artwork, Tidal video cover, or Community Canvas manifest).
+ * art (Apple motion artwork, Tidal video cover, Community Canvas manifest,
+ * or a lightweight YouTube MV loop fallback when Spotify Canvas is enabled).
  */
 @Singleton
 class CanvasRepository @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val networkMonitor: NetworkMonitor,
+    private val syncedVideoRepository: SyncedVideoRepository,
 ) {
 
     private class Entry(
@@ -37,7 +41,11 @@ class CanvasRepository @Inject constructor(
 
     private val lock = Mutex()
 
-    suspend fun canvasFor(track: PlayableTrack, cellularAllowed: Boolean = true): CanvasArtwork? {
+    suspend fun canvasFor(
+        track: PlayableTrack,
+        cellularAllowed: Boolean = true,
+        preferSpotify: Boolean = false,
+    ): CanvasArtwork? {
         val rawTitle = track.title.cleaned()
         val rawArtist = track.artist.cleaned()
         if (rawTitle.isBlank() || rawArtist.isBlank()) return null
@@ -53,6 +61,7 @@ class CanvasRepository @Inject constructor(
             album = album,
             trackId = id,
             cellularAllowed = cellularAllowed,
+            preferSpotify = preferSpotify,
         )
     }
 
@@ -62,13 +71,15 @@ class CanvasRepository @Inject constructor(
         album: String?,
         trackId: String? = null,
         cellularAllowed: Boolean = true,
+        preferSpotify: Boolean = false,
     ): CanvasArtwork? {
         val cleanTitle = stripLeadingArtistPrefix(title.cleaned(), artist.cleaned())
         val cleanArtist = artist.cleaned()
         if (cleanTitle.isBlank() || cleanArtist.isBlank()) return null
 
         val id = trackId ?: "$cleanArtist-$cleanTitle"
-        val key = "song|$id"
+        val styleTag = if (preferSpotify) "spotify" else "apple"
+        val key = "song|$styleTag|$id"
 
         val now = System.currentTimeMillis()
         val cachedAnswer = synchronized(cache) { cache[key] }
@@ -86,17 +97,24 @@ class CanvasRepository @Inject constructor(
                 cleanTitle = cleanTitle,
                 cleanArtist = cleanArtist,
                 album = album,
+                preferSpotify = preferSpotify,
                 appleBlock = { AppleMusicCanvas.search(okHttpClient, cleanTitle, cleanArtist, album) },
                 tidalBlock = { TidalCanvas.search(okHttpClient, cleanTitle, cleanArtist, album) },
                 communityBlock = { CommunityCanvas.search(okHttpClient, cleanTitle, cleanArtist, album) },
+                mvFallbackBlock = if (preferSpotify) {
+                    { mvCanvasFallback(cleanTitle, cleanArtist, album, trackId) }
+                } else {
+                    null
+                },
             )
         }
     }
 
-    fun cached(track: PlayableTrack): CanvasArtwork? {
+    fun cached(track: PlayableTrack, preferSpotify: Boolean = false): CanvasArtwork? {
         val cleanTitle = stripLeadingArtistPrefix(track.title.cleaned(), track.artist.cleaned())
         val id = track.videoId?.takeIf { it.isNotBlank() } ?: "${track.artist.cleaned()}-$cleanTitle"
-        val key = "song|$id"
+        val styleTag = if (preferSpotify) "spotify" else "apple"
+        val key = "song|$styleTag|$id"
         return synchronized(cache) { cache[key]?.artwork }
     }
 
@@ -125,6 +143,7 @@ class CanvasRepository @Inject constructor(
                 cleanTitle = name,
                 cleanArtist = credit,
                 album = name,
+                preferSpotify = false,
                 appleBlock = { AppleMusicCanvas.searchAlbum(okHttpClient, name, credit) },
                 tidalBlock = { TidalCanvas.searchAlbum(okHttpClient, name, credit) },
                 communityBlock = { CommunityCanvas.search(okHttpClient, name, credit, name) },
@@ -136,9 +155,11 @@ class CanvasRepository @Inject constructor(
         cleanTitle: String,
         cleanArtist: String,
         album: String?,
+        preferSpotify: Boolean,
         appleBlock: suspend () -> CanvasArtwork?,
         tidalBlock: suspend () -> CanvasArtwork?,
         communityBlock: suspend () -> CanvasArtwork?,
+        mvFallbackBlock: (suspend () -> CanvasArtwork?)? = null,
     ): CanvasArtwork? = coroutineScope {
         val appleDeferred = async(Dispatchers.IO) {
             runCatching { withTimeoutOrNull(5_500L) { appleBlock() } }
@@ -156,20 +177,105 @@ class CanvasRepository @Inject constructor(
                 ?.takeIf { it.matches(cleanTitle, cleanArtist, album) }
         }
 
-        val appleHit = appleDeferred.await()
-        if (appleHit != null) {
-            tidalDeferred.cancel()
-            communityDeferred.cancel()
-            return@coroutineScope appleHit
-        }
+        if (preferSpotify) {
+            val communityHit = communityDeferred.await()
+            if (communityHit != null) {
+                appleDeferred.cancel()
+                tidalDeferred.cancel()
+                return@coroutineScope communityHit.copy(
+                    tallUrl = communityHit.tallUrl ?: communityHit.url,
+                )
+            }
 
-        val tidalHit = tidalDeferred.await()
-        if (tidalHit != null) {
-            communityDeferred.cancel()
-            return@coroutineScope tidalHit
-        }
+            val appleHit = appleDeferred.await()
+            if (appleHit != null) {
+                tidalDeferred.cancel()
+                val preferredTall = appleHit.tallUrl?.takeIf { it.isNotBlank() }
+                return@coroutineScope if (preferredTall != null && preferredTall != appleHit.url) {
+                    appleHit.copy(url = preferredTall, fallbackUrl = appleHit.url)
+                } else {
+                    appleHit
+                }
+            }
 
-        communityDeferred.await()
+            tidalDeferred.await() ?: mvFallbackBlock?.let { block ->
+                runCatching { withTimeoutOrNull(6_000L) { block() } }.getOrNull()
+            }
+        } else {
+            val appleHit = appleDeferred.await()
+            if (appleHit != null) {
+                tidalDeferred.cancel()
+                communityDeferred.cancel()
+                return@coroutineScope appleHit
+            }
+
+            val tidalHit = tidalDeferred.await()
+            if (tidalHit != null) {
+                communityDeferred.cancel()
+                return@coroutineScope tidalHit
+            }
+
+            communityDeferred.await()
+        }
+    }
+
+    private suspend fun mvCanvasFallback(
+        cleanTitle: String,
+        cleanArtist: String,
+        album: String?,
+        trackId: String?,
+    ): CanvasArtwork? {
+        val ytVideoId = trackId?.trim()?.takeIf { id ->
+            id.length == 11 && id.all { ch -> ch.isLetterOrDigit() || ch == '-' || ch == '_' }
+        }
+        val bundle = syncedVideoRepository.resolveVideo(
+            trackTitle = cleanTitle,
+            trackArtist = cleanArtist,
+            videoId = ytVideoId,
+            targetDurationMs = null,
+            trackAlbum = album,
+        ).getOrNull() ?: return null
+
+        val nonSquareStreams = bundle.availableStreams.filter { !it.isSquareArtTrack }
+        val hwStreams = nonSquareStreams.filter { it.isHardwareFriendlyCodec }
+        val pool = hwStreams.ifEmpty { nonSquareStreams }.ifEmpty { listOf(bundle.fastStartStream) }
+        // Crisp 720p-1080p hardware-decoded clips on Wi-Fi (capped at 720p on cellular, avoiding 4K/AV1 heat).
+        val maxHeight = if (networkMonitor.isOnCellular()) 720 else 1080
+        val chosen = pool
+            .filter { (it.height ?: 0) in 480..maxHeight }
+            .maxByOrNull { it.height ?: 0 }
+            ?: pool.filter { (it.height ?: 0) in 360..maxHeight }.maxByOrNull { it.height ?: 0 }
+            ?: pool.minByOrNull { kotlin.math.abs((it.height ?: 720) - 720) }
+            ?: bundle.fastStartStream
+
+        if (chosen.url.isBlank()) return null
+
+        val durMs = chosen.durationMs ?: bundle.defaultStream.durationMs ?: 0L
+        val (clipStart, clipEnd) = when {
+            durMs >= 55_000L -> 25_000L to 43_000L
+            durMs >= 22_000L -> 4_000L to minOf(durMs - 1_000L, 22_000L)
+            else -> null to null
+        }
+        val headers = buildMap {
+            put("Origin", "https://www.youtube.com")
+            put("Referer", "https://www.youtube.com/")
+            putAll(chosen.requestHeaders)
+            if (!containsKey("User-Agent")) {
+                put("User-Agent", YOUTUBE_WEB_USER_AGENT)
+            }
+        }
+        return CanvasArtwork(
+            url = chosen.url,
+            fallbackUrl = null,
+            tallUrl = chosen.url,
+            title = cleanTitle,
+            artist = cleanArtist,
+            album = album,
+            source = CanvasSource.YOUTUBE_MV,
+            requestHeaders = headers,
+            clipStartMs = clipStart,
+            clipEndMs = clipEnd,
+        )
     }
 
     private suspend fun resolve(

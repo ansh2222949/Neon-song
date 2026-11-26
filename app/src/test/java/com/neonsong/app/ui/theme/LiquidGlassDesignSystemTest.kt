@@ -28,8 +28,8 @@ class LiquidGlassDesignSystemTest {
         val accent = Color(0xFF6C9EFF)
         val bg = LiquidGlassTheme.backgroundColor(isDark = true, accent = accent, isAmoled = false)
 
-        // Must be translucent (alpha ~ 0.25)
-        assertEquals(0.25f, bg.alpha, 0.01f)
+        // Translucent frosted depth (0.38 dark, 0.76 light, 0.44 AMOLED)
+        assertEquals(0.38f, bg.alpha, 0.01f)
         // Red, green, blue should incorporate subtle accent depth
         assertTrue(bg.red > 0f)
         assertTrue(bg.blue > bg.red) // Accent has higher blue
@@ -40,8 +40,8 @@ class LiquidGlassDesignSystemTest {
         val accent = Color(0xFF2463EB)
         val bg = LiquidGlassTheme.backgroundColor(isDark = false, accent = accent, isAmoled = false)
 
-        // Must be luminous frosted glass (alpha ~ 0.25)
-        assertEquals(0.25f, bg.alpha, 0.01f)
+        // Luminous frosted glass (light theme alpha ~ 0.76)
+        assertEquals(0.76f, bg.alpha, 0.01f)
         // Light mode components are near 1.0
         assertTrue(bg.red > 0.85f)
         assertTrue(bg.green > 0.85f)
@@ -53,8 +53,8 @@ class LiquidGlassDesignSystemTest {
         val accent = Color(0xFFFF5722)
         val bg = LiquidGlassTheme.backgroundColor(isDark = true, accent = accent, isAmoled = true)
 
-        // AMOLED glass retains high contrast with subtle dark tint (alpha ~ 0.25)
-        assertEquals(0.25f, bg.alpha, 0.01f)
+        // AMOLED glass retains high contrast with subtle dark tint (alpha ~ 0.44)
+        assertEquals(0.44f, bg.alpha, 0.01f)
         assertTrue(bg.red > 0f)
     }
 

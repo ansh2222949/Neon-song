@@ -128,14 +128,19 @@ class HarmonicMixingAndCurvesTest {
 
     @Test
     fun bassSwapClubSnapsLowEndAtMidpoint() {
-        // At 25% progress: Deck A owns 100% bass
+        // At 25% progress: Deck A owns 100% bass (Deck B low end stays muted before 45%)
         val early = AutoMixCurve.calculateGains(0.25f, AutoMixCurveType.BASS_SWAP_CLUB)
         assertThat(early.bassDeckA).isEqualTo(1.0f)
-        assertThat(early.bassDeckB).isEqualTo(0.5f)
+        assertThat(early.bassDeckB).isEqualTo(0.0f)
 
-        // At 75% progress: Deck B owns 100% bass
+        // At 50% midpoint: Equal-power bass crossover (~0.7071 each)
+        val mid = AutoMixCurve.calculateGains(0.50f, AutoMixCurveType.BASS_SWAP_CLUB)
+        assertThat(abs(mid.bassDeckA - 0.7071f)).isLessThan(1e-3f)
+        assertThat(abs(mid.bassDeckB - 0.7071f)).isLessThan(1e-3f)
+
+        // At 75% progress: Deck B owns 100% bass (Deck A low end muted after 55%)
         val late = AutoMixCurve.calculateGains(0.75f, AutoMixCurveType.BASS_SWAP_CLUB)
-        assertThat(late.bassDeckA).isEqualTo(0.5f)
+        assertThat(late.bassDeckA).isLessThan(1e-5f)
         assertThat(late.bassDeckB).isEqualTo(1.0f)
     }
 }

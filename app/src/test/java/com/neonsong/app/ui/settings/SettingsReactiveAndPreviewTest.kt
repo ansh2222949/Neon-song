@@ -306,5 +306,26 @@ class SettingsReactiveAndPreviewTest {
             vm.viewModelScope.cancel()
         }
     }
+
+    @Test
+    fun canvasStyleSetting_defaultsToSpotifyAndSwitchesCleanly() = runTest {
+        val dataStore = PreferenceDataStoreFactory.create(scope = backgroundScope) {
+            tempFolder.newFile("settings_canvas_style_test.preferences_pb")
+        }
+        val prefs = SettingsPreferences(dataStore, RuntimeEnvironment.getApplication())
+        assertThat(prefs.settings.first().canvasStyle).isEqualTo(com.neonsong.app.data.local.CanvasStyle.SPOTIFY)
+
+        prefs.setCanvasStyle(com.neonsong.app.data.local.CanvasStyle.APPLE_MUSIC)
+        assertThat(prefs.settings.first().canvasStyle).isEqualTo(com.neonsong.app.data.local.CanvasStyle.APPLE_MUSIC)
+
+        val settingsMock = mockk<SettingsPreferences>(relaxed = true)
+        val vm = createViewModel(settingsPreferences = settingsMock)
+        try {
+            vm.setCanvasStyle(com.neonsong.app.data.local.CanvasStyle.SPOTIFY)
+            coVerify { settingsMock.setCanvasStyle(com.neonsong.app.data.local.CanvasStyle.SPOTIFY) }
+        } finally {
+            vm.viewModelScope.cancel()
+        }
+    }
 }
 

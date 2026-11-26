@@ -309,6 +309,8 @@ class MusicPlayer @Inject constructor(
     private var activeUpgradeJob: Job? = null
     private var activeUpgradeMediaId: String? = null
     private var activeUpgradeDeferred: Deferred<ResolvedStream?>? = null
+    @Volatile var isMusicVideoModeActive: Boolean = false
+        private set
     @Volatile private var cachedMiscSettings: MiscSettings = MiscSettings()
     @Volatile private var swappingMediaId: String? = null
     private var queueEnrichmentJob: Job? = null
@@ -506,7 +508,7 @@ class MusicPlayer @Inject constructor(
                 val effectiveBitPerfect = bitPerfectEnabled && !isSpatialAudioCodec(_state.value.audioCodec)
                 val standby = currentStandby()
                 val nextIndex = player.nextMediaItemIndex
-                if (effectiveBitPerfect) {
+                if (effectiveBitPerfect || (!automixEnabled && !crossfadeEnabled)) {
                     if (nextIndex != C.INDEX_UNSET && nextIndex in 0 until player.mediaItemCount) {
                         resolveAndPlayQueueItem(nextIndex)
                     }
@@ -520,7 +522,7 @@ class MusicPlayer @Inject constructor(
                 if (standby != null && standbyMatchesNext && standby.playbackState == Player.STATE_READY) {
                     autoDJStandbyFallbackJob?.cancel()
                     autoDJStandbyFallbackJob = null
-                    if (automixEnabled || autoDJController.get().isEnabled) {
+                    if (automixEnabled && nativeAutoMixEngine.get().isAvailable) {
                         runCatching { nativeAutoMixEngine.get().triggerFadeDurationMs(overlapMs) }
                     }
                     handOffCrossfade(standby, overlapMs)
@@ -1914,11 +1916,18 @@ class MusicPlayer @Inject constructor(
                             }.getOrDefault(0)
                             musicHapticsEngine.pollAndFire(telemetry, player.isPlaying)
                         }
-                        val djTransitionMs = if (automixEnabled) {
-                            val bars = automixBars.coerceIn(4, 16)
-                            minOf(bars * 1800L, if (dur > 0) dur / 3 else 12000L).coerceIn(4000L, 16000L)
-                        } else {
-                            crossfadeDurationMs
+                        val effectiveBitPerfect = bitPerfectEnabled && !isSpatialAudioCodec(_state.value.audioCodec)
+                        val djTransitionMs = when {
+                            effectiveBitPerfect || (!automixEnabled && !crossfadeEnabled) -> 0L
+                            automixEnabled -> {
+                                val bpm = runCatching { nativeAutoMixEngine.get().deckABpm.toDouble() }
+                                    .getOrDefault(120.0)
+                                    .let { if (it.isFinite() && it in 50.0..220.0) it else 120.0 }
+                                val barMs = 4.0 * (60_000.0 / bpm)
+                                val barsMs = kotlin.math.round(automixBars.coerceIn(4, 16) * barMs).toLong()
+                                minOf(barsMs, if (dur > 0) dur / 3 else 12000L).coerceIn(4000L, 16000L)
+                            }
+                            else -> crossfadeDurationMs
                         }
                         runCatching {
                             autoDJController.get().onPlaybackTick(
@@ -2615,10 +2624,25 @@ class MusicPlayer @Inject constructor(
         return _state.value.positionMs
     }
 
+    /** Prevents external Addon/Dolby swaps while Music Video mode needs frame-locked YouTube timing. */
+    fun setMusicVideoModeActive(active: Boolean) {
+        isMusicVideoModeActive = active
+        if (active) {
+            activeUpgradeJob?.cancel()
+            activeUpgradeJob = null
+            activeUpgradeMediaId = null
+            activeUpgradeDeferred?.cancel()
+            activeUpgradeDeferred = null
+        }
+    }
+
     /** Returns the hardware audio output presentation latency in milliseconds. */
     fun presentationLatencyMs(): Long {
         val us = runCatching { nativeAudioEngine.get().getPresentationLatencyUs() }.getOrDefault(0L)
-        return (us / 1000L).coerceIn(0L, 400L)
+        if (us > 0L) return (us / 1000L).coerceIn(0L, 450L)
+        val btLatencyMs = if (findBluetoothOutputDevice() != null) 140L else 55L
+        val spatialPenaltyMs = if (isSpatialAudioCodec(_state.value.audioCodec)) 70L else 0L
+        return (btLatencyMs + spatialPenaltyMs).coerceIn(45L, 450L)
     }
 
     fun seekTo(positionMs: Long) = onMain {
@@ -2833,7 +2857,17 @@ class MusicPlayer @Inject constructor(
         autoMixHandoffStartedAtMs = 0L
         autoMixElapsedMs = 0L
         autoMixLastTickMs = 0L
-        runCatching { nativeAutoMixEngine.get().reset() }
+        val engine = nativeAutoMixEngine.get()
+        val trimFrames = runCatching { engine.deckBLeadingTrimFrames }.getOrDefault(0L)
+        val wasNativePostRestore = automixEnabled && engine.isAvailable &&
+            outgoingPlayer != null &&
+            runCatching { engine.state == AutoMixState.POST_RESTORE || engine.transitionProgress >= 0.99f }.getOrDefault(false)
+        val mixRateHz = if (trimFrames > 0L && wasNativePostRestore && playerDelegate.isInitialized()) {
+            autoMixSinksByPlayer[player]?.firstNotNullOfOrNull { it.currentMixOutputSampleRateHz() } ?: 48_000
+        } else {
+            48_000
+        }
+        runCatching { engine.reset() }
         _state.update {
             it.copy(
                 isAutoMixActive = false,
@@ -2852,6 +2886,17 @@ class MusicPlayer @Inject constructor(
         standbyQueue = emptyList()
         standbyIndex = C.INDEX_UNSET
         player.volume = 1f
+        if (wasNativePostRestore && trimFrames > 0L) {
+            val trimMs = (trimFrames * 1000L / mixRateHz.coerceAtLeast(8_000)).coerceIn(0L, 5_000L)
+            if (trimMs > 120L) {
+                val pDur = runCatching { player.duration }.getOrDefault(C.TIME_UNSET)
+                val pPos = runCatching { player.currentPosition.coerceAtLeast(0L) }.getOrDefault(0L)
+                val target = pPos + trimMs
+                if (pDur == C.TIME_UNSET || target < pDur - 500L) {
+                    runCatching { player.seekTo(target) }
+                }
+            }
+        }
         setAutoMixRoles(player, null)
         // Re-lock DAC routing & sample rate to the newly promoted active track cleanly.
         val promotedRateHz = autoMixSinksByPlayer[player]
@@ -2966,7 +3011,7 @@ class MusicPlayer @Inject constructor(
                         resolveAndPlayQueueItem(nextIndex)
                         return@withContext
                     }
-                    if (automixEnabled || autoDJController.get().isEnabled) {
+                    if (automixEnabled && nativeAutoMixEngine.get().isAvailable) {
                         runCatching { nativeAutoMixEngine.get().triggerFadeDurationMs(overlapMs) }
                     }
                     handOffCrossfade(standby, overlapMs)
@@ -2999,9 +3044,8 @@ class MusicPlayer @Inject constructor(
 
     @MainThread
     private fun updateCrossfade(positionMs: Long): Boolean {
-        val isAutoDJ = runCatching { autoDJController.get().isEnabled }.getOrDefault(false)
         val effectiveBitPerfect = bitPerfectEnabled && !isSpatialAudioCodec(_state.value.audioCodec)
-        if ((!crossfadeEnabled && !automixEnabled && !isAutoDJ) || effectiveBitPerfect) return false
+        if ((!crossfadeEnabled && !automixEnabled) || effectiveBitPerfect) return false
         outgoingPlayer?.let { outgoing ->
             if (!player.isPlaying) {
                 autoMixLastTickMs = 0L
@@ -3009,7 +3053,7 @@ class MusicPlayer @Inject constructor(
             }
             val nowMs = SystemClock.elapsedRealtime()
             val incomingPos = runCatching { player.currentPosition.coerceAtLeast(0L) }.getOrDefault(0L)
-            val isEngineFading = automixEnabled || isAutoDJ
+            val isEngineFading = automixEnabled
             val wallProgress = if (isEngineFading) {
                 if (autoMixLastTickMs > 0L) {
                     autoMixElapsedMs += (nowMs - autoMixLastTickMs).coerceIn(0L, 500L)
@@ -4448,7 +4492,7 @@ class MusicPlayer @Inject constructor(
                     enrichUpcomingQueue(index)
                     if (!resolved.isLossless && resolved.audioCodec != "DOLBY ATMOS") {
                         scheduleQualityUpgrade(
-                            track = track,
+                            track = updatedTrack,
                             expectedMediaId = expectedMediaId,
                             generation = generation,
                             currentStream = resolved,
@@ -6941,6 +6985,13 @@ class MusicPlayer @Inject constructor(
             android.util.Log.i("MusicPlayer", "[STREAM UPGRADE] already running for '${track.title}'")
             return
         }
+        if (isMusicVideoModeActive && !track.videoId.isNullOrBlank()) {
+            android.util.Log.i(
+                "MusicPlayer",
+                "[STREAM UPGRADE] skipped '${track.title}' while Music Video mode is active to keep YouTube A/V sync",
+            )
+            return
+        }
         val misc = cachedMiscSettings
         val requestedQuality = activeStreamingQuality(misc)
         val wantLossless = misc.preferLosslessStreaming &&
@@ -8295,7 +8346,7 @@ class MusicPlayer @Inject constructor(
             """^(.*?)(?:\s+(?:feat\.?|ft\.?|featuring|with|&|,|/)\s+.*)$""",
             RegexOption.IGNORE_CASE,
         )
-        private val NON_ALNUM_SPACE_REGEX = Regex("""[^a-zA-Z0-9\s]""")
+        private val NON_ALNUM_SPACE_REGEX = Regex("""[^\p{L}\p{N}\p{M}\s]""")
         private val MULTI_SPACE_REGEX = Regex("""\s+""")
         private val CLEAN_TRACK_TITLE_BRACKET_REGEX = Regex(
             """(?i)\s*[\(\[](feat\.|ft\.|official\s*(music)?\s*video|audio|lyrics|remastered?|hd|4k|visualizer)[^\)\]]*[\)\]]""",

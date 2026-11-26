@@ -46,6 +46,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -100,6 +101,7 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
@@ -194,6 +196,7 @@ import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import com.neonsong.app.data.artwork.ArtworkNormalizer
+import com.neonsong.app.data.local.CanvasStyle
 import com.neonsong.app.data.local.LyricsAnimation
 import com.neonsong.app.data.local.LyricsUiVersion
 import com.neonsong.app.data.local.PlayerFaceStyle
@@ -663,6 +666,7 @@ private fun FloatingMorphArtworkOverlay(
     onSetVideoFullscreen: (Boolean) -> Unit = {},
     onCloseVideoMode: () -> Unit = {},
     isAudioMorphActive: Boolean = false,
+    isCardHiddenForCanvas: Boolean = false,
     playerFaceStyle: PlayerFaceStyle = PlayerFaceStyle.DEFAULT,
     sleeveCanvas: com.neonsong.app.data.canvas.CanvasArtwork? = null,
     ambientColor: Color = Color.White,
@@ -692,6 +696,7 @@ private fun FloatingMorphArtworkOverlay(
     var pinchZoom by remember(trackIdentity, videoFullscreen) { mutableFloatStateOf(1f) }
     var panOffset by remember(trackIdentity, videoFullscreen) { mutableStateOf(Offset.Zero) }
     var isControlsLocked by remember(trackIdentity, videoFullscreen) { mutableStateOf(false) }
+    var manualSyncOffsetMs by rememberSaveable(trackIdentity) { mutableLongStateOf(0L) }
 
     LaunchedEffect(videoScalingMode) {
         pinchZoom = 1f
@@ -899,7 +904,7 @@ private fun FloatingMorphArtworkOverlay(
                     alpha = when {
                         !overlayVisible -> 0f
                         hasActiveVideo -> 1f
-                        playerFaceStyle == PlayerFaceStyle.BACKGROUND_ONLY ->
+                        playerFaceStyle == PlayerFaceStyle.BACKGROUND_ONLY || isCardHiddenForCanvas ->
                             (1f - (morphProgress / 0.55f)).coerceIn(0f, 1f)
                         playerFaceStyle == PlayerFaceStyle.FULLSCREEN_HERO ->
                             (1f - ((morphProgress - 0.45f) / 0.40f)).coerceIn(0f, 1f)
@@ -914,6 +919,7 @@ private fun FloatingMorphArtworkOverlay(
                     musicPlayer = musicPlayer!!,
                     videoId = activeVideoId!!,
                     videoScalingMode = videoScalingMode,
+                    manualSyncOffsetMs = manualSyncOffsetMs,
                     viewModel = videoViewModel,
                     modifier = Modifier
                         .fillMaxSize()
@@ -1041,6 +1047,64 @@ private fun FloatingMorphArtworkOverlay(
                                     contentDescription = null,
                                     tint = Color.White,
                                     modifier = Modifier.size(17.dp),
+                                )
+                            }
+                        }
+
+                        // Compact manual A/V sync nudge capsule for recordings with intro/codec offset
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Surface(
+                                onClick = { manualSyncOffsetMs = (manualSyncOffsetMs - 250L).coerceIn(-5_000L, 5_000L) },
+                                shape = RoundedCornerShape(50),
+                                color = Color.Black.copy(alpha = 0.50f),
+                                border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.22f)),
+                            ) {
+                                Text(
+                                    text = "−",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                )
+                            }
+                            Surface(
+                                onClick = { manualSyncOffsetMs = 0L },
+                                shape = RoundedCornerShape(50),
+                                color = Color.Black.copy(alpha = 0.50f),
+                                border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.22f)),
+                            ) {
+                                val secText = if (manualSyncOffsetMs == 0L) {
+                                    "0.0s"
+                                } else {
+                                    val sign = if (manualSyncOffsetMs > 0L) "+" else ""
+                                    String.format(java.util.Locale.US, "%s%.2fs", sign, manualSyncOffsetMs / 1000.0)
+                                }
+                                Text(
+                                    text = secText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                )
+                            }
+                            Surface(
+                                onClick = { manualSyncOffsetMs = (manualSyncOffsetMs + 250L).coerceIn(-5_000L, 5_000L) },
+                                shape = RoundedCornerShape(50),
+                                color = Color.Black.copy(alpha = 0.50f),
+                                border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.22f)),
+                            ) {
+                                Text(
+                                    text = "+",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
                                 )
                             }
                         }
@@ -2027,7 +2091,8 @@ class PlayerViewModel @Inject constructor(
 
     private companion object {
         const val LOADING_SPINNER_DELAY_MS = 250L
-        const val CANVAS_PREFETCH_DELAY_MS = 4_000L
+        const val CANVAS_PREFETCH_DELAY_MS = 2_000L
+        const val INTERACTIVE_SETTLE_DEBOUNCE_MS = 280L
 
         val VERSION_MARKERS = listOf(
             "slowed", "reverb", "lofi", "lo-fi", "remix", "mashup", "mash-up", "mash up",
@@ -2057,14 +2122,23 @@ class PlayerViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            var lastTrackIdentityKey: String? = null
             combine(
                 player.chromeState.map { it.current }.distinctUntilChanged(),
                 settingsPreferences.settings.map { it.wordByWordLyrics }.distinctUntilChanged(),
             ) { track, wordByWord -> track to wordByWord }.collect { (track, wordByWord) ->
-                val key = track?.let { "${it.videoId ?: ""}|${it.artist}|${it.title}|$wordByWord" }
+                val trackIdKey = track?.let { "${it.videoId ?: ""}|${it.artist}|${it.title}" }
+                val key = track?.let { "$trackIdKey|$wordByWord" }
                 if (key != currentTrackLyricsKey) {
+                    val isTrackChange = trackIdKey != lastTrackIdentityKey
+                    lastTrackIdentityKey = trackIdKey
                     currentTrackLyricsKey = key
                     if (track != null) {
+                        if (isTrackChange) {
+                            // Clear previous song's lyrics immediately so old lines don't linger 1-2s on skip
+                            lyricsJob?.cancel()
+                            _lyricsState.value = LyricsUiState.Loading
+                        }
                         loadLyrics(track, forceRefresh = false, wordByWord = wordByWord)
                     } else {
                         lyricsJob?.cancel()
@@ -2076,26 +2150,36 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             combine(
                 player.chromeState.map { it.current }.distinctUntilChanged(),
-                settingsPreferences.settings.map { it.canvasEnabled to it.canvasOverCellular }.distinctUntilChanged(),
-            ) { track, (enabled, cellular) -> Triple(track, enabled, cellular) }.collect { (track, enabled, cellular) ->
-                val key = track?.let { "${it.videoId ?: ""}|${it.artist}|${it.title}|$enabled|$cellular" }
+                settingsPreferences.settings.map {
+                    Triple(it.canvasEnabled, it.canvasOverCellular, it.canvasStyle)
+                }.distinctUntilChanged(),
+            ) { track, (enabled, cellular, style) ->
+                val preferSpotify = style == CanvasStyle.SPOTIFY
+                Triple(track, enabled to cellular, preferSpotify)
+            }.collect { (track, flags, preferSpotify) ->
+                val (enabled, cellular) = flags
+                val key = track?.let {
+                    "${it.videoId ?: ""}|${it.artist}|${it.title}|$enabled|$cellular|$preferSpotify"
+                }
                 if (key != currentCanvasTrackKey) {
                     currentCanvasTrackKey = key
                     canvasJob?.cancel()
                     if (track != null && enabled) {
-                        _canvasState.value = canvasRepository.cached(track)
+                        val cachedCanvas = canvasRepository.cached(track, preferSpotify = preferSpotify)
+                        _canvasState.value = cachedCanvas
                         canvasJob = viewModelScope.launch {
-                            waitUntilAudible(track)
-                            MetadataLog.delayed("canvas", track.videoId)
-                            delay(MetadataLog.SETTLE_MS)
-                            if (currentCanvasTrackKey != key) {
-                                MetadataLog.skipped("canvas", track.videoId)
-                                return@launch
+                            if (cachedCanvas == null) {
+                                waitUntilAudible(track, timeoutMs = 1_600L)
+                                delay(INTERACTIVE_SETTLE_DEBOUNCE_MS)
+                                if (currentCanvasTrackKey != key) return@launch
+                                val result = canvasRepository.canvasFor(
+                                    track = track,
+                                    cellularAllowed = cellular,
+                                    preferSpotify = preferSpotify,
+                                )
+                                if (currentCanvasTrackKey != key) return@launch
+                                _canvasState.value = result
                             }
-                            MetadataLog.started("canvas", track.videoId)
-                            val result = canvasRepository.canvasFor(track, cellularAllowed = cellular)
-                            if (currentCanvasTrackKey != key) return@launch
-                            _canvasState.value = result
                             val upcoming = player.state.value.let { snapshot ->
                                 if (snapshot.shuffleEnabled) {
                                     null
@@ -2107,7 +2191,11 @@ class PlayerViewModel @Inject constructor(
                             } ?: return@launch
                             delay(CANVAS_PREFETCH_DELAY_MS)
                             if (currentCanvasTrackKey != key) return@launch
-                            canvasRepository.canvasFor(upcoming, cellularAllowed = cellular)
+                            canvasRepository.canvasFor(
+                                track = upcoming,
+                                cellularAllowed = cellular,
+                                preferSpotify = preferSpotify,
+                            )
                         }
                     } else {
                         _canvasState.value = null
@@ -2137,8 +2225,8 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch { refreshCustomPlaylists() }
     }
 
-    private suspend fun waitUntilAudible(track: PlayableTrack) {
-        withTimeoutOrNull(4_000L) {
+    private suspend fun waitUntilAudible(track: PlayableTrack, timeoutMs: Long = 4_000L) {
+        withTimeoutOrNull(timeoutMs) {
             player.state.first { state ->
                 val same = if (!track.videoId.isNullOrBlank()) {
                     state.current?.videoId == track.videoId
@@ -2157,9 +2245,8 @@ class PlayerViewModel @Inject constructor(
     ) {
         lyricsJob?.cancel()
         lyricsJob = viewModelScope.launch {
-            waitUntilAudible(track)
-            MetadataLog.delayed("lyrics", track.videoId)
-            delay(MetadataLog.SETTLE_MS)
+            waitUntilAudible(track, timeoutMs = 1_500L)
+            delay(INTERACTIVE_SETTLE_DEBOUNCE_MS)
             MetadataLog.started("lyrics", track.videoId)
             val loadingIndicator = launch {
                 delay(LOADING_SPINNER_DELAY_MS)
@@ -2419,6 +2506,10 @@ fun PlayerHost(
 
     val isMiniPlayerVisible = state.current != null && !settings.buttonNowPlayingEnabled && !isImeOpen && !isInPipMode
 
+    LaunchedEffect(isVideoMode) {
+        viewModel.player.setMusicVideoModeActive(isVideoMode)
+    }
+
     LaunchedEffect(
         state.current?.videoId,
         state.current?.title,
@@ -2493,6 +2584,14 @@ fun PlayerHost(
         !sheetController.miniArtBounds.isEmpty &&
         (hasActiveVideo || isAudioMorphActive)
     val activeCanvas by viewModel.canvasState.collectAsStateWithLifecycle()
+    val hostConfiguration = LocalConfiguration.current
+    val isSpotifyFullscreenCanvasOverlay = currentTab == FullPlayerTab.NOW_PLAYING &&
+        !hasActiveVideo &&
+        settings.canvasEnabled &&
+        settings.canvasStyle == CanvasStyle.SPOTIFY &&
+        settings.canvasFullBleed &&
+        activeCanvas != null &&
+        hostConfiguration.orientation != Configuration.ORIENTATION_LANDSCAPE
 
     val prevQueueTrack = remember(fullPlayerState.queue, fullPlayerState.currentIndex) {
         fullPlayerState.queue.getOrNull(fullPlayerState.currentIndex - 1)
@@ -2880,6 +2979,7 @@ fun PlayerHost(
                             isVideoMode = false
                         },
                         isAudioMorphActive = isAudioMorphActive,
+                        isCardHiddenForCanvas = isSpotifyFullscreenCanvasOverlay,
                         playerFaceStyle = activeFaceStyle,
                         sleeveCanvas = null,
                         ambientColor = MaterialTheme.colorScheme.primary,
@@ -3003,6 +3103,7 @@ private fun ExpandedPlayer(
         onSetLyricsFontScale = viewModel::setLyricsFontScale,
         canvas = canvas,
         canvasEnabled = settings.canvasEnabled,
+        canvasStyle = settings.canvasStyle,
         canvasFullBleedEnabled = settings.canvasFullBleed,
         playerFaceStyle = settings.playerFaceStyle,
         inlinePlayerLyricsEnabled = settings.inlinePlayerLyricsEnabled,
@@ -3150,6 +3251,7 @@ private fun FullPlayer(
     onSetLyricsFontScale: ((Float) -> Unit)? = null,
     canvas: com.neonsong.app.data.canvas.CanvasArtwork? = null,
     canvasEnabled: Boolean = true,
+    canvasStyle: CanvasStyle = CanvasStyle.SPOTIFY,
     canvasFullBleedEnabled: Boolean = true,
     playerFaceStyle: PlayerFaceStyle = PlayerFaceStyle.DEFAULT,
     inlinePlayerLyricsEnabled: Boolean = false,
@@ -3256,12 +3358,23 @@ private fun FullPlayer(
     val isLandscapeScreen = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val isCompactStyle = playerFaceStyle == PlayerFaceStyle.COMPACT
     val isCanvasActive = canvasEnabled && canvas != null && !isVideoMode
-    // Cardless styles (BACKGROUND_ONLY, FULLSCREEN_HERO) render full-bleed motion video;
-    // DEFAULT (Adaptive Card & Glow) keeps its floating card + in-card motion video while retaining
-    // the faded hero cover image backdrop underneath when Full Screen Artwork is on.
-    val showFullBleedCanvas = canvasFullBleedEnabled && !isLandscapeScreen && !isVideoMode &&
+    // Spotify Canvas mode renders a full-screen 9:16 vertical looping video behind player controls
+    // and hides the large center album card; Apple Music mode keeps the framed sleeve or Apple hero.
+    val showSpotifyFullscreenCanvas = isCanvasActive &&
+        canvasStyle == CanvasStyle.SPOTIFY &&
+        canvasFullBleedEnabled &&
+        !isLandscapeScreen
+    val showAppleFullBleedCanvas = canvasEnabled &&
+        canvasStyle == CanvasStyle.APPLE_MUSIC &&
+        canvasFullBleedEnabled &&
+        !isLandscapeScreen &&
+        !isVideoMode &&
         (playerFaceStyle == PlayerFaceStyle.BACKGROUND_ONLY || playerFaceStyle == PlayerFaceStyle.FULLSCREEN_HERO)
-    val showBackgroundCoverHero = canvasFullBleedEnabled && !isLandscapeScreen && !isVideoMode &&
+    val showFullBleedCanvas = showSpotifyFullscreenCanvas || showAppleFullBleedCanvas
+    val showBackgroundCoverHero = !showSpotifyFullscreenCanvas &&
+        canvasFullBleedEnabled &&
+        !isLandscapeScreen &&
+        !isVideoMode &&
         (playerFaceStyle == PlayerFaceStyle.DEFAULT || playerFaceStyle == PlayerFaceStyle.BACKGROUND_ONLY)
     val showSleeveCanvas = isCanvasActive && !showFullBleedCanvas &&
         playerFaceStyle != PlayerFaceStyle.FULLSCREEN_HERO &&
@@ -3277,8 +3390,8 @@ private fun FullPlayer(
             null
         } else {
             val tall = canvas?.tallUrl
-            if (showFullBleedCanvas && canvas != null && !tall.isNullOrBlank()) {
-                canvas.copy(url = tall)
+            if (showFullBleedCanvas && canvas != null && !tall.isNullOrBlank() && tall != canvas.url) {
+                canvas.copy(url = tall, fallbackUrl = canvas.fallbackUrl ?: canvas.url)
             } else {
                 canvas
             }
@@ -3525,7 +3638,7 @@ private fun FullPlayer(
                                             },
                                     )
                                 }
-                                if (activeCanvas != null && currentTab == FullPlayerTab.NOW_PLAYING) {
+                                if (!showSpotifyFullscreenCanvas && activeCanvas != null && currentTab == FullPlayerTab.NOW_PLAYING) {
                                     CanvasArtworkPlayer(
                                         canvas = activeCanvas,
                                         isPlaying = state.isPlaying,
@@ -3561,7 +3674,12 @@ private fun FullPlayer(
                                 modifier = Modifier.fillMaxSize(),
                                 extraBlur = currentTab == FullPlayerTab.LYRICS,
                                 rotatingBackgroundEnabled = rotatingBackgroundEnabled,
-                                isPlaying = state.isPlaying && !isVideoMode && isSheetSettled && !isDismissDragging,
+                                isPlaying = state.isPlaying &&
+                                    !isVideoMode &&
+                                    isSheetSettled &&
+                                    !isDismissDragging &&
+                                    !(showSpotifyFullscreenCanvas && canvasRendered && currentTab == FullPlayerTab.NOW_PLAYING) &&
+                                    !(showAppleFullBleedCanvas && canvasRendered && currentTab == FullPlayerTab.NOW_PLAYING),
                                 fallback = {
                                     val staticBlurTransform = remember(currentTab) {
                                         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -3696,7 +3814,7 @@ private fun FullPlayer(
                                             },
                                     )
                                 }
-                                if (showFullBleedCanvas && activeCanvas != null && currentTab == FullPlayerTab.NOW_PLAYING) {
+                                if (showAppleFullBleedCanvas && activeCanvas != null && currentTab == FullPlayerTab.NOW_PLAYING) {
                                     CanvasArtworkPlayer(
                                         canvas = activeCanvas,
                                         isPlaying = state.isPlaying,
@@ -3714,6 +3832,45 @@ private fun FullPlayer(
                                     )
                                 }
                             }
+                        }
+                    }
+                    if (showSpotifyFullscreenCanvas && activeCanvas != null && currentTab == FullPlayerTab.NOW_PLAYING) {
+                        val spotifyCanvasAlphaState = animateFloatAsState(
+                            targetValue = if (currentTab == FullPlayerTab.NOW_PLAYING) 1f else 0f,
+                            animationSpec = tween(280, easing = FastOutSlowInEasing),
+                            label = "spotifyCanvasAlpha",
+                        )
+                        Box(Modifier.fillMaxSize()) {
+                            CanvasArtworkPlayer(
+                                canvas = activeCanvas,
+                                isPlaying = state.isPlaying,
+                                contentMode = CanvasContentMode.CROP,
+                                alignPortraitTop = false,
+                                bottomFade = 0f,
+                                presentationAlpha = {
+                                    spotifyCanvasAlphaState.value *
+                                        ((sheetProgress() - 0.72f) / 0.28f).coerceIn(0f, 1f)
+                                },
+                                onAspectRatioChanged = { canvasAspect = it },
+                                onRenderedChanged = { canvasRendered = it },
+                                pausedForTransition = isVideoMode || isDismissDragging || currentTab != FullPlayerTab.NOW_PLAYING || !isSheetSettled,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                            // Spotify Canvas readability gradient scrims (keeps top icons & bottom controls legible)
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            0.00f to Color.Black.copy(alpha = 0.52f),
+                                            0.18f to Color.Black.copy(alpha = 0.16f),
+                                            0.46f to Color.Transparent,
+                                            0.64f to Color.Black.copy(alpha = 0.36f),
+                                            0.80f to Color.Black.copy(alpha = 0.74f),
+                                            1.00f to Color.Black.copy(alpha = 0.92f),
+                                        ),
+                                    ),
+                            )
                         }
                     }
                     val lyricsVeilState = animateFloatAsState(
@@ -4002,7 +4159,8 @@ private fun FullPlayer(
                                     label = "spatialTiltY",
                                 )
                                 val isCardHidden = playerFaceStyle == PlayerFaceStyle.BACKGROUND_ONLY ||
-                                    playerFaceStyle == PlayerFaceStyle.FULLSCREEN_HERO
+                                    playerFaceStyle == PlayerFaceStyle.FULLSCREEN_HERO ||
+                                    showSpotifyFullscreenCanvas
 
                                 val artworkContent = @Composable { artworkMod: Modifier ->
                                     val sleeveAlpha by animateFloatAsState(
@@ -4525,6 +4683,36 @@ private fun FullPlayer(
                                                     ),
                                                 verticalAlignment = Alignment.CenterVertically,
                                             ) {
+                                                AnimatedVisibility(
+                                                    visible = showSpotifyFullscreenCanvas,
+                                                    enter = fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.85f),
+                                                    exit = fadeOut(tween(180)) + scaleOut(tween(180), targetScale = 0.85f),
+                                                ) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(46.dp)
+                                                                .clip(SquircleShape(10.dp))
+                                                                .background(Color.White.copy(alpha = 0.10f))
+                                                                .border(
+                                                                    width = 0.8.dp,
+                                                                    color = Color.White.copy(alpha = 0.24f),
+                                                                    shape = SquircleShape(10.dp),
+                                                                ),
+                                                        ) {
+                                                            com.neonsong.app.ui.common.ArtworkImage(
+                                                                name = track.title,
+                                                                artist = track.artist,
+                                                                embeddedUrl = track.artworkUrl,
+                                                                fallbackIcon = Icons.Filled.MusicNote,
+                                                                decodeSizePx = 180,
+                                                                enable3DGlass = false,
+                                                                modifier = Modifier.fillMaxSize(),
+                                                            )
+                                                        }
+                                                        Spacer(Modifier.width(12.dp))
+                                                    }
+                                                }
                                                 Column(Modifier.weight(1f)) {
                                                     Text(
                                                         track.title,
@@ -4607,7 +4795,10 @@ private fun FullPlayer(
                                             Spacer(Modifier.height(verticalGap))
                                             SeekBar(
                                                 progressState = progressState,
-                                                isPlaying = state.isPlaying,
+                                                isPlaying = state.isPlaying &&
+                                                    currentTab == FullPlayerTab.NOW_PLAYING &&
+                                                    isSheetSettled &&
+                                                    !isVideoFullscreen,
                                                 trackKey = track.videoId ?: "${track.artist}|${track.title}",
                                                 wavyEnabled = wavySeekbarEnabled,
                                                 onSeek = { targetMs -> player.seekTo(targetMs) },

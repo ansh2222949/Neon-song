@@ -151,6 +151,28 @@ enum class LyricsProvider(val id: String, val title: String, val subtitle: Strin
     }
 }
 
+enum class CanvasStyle(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+) {
+    APPLE_MUSIC(
+        id = "apple",
+        title = "Apple Music",
+        subtitle = "Motion artwork inside the glass sleeve card or top hero",
+    ),
+    SPOTIFY(
+        id = "spotify",
+        title = "Spotify",
+        subtitle = "Full-screen vertical looping canvas behind controls",
+    );
+
+    companion object {
+        fun fromId(id: String?): CanvasStyle =
+            entries.firstOrNull { it.id == id } ?: SPOTIFY
+    }
+}
+
 data class MiscSettings(
     /** Optional local image shown as the user's Settings identity photo. */
     val settingsPhotoUri: String = "",
@@ -268,6 +290,8 @@ data class MiscSettings(
     val hiddenHomeSections: Set<String> = emptySet(),
     /** When true, Animated Album Canvas motion video loops are displayed. */
     val canvasEnabled: Boolean = true,
+    /** Presentation & source style for motion canvas loops (Spotify vs Apple Music). */
+    val canvasStyle: CanvasStyle = CanvasStyle.SPOTIFY,
     /** When true, portrait motion artwork is displayed edge-to-edge behind player controls. */
     val canvasFullBleed: Boolean = true,
     /** When true, canvas video loops may be fetched over cellular data. */
@@ -415,6 +439,7 @@ class SettingsPreferences @Inject constructor(
         val ADDON_SIGNING_KEY = stringPreferencesKey("lw_addon_signing_key")
         val ADDON_ENABLED = booleanPreferencesKey("lw_addon_enabled")
         val CANVAS_ENABLED = booleanPreferencesKey("lw_canvas_enabled")
+        val CANVAS_STYLE = stringPreferencesKey("lw_canvas_style")
         val CANVAS_FULL_BLEED = booleanPreferencesKey("lw_canvas_full_bleed")
         val CANVAS_OVER_CELLULAR = booleanPreferencesKey("lw_canvas_over_cellular")
         val SUPPRESS_YOUTUBE_LOGIN_PROMPT = booleanPreferencesKey("lw_suppress_youtube_login_prompt")
@@ -492,6 +517,7 @@ class SettingsPreferences @Inject constructor(
                 addonSigningKey = p.readSafely(Keys.ADDON_SIGNING_KEY)?.trim().orEmpty(),
                 addonEnabled = p.readSafely(Keys.ADDON_ENABLED) ?: true,
                 canvasEnabled = p.readSafely(Keys.CANVAS_ENABLED) ?: true,
+                canvasStyle = CanvasStyle.fromId(p.readSafely(Keys.CANVAS_STYLE)),
                 canvasFullBleed = p.readSafely(Keys.CANVAS_FULL_BLEED) ?: true,
                 canvasOverCellular = p.readSafely(Keys.CANVAS_OVER_CELLULAR) ?: true,
                 suppressYouTubeLoginPrompt = p.readSafely(Keys.SUPPRESS_YOUTUBE_LOGIN_PROMPT) ?: false,
@@ -823,6 +849,10 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setCanvasEnabled(enabled: Boolean) {
         dataStore.edit { it[Keys.CANVAS_ENABLED] = enabled }
+    }
+
+    suspend fun setCanvasStyle(style: CanvasStyle) {
+        dataStore.edit { it[Keys.CANVAS_STYLE] = style.id }
     }
 
     suspend fun setCanvasFullBleed(enabled: Boolean) {

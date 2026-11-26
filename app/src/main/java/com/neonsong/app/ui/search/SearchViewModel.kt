@@ -164,6 +164,7 @@ class SearchViewModel @Inject constructor(
                     album = item.subtitle,
                     artworkUrl = item.artworkUrl,
                     videoId = item.videoId?.takeIf { it.isNotBlank() } ?: item.entityId?.takeIf { it.isNotBlank() },
+                    durationMs = item.durationSeconds?.takeIf { it > 0 }?.times(1_000L),
                 )
                 // Start immediately. Similar song radio queue loads and extends infinitely.
                 musicPlayer.play(selected, sourceLabel = "Search", startRadio = true)

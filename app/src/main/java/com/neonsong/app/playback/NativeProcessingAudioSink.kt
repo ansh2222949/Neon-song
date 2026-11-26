@@ -59,6 +59,7 @@ class NativeProcessingAudioSink(
     @Volatile private var exclusiveWanted = false
     @Volatile private var usbExclusive = false
     @Volatile private var autoMixEnabled = false
+    @Volatile private var autoMixRequested = false
     @Volatile private var autoMixActive = !standbyAutoMixRole
     @Volatile private var lastAutoMixSampleRateHz = 0
     @Volatile private var exclusiveStartFailed = false
@@ -112,6 +113,7 @@ class NativeProcessingAudioSink(
 
     /** Avoids a JNI availability query on every renderer callback. */
     fun setAutoMixEnabled(enabled: Boolean) {
+        autoMixRequested = enabled
         val activeEngine = autoMixEngine?.takeIf { it.isAvailable }
         autoMixEnabled = enabled && activeEngine != null
         val mixRateHz = currentMixOutputSampleRateHz() ?: 0
@@ -716,7 +718,16 @@ class NativeProcessingAudioSink(
                 val acceptedSlice = output.duplicate().order(output.order())
                 acceptedSlice.position(posBefore)
                 acceptedSlice.limit(posAfter)
-                routeStandbyDeckBPcm(acceptedSlice)
+                val bytesPerFrame = Float.SIZE_BYTES * outputChannelCount
+                val expectedFrames = (posAfter - posBefore) / bytesPerFrame
+                val writtenFrames = routeStandbyDeckBPcm(acceptedSlice)
+                if (writtenFrames < expectedFrames) {
+                    // AutoMix ring buffer backpressured before delegate's AudioTrack:
+                    // rewind output to the exact boundary accepted by AutoMixEngine so
+                    // remaining frames are retried cleanly without frame loss.
+                    output.position(posBefore + writtenFrames * bytesPerFrame)
+                    return false
+                }
             }
 
             if (!consumedByDelegate || output.hasRemaining()) return false
@@ -806,7 +817,10 @@ class NativeProcessingAudioSink(
     }
 
     private fun suppressStandbyAutoMixOutput(): Boolean =
-        autoMixEnabled && !autoMixActive && (standbyAutoMixRole || outputChannelCount in 1..2)
+        !autoMixActive && (
+            (autoMixEnabled && (standbyAutoMixRole || outputChannelCount in 1..2)) ||
+                (autoMixRequested && standbyAutoMixRole)
+            )
 
     override fun playToEndOfStream() {
         if (usbExclusive) {

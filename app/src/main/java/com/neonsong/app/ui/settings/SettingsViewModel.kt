@@ -670,6 +670,9 @@ class SettingsViewModel @Inject constructor(
     fun setCanvasEnabled(enabled: Boolean) = launchSettingsAction("update canvas enabled setting") {
         settingsPreferences.setCanvasEnabled(enabled)
     }
+    fun setCanvasStyle(style: com.neonsong.app.data.local.CanvasStyle) = launchSettingsAction("update canvas style setting") {
+        settingsPreferences.setCanvasStyle(style)
+    }
     fun setCanvasFullBleed(enabled: Boolean) = launchSettingsAction("update canvas full-bleed setting") {
         settingsPreferences.setCanvasFullBleed(enabled)
     }

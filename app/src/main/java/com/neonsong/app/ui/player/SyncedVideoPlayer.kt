@@ -186,10 +186,11 @@ class SyncedVideoViewModel @Inject constructor(
     fun trackRequestKey(title: String, artist: String, videoId: String?): String {
         val normTitle = title.trim().lowercase()
         val normArtist = artist.trim().lowercase()
+        val cleanId = videoId?.trim().orEmpty()
         return if (normTitle.isNotBlank() || normArtist.isNotBlank()) {
-            "$normTitle|$normArtist"
+            "$normTitle|$normArtist|$cleanId"
         } else {
-            "id:${videoId.orEmpty()}"
+            "id:$cleanId"
         }
     }
 

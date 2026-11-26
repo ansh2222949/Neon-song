@@ -30,8 +30,7 @@ class ChallengeFormatException(message: String) : IllegalArgumentException(messa
 fun parseCreateChallenge(rawResponse: String): String {
     val root = parseJsonElement("Create", rawResponse)
     if (root is JsonObject && root.containsKey("error")) {
-        val err = root["error"]
-        throw ChallengeFormatException("YouTube Create API returned error: $err")
+        throw ChallengeFormatException("YouTube Create API returned error ${describeElement(root)}")
     }
     val challenge = when (root) {
         is JsonArray -> extractLegacyChallenge(root) ?: findChallengeArray(root)
@@ -54,8 +53,7 @@ fun parseCreateChallenge(rawResponse: String): String {
 fun parseIntegrityToken(rawResponse: String): Pair<String, Long> {
     val root = parseJsonElement("GenerateIT", rawResponse)
     if (root is JsonObject && root.containsKey("error")) {
-        val err = root["error"]
-        throw ChallengeFormatException("YouTube GenerateIT API returned error: $err")
+        throw ChallengeFormatException("YouTube GenerateIT API returned error ${describeElement(root)}")
     }
     val pair = when (root) {
         is JsonArray -> readTokenPair(root)

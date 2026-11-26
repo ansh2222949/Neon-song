@@ -294,6 +294,24 @@ void AutoMixEngine::readDeckBFrames(float* dstStereo, std::size_t frames) noexce
 
     const std::size_t scratchCap = deckBScratch_.size() / 2U;
     const float ratio = deckBStretcher_.currentRatio();
+    const std::uint64_t readNow = deckBReadCounter_.load(std::memory_order_relaxed);
+    const std::uint64_t writeNow = deckBWriteCounter_.load(std::memory_order_acquire);
+    const std::size_t ringAvail = (writeNow > readNow)
+        ? std::min<std::size_t>(static_cast<std::size_t>(writeNow - readNow), totalCapacityFrames)
+        : 0U;
+    const std::size_t stretchDesired = static_cast<std::size_t>(
+        std::ceil(static_cast<double>(frames) * ratio));
+    // Prevent real-time ringbuffer starvation when Deck B AudioTrack clocks at 1.0x
+    // while tempo sync tries to consume at ratio > 1.0x: fall back cleanly to 1.0x read
+    // once headroom runs tight rather than padding silent dropouts.
+    if (ratio > 1.01F && ringAvail < stretchDesired + kMaxBlockFrames) {
+        const std::size_t got = readRing(dstStereo, frames);
+        if (got < frames) {
+            std::memset(dstStereo + got * 2U, 0, (frames - got) * 2U * sizeof(float));
+        }
+        return;
+    }
+
     std::size_t produced = 0;
     for (int pass = 0; pass < 4 && produced < frames; ++pass) {
         const std::size_t remainingOut = frames - produced;
@@ -374,11 +392,16 @@ void AutoMixEngine::processBlock(float* deckAStereo, std::size_t frames) noexcep
         const float shortAlpha = static_cast<float>(1.0 - std::exp(-blockSec / 0.20));
         const float baseAlpha = static_cast<float>(1.0 - std::exp(-blockSec / 1.0));
         shortTermEnergy_ += shortAlpha * (chunkEnergy - shortTermEnergy_);
+        const std::uint64_t readCounter = deckBReadCounter_.load(std::memory_order_acquire);
+        const std::uint64_t writeCounter = deckBWriteCounter_.load(std::memory_order_acquire);
+        const std::uint64_t minDeckBReady = static_cast<std::uint64_t>(sampleRate_ * 0.25);
         if (energyHistoryFrames_ < static_cast<std::size_t>(sampleRate_ * 10.0)) {
             baselineEnergy_ += baseAlpha * (chunkEnergy - baselineEnergy_);
             energyHistoryFrames_ += frames;
         } else if (baselineEnergy_ > kSilenceThresholdLinear &&
-                   shortTermEnergy_ < baselineEnergy_ * 0.45F) {
+                   shortTermEnergy_ < baselineEnergy_ * 0.45F &&
+                   writeCounter > readCounter &&
+                   (writeCounter - readCounter) >= minDeckBReady) {
             startTransition(AutoMixState::FadingAuto, barMode_.load(std::memory_order_relaxed));
             currState = AutoMixState::FadingAuto;
         }

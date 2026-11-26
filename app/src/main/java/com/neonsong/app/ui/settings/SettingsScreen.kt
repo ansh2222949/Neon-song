@@ -243,6 +243,7 @@ import com.neonsong.app.core.designsystem.components.StatusChip
 import com.neonsong.app.core.designsystem.components.settingHighlightGlow
 import com.neonsong.app.data.local.AccentMode
 import com.neonsong.app.data.local.AppLanguage
+import com.neonsong.app.data.local.CanvasStyle
 import com.neonsong.app.data.local.HomeSection
 import com.neonsong.app.data.local.LyricsAnimation
 import com.neonsong.app.data.local.LyricsProvider
@@ -276,6 +277,8 @@ import com.neonsong.app.features.settings.playback.lastSyncSuffix
 import com.neonsong.app.features.settings.playback.relativeTime
 import com.neonsong.app.playback.ClarityPresets
 import com.neonsong.app.playback.LoudnessMode
+import com.neonsong.app.ui.common.ConnectedButtonGroup
+import com.neonsong.app.ui.common.ConnectedButtonItem
 import com.neonsong.app.ui.common.EdgeToEdgeDialogWindow
 import com.neonsong.app.ui.common.ExpressiveGroup
 import com.neonsong.app.ui.common.ExpressiveGroupRow
@@ -1527,8 +1530,11 @@ fun SettingsScreen(
                                         }
                                     }
                                     item(key = "appearance_canvas_section") {
-                                        SettingsGlassSection(title = stringResource(R.string.settings_canvas_enabled), subtitle = "Spotify-style background video loops") {
-                                            val canvasRowCount = if (misc.canvasEnabled) 3 else 1
+                                        SettingsGlassSection(
+                                            title = stringResource(R.string.settings_canvas_enabled),
+                                            subtitle = "Spotify Canvas or Apple Music motion artwork",
+                                        ) {
+                                            val canvasRowCount = if (misc.canvasEnabled) 4 else 1
                                             ExpressiveGroup(rowCount = canvasRowCount) { index, position ->
                                                 when (index) {
                                                     0 -> SettingsToggleCard(
@@ -1542,7 +1548,13 @@ fun SettingsScreen(
                                                         position = position,
                                                         isHighlighted = (highlightedSettingId == "appearance.canvas_enabled"),
                                                     )
-                                                    1 -> SettingsToggleCard(
+                                                    1 -> CanvasStyleSelectorCard(
+                                                        currentStyle = misc.canvasStyle,
+                                                        onSelectStyle = viewModel::setCanvasStyle,
+                                                        position = position,
+                                                        isHighlighted = (highlightedSettingId == "appearance.canvas_style"),
+                                                    )
+                                                    2 -> SettingsToggleCard(
                                                         icon = Icons.Filled.Visibility,
                                                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                                         iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -2497,7 +2509,11 @@ fun SettingsScreen(
                             )
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                text = if (misc.canvasEnabled) "On • Play Apple Music & live motion loops on cover" else "Off • Keep album artwork completely static",
+                                text = if (misc.canvasEnabled) {
+                                    "On • ${misc.canvasStyle.title}: ${misc.canvasStyle.subtitle}"
+                                } else {
+                                    "Off • Keep album artwork completely static"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -2511,6 +2527,23 @@ fun SettingsScreen(
                             },
                         )
                     }
+                }
+
+                if (misc.canvasEnabled) {
+                    Spacer(Modifier.height(10.dp))
+                    ConnectedButtonGroup(
+                        items = listOf(
+                            ConnectedButtonItem("Apple Music"),
+                            ConnectedButtonItem("Spotify Canvas"),
+                        ),
+                        selectedIndex = if (misc.canvasStyle == CanvasStyle.APPLE_MUSIC) 0 else 1,
+                        onSelect = { idx ->
+                            hapticManager.click()
+                            viewModel.setCanvasStyle(
+                                if (idx == 0) CanvasStyle.APPLE_MUSIC else CanvasStyle.SPOTIFY,
+                            )
+                        },
+                    )
                 }
 
                 Spacer(Modifier.height(14.dp))
@@ -3386,6 +3419,68 @@ internal fun SettingsActionCard(
                 contentDescription = null,
                 tint = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                 modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CanvasStyleSelectorCard(
+    currentStyle: CanvasStyle,
+    onSelectStyle: (CanvasStyle) -> Unit,
+    position: GroupPosition = GroupPosition.SINGLE,
+    isHighlighted: Boolean = false,
+) {
+    val hapticManager = LocalHapticManager.current
+    val shape = remember(position) { groupShape(position) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidGlassChrome(
+                shape = shape,
+                preset = LiquidGlassPreset.Card,
+                accentTint = if (isHighlighted) MaterialTheme.colorScheme.primary.copy(alpha = 0.20f) else Color.Unspecified,
+            )
+            .settingHighlightGlow(isHighlighted = isHighlighted, shape = shape),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                GroupIconBadge(
+                    icon = Icons.Filled.AutoAwesome,
+                    container = MaterialTheme.colorScheme.secondaryContainer,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.settings_canvas_style),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = currentStyle.subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            ConnectedButtonGroup(
+                items = listOf(
+                    ConnectedButtonItem("Apple Music"),
+                    ConnectedButtonItem("Spotify Canvas"),
+                ),
+                selectedIndex = if (currentStyle == CanvasStyle.APPLE_MUSIC) 0 else 1,
+                onSelect = { idx ->
+                    hapticManager.click()
+                    onSelectStyle(if (idx == 0) CanvasStyle.APPLE_MUSIC else CanvasStyle.SPOTIFY)
+                },
             )
         }
     }
@@ -4554,7 +4649,7 @@ private fun PlayerLayoutPreview(
 }
 
 private fun appVersionName(context: android.content.Context): String = try {
-    context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "4.2.4"
+    context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "5.0.0"
 } catch (error: Exception) {
-    "4.2.4"
+    "5.0.0"
 }

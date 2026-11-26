@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +45,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.neonsong.app.data.canvas.CANVAS_UA
 import com.neonsong.app.data.canvas.CanvasArtwork
 import com.neonsong.app.data.canvas.CanvasCache
+import com.neonsong.app.data.canvas.CanvasSource
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import java.util.Locale
@@ -82,6 +84,9 @@ fun CanvasArtworkPlayer(
     bottomFadeEndPx: Float? = null,
     pausedForTransition: Boolean = false,
 ) {
+    // Key by primary canvas.url so Next/Prev track transitions in Fullscreen always get a clean
+    // ExoPlayer + TextureView SurfaceTexture (avoids Samsung MediaCodec frozen-frame stalls).
+    key(canvas.url) {
     val context = LocalContext.current
 
     var url by remember(canvas.url) { mutableStateOf(canvas.url) }
@@ -124,7 +129,7 @@ fun CanvasArtworkPlayer(
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 /* minBufferMs = */ 1_500,
-                /* maxBufferMs = */ 6_000,
+                /* maxBufferMs = */ 4_500,
                 /* bufferForPlaybackMs = */ 150,
                 /* bufferForPlaybackAfterRebufferMs = */ 300,
             )
@@ -141,8 +146,8 @@ fun CanvasArtworkPlayer(
                 repeatMode = Player.REPEAT_MODE_ONE
                 trackSelectionParameters = trackSelectionParameters.buildUpon()
                     .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
-                    .setMaxVideoSize(1080, 1440)
-                    .setMaxVideoBitrate(6_500_000)
+                    .setMaxVideoSize(1920, 1920)
+                    .setMaxVideoBitrate(8_500_000)
                     .build()
             }
     }
@@ -202,16 +207,43 @@ fun CanvasArtworkPlayer(
         clipAspect = 1f
         reportAspect(1f)
         val mime = mimeTypeOf(url)
-        val item = MediaItem.Builder()
+        val activeHeaders = currentCanvas.requestHeaders
+        val clipStart = currentCanvas.clipStartMs
+        val clipEnd = currentCanvas.clipEndMs
+        val itemBuilder = MediaItem.Builder()
             .setUri(url)
             .apply { if (mime != null) setMimeType(mime) }
-            .build()
+        if (clipStart != null && clipEnd != null && clipEnd > clipStart) {
+            itemBuilder.setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(clipStart)
+                    .setEndPositionMs(clipEnd)
+                    .build(),
+            )
+        }
+        val item = itemBuilder.build()
 
         val isHls = mime == MimeTypes.APPLICATION_M3U8 || url.contains(".m3u8", ignoreCase = true)
-        val mediaSource = if (isHls) {
-            directMediaSourceFactory.createMediaSource(item)
-        } else {
-            cachedMediaSourceFactory.createMediaSource(item)
+        val isMvStream = currentCanvas.source == CanvasSource.YOUTUBE_MV
+        val mediaSource = when {
+            activeHeaders.isNotEmpty() || isMvStream -> {
+                val headers = buildMap {
+                    if (activeHeaders.isEmpty()) {
+                        put("Origin", "https://www.youtube.com")
+                        put("Referer", "https://www.youtube.com/")
+                    } else {
+                        putAll(activeHeaders)
+                    }
+                }
+                val customHttp = DefaultHttpDataSource.Factory()
+                    .setUserAgent(headers["User-Agent"] ?: CANVAS_UA)
+                    .setAllowCrossProtocolRedirects(true)
+                    .setDefaultRequestProperties(headers)
+                DefaultMediaSourceFactory(DefaultDataSource.Factory(context, customHttp))
+                    .createMediaSource(item)
+            }
+            isHls -> directMediaSourceFactory.createMediaSource(item)
+            else -> cachedMediaSourceFactory.createMediaSource(item)
         }
         player.setMediaSource(mediaSource)
         player.prepare()
@@ -324,6 +356,7 @@ fun CanvasArtworkPlayer(
                     ),
             )
         }
+    }
     }
 }
 

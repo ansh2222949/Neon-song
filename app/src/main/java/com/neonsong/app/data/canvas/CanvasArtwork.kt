@@ -13,11 +13,12 @@ enum class CanvasSource {
     APPLE,
     TIDAL,
     COMMUNITY,
+    YOUTUBE_MV,
 }
 
 /**
  * A looping video that stands in for a track's cover art (Apple motion artwork,
- * Tidal video cover, or Community Canvas manifest).
+ * Tidal video cover, Community Canvas manifest, or a clipped YouTube MV loop).
  *
  * [url] is the primary stream/file to mount; [fallbackUrl] is tried if that fails.
  */
@@ -29,6 +30,9 @@ data class CanvasArtwork(
     val artist: String? = null,
     val album: String? = null,
     val source: CanvasSource = CanvasSource.COMMUNITY,
+    val requestHeaders: Map<String, String> = emptyMap(),
+    val clipStartMs: Long? = null,
+    val clipEndMs: Long? = null,
 ) {
     /**
      * Whether this clip really belongs to the track we asked about.
@@ -84,10 +88,13 @@ internal fun String.cleanCanvasArtist(): String =
  * Normalizes case, accents and punctuation between platforms.
  */
 internal fun String.normalizeForMatch(): String =
-    Normalizer.normalize(this, Normalizer.Form.NFD)
-        .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+    Normalizer.normalize(
+        Normalizer.normalize(this, Normalizer.Form.NFD)
+            .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), ""),
+        Normalizer.Form.NFC,
+    )
         .lowercase(Locale.ROOT)
-        .replace(Regex("[^a-z0-9\\s]"), " ")
+        .replace(Regex("[^\\p{L}\\p{N}\\p{M}\\s]"), " ")
         .replace(Regex("\\s+"), " ")
         .trim()
 

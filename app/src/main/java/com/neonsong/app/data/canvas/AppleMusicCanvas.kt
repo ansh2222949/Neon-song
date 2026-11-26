@@ -42,6 +42,16 @@ object AppleMusicCanvas {
         // Pass 1: Clean artist + clean title
         searchCatalog(client, bearer, "$primaryArtist $cleanTitle", cleanTitle, cleanArtist, album)?.let { return it }
 
+        // Pass 1b: If bilingual "Native - Romanized" title (e.g. "うっせぇわ - Usseewa"), try each side
+        val bilingualParts = title.split(Regex("""\s+[-–—/]\s+"""))
+            .map { it.cleanCanvasTitle() }
+            .filter { it.isNotBlank() && !it.equals(cleanTitle, ignoreCase = true) }
+        if (bilingualParts.size == 2) {
+            for (part in bilingualParts) {
+                searchCatalog(client, bearer, "$primaryArtist $part", part, cleanArtist, album)?.let { return it }
+            }
+        }
+
         // Pass 2: If original title had extra context, try raw title
         if (!cleanTitle.equals(title.trim(), ignoreCase = true)) {
             searchCatalog(client, bearer, "$primaryArtist $title", cleanTitle, cleanArtist, album)?.let { return it }
@@ -63,7 +73,19 @@ object AppleMusicCanvas {
         artist: String,
         album: String?,
     ): CanvasArtwork? {
-        val stores = listOf(storefront, "us").distinct()
+        val hasJapaneseOrCjk = "$term $title $artist".any { ch ->
+            when (Character.UnicodeScript.of(ch.code)) {
+                Character.UnicodeScript.HIRAGANA,
+                Character.UnicodeScript.KATAKANA,
+                Character.UnicodeScript.HAN -> true
+                else -> false
+            }
+        }
+        val stores = buildList {
+            add(storefront)
+            if (storefront != "us") add("us")
+            if (hasJapaneseOrCjk && storefront != "jp") add("jp")
+        }
         for (store in stores) {
             val url = "$AMP/$store/search".toHttpUrl().newBuilder()
                 .addQueryParameter("term", term)

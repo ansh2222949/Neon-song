@@ -350,7 +350,7 @@ class GenerateRepository @Inject constructor(
         return title.lowercase()
             .replace(Regex("\\s*[({\\[][^)\\]]*[)}\\]]"), " ")
             .replace(Regex("(?i)\\b(official\\s+video|official\\s+audio|lyrics?|remix|mix|edit|bootleg|flip|vip|slowed|reverb|sped\\s+up|speed\\s+up|cover|version|live|acoustic|instrumental|feat\\.?|ft\\.?)\\b.*"), " ")
-            .replace(Regex("[^a-z0-9]"), "")
+            .replace(Regex("[^\\p{L}\\p{N}\\p{M}]"), "")
             .trim()
     }
 

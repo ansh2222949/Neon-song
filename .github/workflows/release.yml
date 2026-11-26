@@ -4,22 +4,23 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Git Tag (e.g., 4.2.5)'
+        description: 'Git Tag (e.g., 5.0.0)'
         required: true
-        default: '4.2.5'
+        default: '5.0.0'
       release_name:
-        description: 'Release Title (e.g., Neon Song 4.2.5)'
+        description: 'Release Title (e.g., Neon Song 5.0.0)'
         required: true
-        default: 'Neon Song 4.2.5'
+        default: 'Neon Song 5.0.0'
       release_notes:
         description: 'Changelog / Release Notes'
         required: false
         default: |
-          ## Neon Song 4.2.5
+          ## Neon Song 5.0.0
 
-          - Preload the configured high-quality stream for the next track and keep three upcoming AutoDJ tracks warm.
-          - Improve track handoff reliability and fallback playback.
-          - Add Liquid Glass controls, loading states, and an upcoming-track panel.
+          - Dual-mode Animated Canvas (Spotify 9:16 full-bleed with HD MV loop fallback + Apple Music Motion Art switcher).
+          - Strict Lossless/Atmos track matching with bilingual CJK/Latin verification and request deduplication.
+          - Instant lyrics state clearing on track skip, fullscreen Canvas surface resets, and thermal/GPU power optimizations.
+          - AutoMix/AutoDJ beatmatching accuracy and reactive Settings Studio improvements.
 
 jobs:
   release:

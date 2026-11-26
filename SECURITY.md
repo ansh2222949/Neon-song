@@ -6,8 +6,8 @@ Security fixes are provided for the latest stable release of Neon Song.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 4.2.x   | Yes                |
-| < 4.2.5 | No                 |
+| 5.0.x   | Yes                |
+| < 5.0.0 | No                 |
 
 ## Reporting a Vulnerability
 
