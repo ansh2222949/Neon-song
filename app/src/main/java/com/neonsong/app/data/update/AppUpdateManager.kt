@@ -2,6 +2,8 @@ package com.neonsong.app.data.update
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import androidx.core.content.FileProvider
@@ -21,6 +23,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -52,6 +55,86 @@ class AppUpdateManager @Inject constructor(
         // Default GitHub releases endpoint and raw manifest fallback
         const val DEFAULT_GITHUB_API_URL = "https://api.github.com/repos/ansh2222949/Neon-song/releases/latest"
         const val DEFAULT_MANIFEST_URL = "https://raw.githubusercontent.com/ansh2222949/Neon-song/main/version.json"
+
+        internal data class ApkValidationResult(
+            val canInstall: Boolean,
+            val signatureMismatch: Boolean = false,
+            val message: String? = null,
+        )
+
+        internal fun buildUpdateSourceUrls(customUrl: String?): List<String> {
+            val trimmed = customUrl?.trim()?.takeIf { it.isNotBlank() }
+            return listOfNotNull(
+                trimmed,
+                DEFAULT_GITHUB_API_URL,
+                DEFAULT_MANIFEST_URL,
+            )
+        }
+
+        internal fun selectPreferredApkAsset(assets: List<Pair<String, String>>): String? {
+            if (assets.isEmpty()) return null
+            val apkAssets = assets.filter { (name, url) ->
+                name.endsWith(".apk", ignoreCase = true) && url.isNotBlank()
+            }
+            if (apkAssets.isEmpty()) return null
+
+            return apkAssets.firstOrNull { (name, _) ->
+                name.equals("NeonSong.apk", ignoreCase = true)
+            }?.second
+                ?: apkAssets.firstOrNull { (name, _) ->
+                    val lower = name.lowercase()
+                    !lower.contains("android7") &&
+                        !lower.contains("raw") &&
+                        !lower.contains("uncompressed") &&
+                        !lower.contains("debug")
+                }?.second
+                ?: apkAssets.firstOrNull { (name, _) ->
+                    val lower = name.lowercase()
+                    !lower.contains("android7") && !lower.contains("debug")
+                }?.second
+                ?: apkAssets.firstOrNull()?.second
+        }
+
+        internal fun sha256Hex(bytes: ByteArray): String {
+            val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+            return digest.joinToString("") { "%02x".format(it) }
+        }
+
+        internal fun evaluateApkInstallability(
+            expectedPackageName: String,
+            installedVersionCode: Long?,
+            installedSigningDigests: Set<String>,
+            archivePackageName: String?,
+            archiveVersionCode: Long,
+            archiveVersionName: String?,
+            archiveSigningDigests: Set<String>,
+        ): ApkValidationResult {
+            if (!archivePackageName.isNullOrBlank() && archivePackageName != expectedPackageName) {
+                return ApkValidationResult(
+                    canInstall = false,
+                    message = "Downloaded APK package ($archivePackageName) does not match $expectedPackageName.",
+                )
+            }
+            if (installedVersionCode != null && archiveVersionCode > 0L && archiveVersionCode <= installedVersionCode) {
+                val versionLabel = archiveVersionName?.takeIf { it.isNotBlank() } ?: archiveVersionCode.toString()
+                return ApkValidationResult(
+                    canInstall = false,
+                    message = "Downloaded APK (v$versionLabel, code $archiveVersionCode) is not newer than installed build (code $installedVersionCode).",
+                )
+            }
+            if (
+                installedSigningDigests.isNotEmpty() &&
+                archiveSigningDigests.isNotEmpty() &&
+                installedSigningDigests.intersect(archiveSigningDigests).isEmpty()
+            ) {
+                return ApkValidationResult(
+                    canInstall = true,
+                    signatureMismatch = true,
+                    message = "Signing key differs from installed build. If Android blocks update, back up data in Settings and reinstall.",
+                )
+            }
+            return ApkValidationResult(canInstall = true)
+        }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -93,12 +176,7 @@ class AppUpdateManager @Inject constructor(
             }
 
             val currentVer = getCurrentVersion()
-            val customUrl = getCustomUpdateUrl().takeIf { it.isNotBlank() }
-            val urlsToTry = listOfNotNull(
-                customUrl,
-                DEFAULT_MANIFEST_URL,
-                DEFAULT_GITHUB_API_URL,
-            )
+            val urlsToTry = buildUpdateSourceUrls(getCustomUpdateUrl())
 
             var foundUpdate = false
             for (targetUrl in urlsToTry) {
@@ -127,19 +205,24 @@ class AppUpdateManager @Inject constructor(
 
                     if (json.has("tag_name")) {
                         // GitHub Release JSON structure
+                        if (json.optBoolean("draft", false)) continue
                         remoteVersion = json.optString("tag_name", "").removePrefix("v").removePrefix("V")
                         releaseNotes = json.optString("body", "")
                         releaseUrl = json.optString("html_url", "")
 
                         val assets = json.optJSONArray("assets") ?: JSONArray()
-                        for (i in 0 until assets.length()) {
-                            val asset = assets.optJSONObject(i) ?: continue
-                            val assetName = asset.optString("name", "")
-                            if (assetName.endsWith(".apk", ignoreCase = true)) {
-                                downloadUrl = asset.optString("browser_download_url", null)
-                                break
+                        val apkAssets = buildList {
+                            for (i in 0 until assets.length()) {
+                                val asset = assets.optJSONObject(i) ?: continue
+                                val assetName = asset.optString("name", "")
+                                val url = asset.optString("browser_download_url", "")
+                                if (assetName.endsWith(".apk", ignoreCase = true) && url.isNotBlank()) {
+                                    add(assetName to url)
+                                }
                             }
                         }
+                        downloadUrl = selectPreferredApkAsset(apkAssets)
+                        if (downloadUrl.isNullOrBlank()) continue
                     } else if (json.has("version")) {
                         // Custom version.json manifest structure
                         remoteVersion = json.optString("version", "").removePrefix("v").removePrefix("V")
@@ -256,11 +339,54 @@ class AppUpdateManager @Inject constructor(
                 inputStream.close()
                 response.close()
 
+                val archiveInfo = readArchivePackageInfo(apkFile)
+                if (archiveInfo == null || apkFile.length() == 0L) {
+                    apkFile.delete()
+                    _updateInfo.update {
+                        it.copy(
+                            isDownloading = false,
+                            downloadProgress = 0f,
+                            isDownloaded = false,
+                            message = "Downloaded APK is incomplete or invalid. Opening release page...",
+                        )
+                    }
+                    withContext(Dispatchers.Main) {
+                        openUpdate(activityContext)
+                    }
+                    return@launch
+                }
+
+                val installedInfo = readInstalledPackageInfo()
+                val validation = evaluateApkInstallability(
+                    expectedPackageName = context.packageName,
+                    installedVersionCode = installedInfo?.longVersionCode,
+                    installedSigningDigests = extractSigningDigests(installedInfo),
+                    archivePackageName = archiveInfo.packageName,
+                    archiveVersionCode = archiveInfo.longVersionCode,
+                    archiveVersionName = archiveInfo.versionName,
+                    archiveSigningDigests = extractSigningDigests(archiveInfo),
+                )
+
+                if (!validation.canInstall) {
+                    apkFile.delete()
+                    _updateInfo.update {
+                        it.copy(
+                            isDownloading = false,
+                            downloadProgress = 0f,
+                            isDownloaded = false,
+                            isUpdateAvailable = false,
+                            message = validation.message ?: "Downloaded build is not newer than the installed app.",
+                        )
+                    }
+                    return@launch
+                }
+
                 _updateInfo.update {
                     it.copy(
                         isDownloading = false,
                         downloadProgress = 1.0f,
                         isDownloaded = true,
+                        message = validation.message ?: it.message,
                     )
                 }
 
@@ -273,6 +399,38 @@ class AppUpdateManager @Inject constructor(
                     openUpdate(activityContext)
                 }
             }
+        }
+    }
+
+    private fun readInstalledPackageInfo(): PackageInfo? = try {
+        @Suppress("DEPRECATION")
+        context.packageManager.getPackageInfo(
+            context.packageName,
+            PackageManager.GET_SIGNING_CERTIFICATES,
+        )
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun readArchivePackageInfo(apkFile: File): PackageInfo? = try {
+        @Suppress("DEPRECATION")
+        context.packageManager.getPackageArchiveInfo(
+            apkFile.absolutePath,
+            PackageManager.GET_SIGNING_CERTIFICATES,
+        )
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun extractSigningDigests(packageInfo: PackageInfo?): Set<String> {
+        val signingInfo = packageInfo?.signingInfo ?: return emptySet()
+        val signatures = if (signingInfo.hasMultipleSigners()) {
+            signingInfo.apkContentsSigners
+        } else {
+            signingInfo.signingCertificateHistory ?: signingInfo.apkContentsSigners
+        }
+        return signatures.orEmpty().mapTo(linkedSetOf()) { sig ->
+            sha256Hex(sig.toByteArray())
         }
     }
 

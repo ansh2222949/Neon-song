@@ -218,6 +218,14 @@ fun AboutCard(
                                 }
                             }
                         }
+
+                        if (!updateInfo.message.isNullOrBlank() && !updateInfo.message.startsWith("Version ")) {
+                            Text(
+                                text = updateInfo.message,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             } else {

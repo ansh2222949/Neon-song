@@ -200,25 +200,38 @@ jobs:
         id: auto_tag
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
         run: |
           VERSION="${{ steps.prep_apk.outputs.version }}"
           GIT_TAG="v${VERSION}"
           echo "tag_name=${GIT_TAG}" >> "$GITHUB_OUTPUT"
           echo "publish_release=false" >> "$GITHUB_OUTPUT"
-          if git ls-remote --exit-code --tags origin "refs/tags/${GIT_TAG}" >/dev/null 2>&1; then
-            echo "Git tag ${GIT_TAG} already exists on origin; skipping auto-tag."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${GIT_TAG}" -m "Neon Song ${GIT_TAG} (automated CI build)"
-          git push origin "refs/tags/${GIT_TAG}"
-          echo "Created and pushed new tag ${GIT_TAG}."
           if [ -n "$SIGNING_KEY" ]; then
+            echo "release_body=Automated signed release for Neon Song ${GIT_TAG}." >> "$GITHUB_OUTPUT"
+          else
+            echo "release_body=Automated CI release for Neon Song ${GIT_TAG} (signed with CI fallback key; if upgrading over a differently signed build, export Backup first and reinstall cleanly)." >> "$GITHUB_OUTPUT"
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${GIT_TAG}" >/dev/null 2>&1; then
+            echo "Git tag ${GIT_TAG} already exists on origin."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "${GIT_TAG}" -m "Neon Song ${GIT_TAG} (automated CI build)"
+            git push origin "refs/tags/${GIT_TAG}"
+            echo "Created and pushed new tag ${GIT_TAG}."
+          fi
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${GIT_TAG}")
+          echo "Release lookup status for ${GIT_TAG}: HTTP ${HTTP_CODE}"
+          if [ "$HTTP_CODE" = "404" ]; then
             echo "publish_release=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::Auto-created tag ${GIT_TAG}; configure SIGNING_KEY secret to auto-publish GitHub Release APKs."
+            echo "GitHub Release for ${GIT_TAG} already exists (HTTP ${HTTP_CODE}); skipping publish."
           fi
 
       - name: Auto-Publish GitHub Release
@@ -227,6 +240,7 @@ jobs:
         with:
           tag_name: ${{ steps.auto_tag.outputs.tag_name }}
           name: Neon Song ${{ steps.prep_apk.outputs.version }}
+          body: ${{ steps.auto_tag.outputs.release_body }}
           generate_release_notes: true
           files: |
             final_apk/*.apk
