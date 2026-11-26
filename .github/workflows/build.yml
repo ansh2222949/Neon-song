@@ -17,6 +17,8 @@ jobs:
   build:
     name: Build Release APKs
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
       ADDON_CLIENT_SECRET: ${{ secrets.ADDON_CLIENT_SECRET }}
@@ -112,7 +114,7 @@ jobs:
           mkdir -p final_apk
           VERSION=$(grep 'versionName = ' app/build.gradle.kts | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
           if [ -z "$VERSION" ]; then
-            VERSION="4.2.3"
+            VERSION="5.0.0"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
@@ -123,6 +125,7 @@ jobs:
           else
             cp "app/build/outputs/apk/release/app-release.apk" "final_apk/Neon Song-v${VERSION}-release.apk"
           fi
+          cp "final_apk/Neon Song-v${VERSION}-release.apk" "final_apk/NeonSong.apk"
           # Raw release (Android 10+, no minify, no shrink, no ProGuard)
           if [ -f "app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk" ]; then
             cp "app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk" "final_apk/Neon Song-v${VERSION}-raw.apk"
@@ -192,3 +195,43 @@ jobs:
           name: Neon Song-v${{ steps.prep_apk.outputs.version }}-APKs
           path: final_apk/*
           if-no-files-found: error
+
+      - name: Auto-Tag New Version Build
+        id: auto_tag
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: |
+          VERSION="${{ steps.prep_apk.outputs.version }}"
+          GIT_TAG="v${VERSION}"
+          echo "tag_name=${GIT_TAG}" >> "$GITHUB_OUTPUT"
+          echo "publish_release=false" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/${GIT_TAG}" >/dev/null 2>&1; then
+            echo "Git tag ${GIT_TAG} already exists on origin; skipping auto-tag."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${GIT_TAG}" -m "Neon Song ${GIT_TAG} (automated CI build)"
+          git push origin "refs/tags/${GIT_TAG}"
+          echo "Created and pushed new tag ${GIT_TAG}."
+          if [ -n "$SIGNING_KEY" ]; then
+            echo "publish_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Auto-created tag ${GIT_TAG}; configure SIGNING_KEY secret to auto-publish GitHub Release APKs."
+          fi
+
+      - name: Auto-Publish GitHub Release
+        if: steps.auto_tag.outputs.publish_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.auto_tag.outputs.tag_name }}
+          name: Neon Song ${{ steps.prep_apk.outputs.version }}
+          generate_release_notes: true
+          files: |
+            final_apk/*.apk
+            final_apk/SHA256SUMS.txt
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

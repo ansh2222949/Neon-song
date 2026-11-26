@@ -106,7 +106,9 @@ jobs:
       - name: Stage Android 10 Final APKs
         run: |
           mkdir -p final_apk
-          TAG="${{ inputs.tag_name }}"
+          RAW_TAG="${{ inputs.tag_name }}"
+          TAG="${RAW_TAG#v}"
+          TAG="${TAG#V}"
           # Universal release (Android 10+, R8 + ProGuard + shrinkResources)
           if [ -f "app/build/outputs/apk/release/app-release-signed.apk" ]; then
             cp "app/build/outputs/apk/release/app-release-signed.apk" "final_apk/Neon Song-v${TAG}-universal.apk"
@@ -149,7 +151,9 @@ jobs:
 
       - name: Stage Android 7 Final APK
         run: |
-          TAG="${{ inputs.tag_name }}"
+          RAW_TAG="${{ inputs.tag_name }}"
+          TAG="${RAW_TAG#v}"
+          TAG="${TAG#V}"
           if [ -f "app/build/outputs/apk/release/app-release-signed.apk" ]; then
             cp "app/build/outputs/apk/release/app-release-signed.apk" "final_apk/Neon Song-v${TAG}-android7.apk"
           else
@@ -176,9 +180,11 @@ jobs:
 
       - name: Prepare Release Notes & Compatibility Notice
         env:
-          TAG: ${{ inputs.tag_name }}
+          RAW_TAG: ${{ inputs.tag_name }}
           NOTES: ${{ inputs.release_notes }}
         run: |
+          TAG="${RAW_TAG#v}"
+          TAG="${TAG#V}"
           cat << 'EOF' | sed 's/^ *//' > notice.md
           ### 📦 Download Packages & Compatibility
 
